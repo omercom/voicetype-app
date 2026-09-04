@@ -30,10 +30,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // Tab 2: Yapay Zeka & Modeller
     private var providerSegmentedControl: NSSegmentedControl!
     private var providerPopUp: NSPopUpButton!
-    private var groqKeyField: NSSecureTextField!
+    private var groqKeyField: NSTextField!
     private var groqModelPopUp: NSPopUpButton!
     private var groqStatusLabel: NSTextField!
-    private var geminiKeyField: NSSecureTextField!
+    private var geminiKeyField: NSTextField!
     private var geminiModelPopUp: NSPopUpButton!
     private var geminiStatusLabel: NSTextField!
 
@@ -231,6 +231,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         saveBtn.target = self
         saveBtn.action = #selector(saveClicked)
         mainContainer.addSubview(saveBtn)
+
+        window.initialFirstResponder = mainContainer
     }
 
     @objc private func tabSegmentChanged(_ sender: NSSegmentedControl) {
@@ -245,6 +247,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
         if index < segmentedControl.segmentCount {
             segmentedControl.selectedSegment = index
+        }
+        // Sekme değiştiğinde herhangi bir metin kutusunun otomatik seçilmesini (mavi odak çerçevesi ve metin vurgusu) önle
+        DispatchQueue.main.async { [weak self] in
+            self?.window?.makeFirstResponder(nil)
         }
     }
 
@@ -425,8 +431,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let geminiSection = createSectionLabel(text: "Google Gemini", y: 86)
         container.addSubview(geminiSection)
 
-        geminiKeyField = NSSecureTextField(frame: NSRect(x: 175, y: 84, width: 295, height: 24))
+        geminiKeyField = NSTextField(frame: NSRect(x: 175, y: 84, width: 295, height: 24))
         geminiKeyField.placeholderString = "AIzaSy..."
+        geminiKeyField.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
         container.addSubview(geminiKeyField)
 
         let getGeminiKeyBtn = NSButton(frame: NSRect(x: 480, y: 82, width: 135, height: 28))
@@ -465,8 +472,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let groqSection = createSectionLabel(text: "Groq Whisper", y: 234)
         container.addSubview(groqSection)
 
-        groqKeyField = NSSecureTextField(frame: NSRect(x: 175, y: 232, width: 295, height: 24))
+        groqKeyField = NSTextField(frame: NSRect(x: 175, y: 232, width: 295, height: 24))
         groqKeyField.placeholderString = "gsk_..."
+        groqKeyField.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
         container.addSubview(groqKeyField)
 
         let getGroqKeyBtn = NSButton(frame: NSRect(x: 480, y: 230, width: 135, height: 28))
@@ -779,6 +787,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         window?.makeKeyAndOrderFront(sender)
         NSApp.activate(ignoringOtherApps: true)
+        // Pencere ilk açıldığında metin kutularının otomatik seçilmesini (mavi odak çerçevesi ve metin vurgusu) önle
+        DispatchQueue.main.async { [weak self] in
+            self?.window?.makeFirstResponder(nil)
+        }
         startPermissionPollTimer()
     }
 
