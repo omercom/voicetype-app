@@ -79,13 +79,16 @@ public class PermissionManager {
         }
     }
 
-    public func requestAccessibilityPermission() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
+    public func requestAccessibilityPermission(showSystemPrompt: Bool = false) {
+        if showSystemPrompt {
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+        } else {
+            _ = AXIsProcessTrusted()
+        }
     }
 
     public func openAccessibilitySettings() {
-        requestAccessibilityPermission()
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
