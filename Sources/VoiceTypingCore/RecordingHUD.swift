@@ -179,12 +179,14 @@ public class RecordingHUD: NSObject {
         return NSScreen.main ?? NSScreen.screens.first
     }
 
-    private func updatePosition() {
+    private func updatePosition(width: CGFloat? = nil) {
         guard let screen = targetScreen() else { return }
+        let currentW = width ?? hudWidth
         let screenFrame = screen.visibleFrame
-        let x = round(screenFrame.midX - (hudWidth / 2.0))
+        let x = round(screenFrame.midX - (currentW / 2.0))
         let y = round(screenFrame.minY + 64.0)
-        panel.setFrame(NSRect(x: x, y: y, width: hudWidth, height: hudHeight), display: true)
+        panel.setFrame(NSRect(x: x, y: y, width: currentW, height: hudHeight), display: true)
+        statusLabel.frame = NSRect(x: 41, y: (hudHeight - 16) / 2.0 - 0.5, width: max(50, currentW - 50), height: 16)
     }
 
     private func executeOnMainThread(_ block: @escaping () -> Void) {
@@ -203,7 +205,7 @@ public class RecordingHUD: NSObject {
             self.cancelDismissTimer()
             self.currentState = .recording
 
-            self.updatePosition()
+            self.updatePosition(width: self.hudWidth)
 
             // Görünürlükleri ayarla
             self.pulsingDot.isHidden = false
@@ -228,6 +230,23 @@ public class RecordingHUD: NSObject {
         }
     }
 
+    /// Canlı akış sırasında (Gemini Live) gelen ara metinleri dinamik ve yumuşak şekilde gösterir.
+    public func updateInterimText(_ text: String) {
+        executeOnMainThread { [weak self] in
+            guard let self = self, (self.currentState == .recording || self.currentState == .transcribing) else { return }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+
+            self.statusLabel.stringValue = trimmed
+
+            // Metin genişliğine göre Dynamic Island tarzı yumuşak genişleme (152px - 340px)
+            let font = self.statusLabel.font ?? NSFont.systemFont(ofSize: 12, weight: .medium)
+            let textWidth = (trimmed as NSString).size(withAttributes: [.font: font]).width
+            let targetWidth = min(340.0, max(self.hudWidth, textWidth + 56.0))
+            self.updatePosition(width: targetWidth)
+        }
+    }
+
     // MARK: - Durum 2: Deşifre Ediliyor (Transcribing)
 
     public func showTranscribing() {
@@ -238,6 +257,10 @@ public class RecordingHUD: NSObject {
             self.stopPulseAnimation()
             self.currentState = .transcribing
 
+            let hasLiveText = !self.statusLabel.stringValue.isEmpty &&
+                              self.statusLabel.stringValue != "Dinliyor..." &&
+                              self.statusLabel.stringValue != "Yazılıyor..."
+
             self.pulsingDot.isHidden = true
             self.waveformContainer.isHidden = true
             self.checkmarkLabel.isHidden = true
@@ -246,11 +269,19 @@ public class RecordingHUD: NSObject {
             self.spinner.isHidden = false
             self.spinner.startAnimation(nil)
 
-            self.statusLabel.stringValue = "Yazılıyor..."
-            self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
+            if !hasLiveText {
+                self.statusLabel.stringValue = "Yazılıyor..."
+                self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
+                self.updatePosition(width: self.hudWidth)
+            } else {
+                self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
+                // Mevcut canlı metni ve genişliği koru, son kelimeler akmaya devam edebilir
+            }
 
             if !self.panel.isVisible || self.panel.alphaValue < 0.1 {
-                self.updatePosition()
+                if !hasLiveText {
+                    self.updatePosition(width: self.hudWidth)
+                }
                 self.panel.orderFrontRegardless()
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.14
@@ -269,6 +300,8 @@ public class RecordingHUD: NSObject {
             self.stopMeterTimer()
             self.stopPulseAnimation()
             self.currentState = .success
+
+            self.updatePosition(width: self.hudWidth)
 
             self.pulsingDot.isHidden = true
             self.waveformContainer.isHidden = true
@@ -297,6 +330,8 @@ public class RecordingHUD: NSObject {
             self.stopMeterTimer()
             self.stopPulseAnimation()
             self.currentState = .error(message)
+
+            self.updatePosition(width: self.hudWidth)
 
             self.pulsingDot.isHidden = true
             self.waveformContainer.isHidden = true

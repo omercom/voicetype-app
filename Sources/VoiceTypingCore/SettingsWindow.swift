@@ -587,6 +587,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         geminiKeyField.stringValue = cfg.gemini_api_key
         if let idx = ConfigManager.availableGeminiModels.firstIndex(where: { $0.id == cfg.gemini_model }) {
             geminiModelPopUp.selectItem(at: idx)
+        } else {
+            geminiModelPopUp.selectItem(at: 0)
         }
 
         // Language
@@ -834,6 +836,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
             let geminiIdx = max(0, self.geminiModelPopUp.indexOfSelectedItem)
             if geminiIdx < ConfigManager.availableGeminiModels.count {
                 testConfig.gemini_model = ConfigManager.availableGeminiModels[geminiIdx].id
+            } else {
+                testConfig.gemini_model = "gemini-3.5-transcribe-live"
             }
 
             let lang = self.languageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -892,7 +896,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
             : "whisper-large-v3"
 
         let geminiIdx = max(0, geminiModelPopUp.indexOfSelectedItem)
-        let geminiModel = ConfigManager.availableGeminiModels[geminiIdx].id
+        let geminiModel = (geminiIdx < ConfigManager.availableGeminiModels.count)
+            ? ConfigManager.availableGeminiModels[geminiIdx].id
+            : "gemini-3.5-transcribe-live"
 
         let language = languageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
