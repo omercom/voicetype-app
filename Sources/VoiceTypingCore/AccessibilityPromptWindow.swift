@@ -160,6 +160,9 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
         statusLabel.stringValue = "✅ Yetki verildi! Voice Typing hazır."
         statusLabel.textColor = .systemGreen
 
+        // Sistem Ayarları'nı otomatik kapat
+        PermissionManager.shared.closeSystemSettings()
+
         // 0.3 saniye sonra pencereyi kapat ve callback'i çalıştır
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             guard let self = self else { return }

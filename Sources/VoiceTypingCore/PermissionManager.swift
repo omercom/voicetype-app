@@ -93,4 +93,17 @@ public class PermissionManager {
             NSWorkspace.shared.open(url)
         }
     }
+
+    // MARK: - Auto Close System Settings
+
+    public func closeSystemSettings() {
+        DispatchQueue.main.async {
+            let bundleIDs = ["com.apple.systempreferences", "com.apple.SystemSettings"]
+            for id in bundleIDs {
+                for app in NSWorkspace.shared.runningApplications where app.bundleIdentifier == id {
+                    app.terminate()
+                }
+            }
+        }
+    }
 }

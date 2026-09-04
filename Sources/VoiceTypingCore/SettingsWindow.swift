@@ -45,6 +45,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var accProgressIndicator: NSProgressIndicator!
     private var accGuideLabel: NSTextField!
     private var lastKnownAccStatus: Bool = false
+    private var lastKnownMicStatus: Bool = false
     private var testStatusLabel: NSTextField!
     private var testAudioResultLabel: NSTextField!
     private var testRecordButton: NSButton!
@@ -826,15 +827,23 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         case .authorized:
             micStatusLabel.textColor = .systemGreen
             micActionButton?.title = "Sistem Ayarları"
+            if !lastKnownMicStatus && permissionPollTimer != nil {
+                SoundManager.shared.playSuccess()
+                PermissionManager.shared.closeSystemSettings()
+            }
+            lastKnownMicStatus = true
         case .denied:
             micStatusLabel.textColor = .systemRed
             micActionButton?.title = "Sistem Ayarlarını Aç"
+            lastKnownMicStatus = false
         case .notDetermined:
             micStatusLabel.textColor = .systemOrange
             micActionButton?.title = "İzin Ver"
+            lastKnownMicStatus = false
         default:
             micStatusLabel.textColor = .systemOrange
             micActionButton?.title = "İzin Ver"
+            lastKnownMicStatus = false
         }
 
         let acc = PermissionManager.shared.getAccessibilityStatus()
@@ -848,6 +857,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
                 accGuideLabel?.stringValue = "✅ Yetki verildi! Voice Typing kullanıma hazır."
                 accGuideLabel?.textColor = .systemGreen
                 SoundManager.shared.playSuccess()
+                PermissionManager.shared.closeSystemSettings()
             }
             lastKnownAccStatus = true
         case .denied:
