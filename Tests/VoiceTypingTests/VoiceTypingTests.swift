@@ -185,7 +185,7 @@ final class VoiceTypingTests: XCTestCase {
         let expectation = XCTestExpectation(description: "Gemini transcription completes")
 
         Transcriber.shared.transcribeGemini(audioData: audioData, config: cfg) { result in
-            if !result.success, let err = result.error, err.contains("503") || err.contains("429") || err.contains("Resource has been exhausted") || err.contains("over capacity") || err.contains("timed out") || err.contains("quota") {
+            if !result.success, let err = result.error, err.contains("503") || err.contains("429") || err.contains("Resource has been exhausted") || err.contains("over capacity") || err.contains("timed out") || err.contains("quota") || err.contains("connection was lost") || err.contains("Bağlantı hatası") {
                 print("Gemini API geçici olarak aşırı yüklü, kotalı veya zaman aşımına uğradı: \(err). Canlı test es geçiliyor.")
                 expectation.fulfill()
                 return
