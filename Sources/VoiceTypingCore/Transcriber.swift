@@ -770,6 +770,17 @@ public class Transcriber {
     private var activeLiveSession: LiveGeminiStreamSession?
     private let lock = NSLock()
 
+    /// HTTP Keep-Alive bağlantı havuzlu, düşük gecikmeli optimize oturum
+    private let httpSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 20.0
+        configuration.timeoutIntervalForResource = 30.0
+        configuration.httpMaximumConnectionsPerHost = 6
+        configuration.httpShouldUsePipelining = true
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
+    }()
+
     private init() {}
 
     public func cancel() {
@@ -978,7 +989,7 @@ public class Transcriber {
         let startTime = CFAbsoluteTimeGetCurrent()
 
         lock.lock()
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        let task = httpSession.dataTask(with: request) { [weak self] data, response, error in
             let latency = CFAbsoluteTimeGetCurrent() - startTime
             self?.lock.lock()
             self?.currentTask = nil
@@ -1148,7 +1159,7 @@ public class Transcriber {
         let startTime = CFAbsoluteTimeGetCurrent()
 
         lock.lock()
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        let task = httpSession.dataTask(with: request) { [weak self] data, response, error in
             let latency = CFAbsoluteTimeGetCurrent() - startTime
             self?.lock.lock()
             self?.currentTask = nil
