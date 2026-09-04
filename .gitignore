@@ -27,7 +27,7 @@ app.log
 config.json
 # Swift build artifacts
 .build/
-VoiceTyping
+/VoiceTyping
 VoiceTyping.app/
 *.bundle/
 sounds
