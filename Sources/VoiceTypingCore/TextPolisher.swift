@@ -3,6 +3,48 @@ import Foundation
 public final class TextPolisher {
     public static let shared = TextPolisher()
 
+    // MARK: - Önceden Derlenmiş Statik Regexler (Sıfır Çalışma Zamanı Derleme Gecikmesi)
+
+    private static let hesitationRegex = try! NSRegularExpression(
+        pattern: #"(?i)\b([ıIİi]{1,}|e{2,}|h[ıiİI]m{1,}|[öÖoO]hm+|m{3,}|uh+|um+|er+|ah+|hmm+)\b"#
+    )
+    private static let startFillersRegex = try! NSRegularExpression(
+        pattern: #"(?i)^\s*([şŞsS]ey|yani|well|like|you know)\s*[,:\-]?\s*"#
+    )
+    private static let midFillersRegex = try! NSRegularExpression(
+        pattern: #"(?i)(,\s*)([şŞsS]ey|yani|you know)(\s*,|\s+)"#
+    )
+    private static let whitespaceRegex = try! NSRegularExpression(
+        pattern: #"\s{2,}"#
+    )
+    private static let punctuationSpaceRegex = try! NSRegularExpression(
+        pattern: #"\s+([.,!?:;])"#
+    )
+    private static let doubleCommaRegex = try! NSRegularExpression(
+        pattern: #",\s*,"#
+    )
+    private static let commaDotRegex = try! NSRegularExpression(
+        pattern: #",\s*\."#
+    )
+    private static let leadPunctuationRegex = try! NSRegularExpression(
+        pattern: #"^\s*[,:;\-]\s*"#
+    )
+    private static let sentenceCapitalizeRegex = try! NSRegularExpression(
+        pattern: #"(^|[.!?]\s+)([a-zçğıöşü])"#,
+        options: [.caseInsensitive]
+    )
+    private static let bulletSplitRegex = try! NSRegularExpression(
+        pattern: #"([.!?])\s+"#
+    )
+    private static let bulletKeywordRegexes: [NSRegularExpression] = [
+        try! NSRegularExpression(pattern: #"(?i)\s*([iİıI]lk olarak|[iİıI]lk|birincisi|1\.|madde 1|öğe 1)[:\s]*"#),
+        try! NSRegularExpression(pattern: #"(?i)\s*([iİıI]kinci olarak|[iİıI]kinci|2\.|madde 2|öğe 2)[:\s]*"#),
+        try! NSRegularExpression(pattern: #"(?i)\s*([üÜuU]çüncü olarak|[üÜuU]çüncü|3\.|madde 3|öğe 3)[:\s]*"#),
+        try! NSRegularExpression(pattern: #"(?i)\s*(dördüncü olarak|dördüncü|4\.|madde 4)[:\s]*"#),
+        try! NSRegularExpression(pattern: #"(?i)\s*(beşinci olarak|beşinci|5\.|madde 5)[:\s]*"#),
+        try! NSRegularExpression(pattern: #"(?i)\s*(son olarak|ayrıca|bunun yanında|bununla birlikte|ek olarak)[:\s]*"#)
+    ]
+
     private init() {}
 
     /// Metni aktif ayarlara ve dikte moduna göre temizler ve biçimlendirir
@@ -40,16 +82,13 @@ public final class TextPolisher {
         var result = input
 
         // 1. Saf duraksama sesleri (Türkçe & İngilizce ses öbekleri)
-        let hesitationRegex = #"(?i)\b([ıIİi]{1,}|e{2,}|h[ıiİI]m{1,}|[öÖoO]hm+|m{3,}|uh+|um+|er+|ah+|hmm+)\b"#
-        result = replaceRegex(pattern: hesitationRegex, in: result, with: "")
+        result = replaceRegex(Self.hesitationRegex, in: result, with: "")
 
         // 2. Cümle başı dolgu kelimeleri (örn: "Şey, bugün...", "Yani, aslında...")
-        let startFillersRegex = #"(?i)^\s*([şŞsS]ey|yani|well|like|you know)\s*[,:\-]?\s*"#
-        result = replaceRegex(pattern: startFillersRegex, in: result, with: "")
+        result = replaceRegex(Self.startFillersRegex, in: result, with: "")
 
         // 3. Virgül veya duraksama ile çevrelenmiş ara dolgu kelimeleri (örn: ", şey,", ", yani,")
-        let midFillersRegex = #"(?i)(,\s*)([şŞsS]ey|yani|you know)(\s*,|\s+)"#
-        result = replaceRegex(pattern: midFillersRegex, in: result, with: ", ")
+        result = replaceRegex(Self.midFillersRegex, in: result, with: ", ")
 
         // 4. Noktalama ve boşluk temizliği
         result = cleanWhitespaceAndPunctuation(text: result)
@@ -73,7 +112,9 @@ public final class TextPolisher {
             // Tam kelime eşleşmesi (büyük/küçük harf duyarsız), kullanıcının yazdığı orijinal harf düzeniyle değiştir
             let escaped = NSRegularExpression.escapedPattern(for: term)
             let pattern = #"(?i)\b\#(escaped)\b"#
-            result = replaceRegex(pattern: pattern, in: result, with: term)
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+                result = replaceRegex(regex, in: result, with: term)
+            }
         }
         return result
     }
@@ -102,22 +143,13 @@ public final class TextPolisher {
         guard !cleaned.isEmpty else { return "" }
 
         // Türkçe madde geçiş belirteçlerini yeni satır ayracına dönüştür
-        let bulletKeywords = [
-            #"(?i)\s*([iİıI]lk olarak|[iİıI]lk|birincisi|1\.|madde 1|öğe 1)[:\s]*"#,
-            #"(?i)\s*([iİıI]kinci olarak|[iİıI]kinci|2\.|madde 2|öğe 2)[:\s]*"#,
-            #"(?i)\s*([üÜuU]çüncü olarak|[üÜuU]çüncü|3\.|madde 3|öğe 3)[:\s]*"#,
-            #"(?i)\s*(dördüncü olarak|dördüncü|4\.|madde 4)[:\s]*"#,
-            #"(?i)\s*(beşinci olarak|beşinci|5\.|madde 5)[:\s]*"#,
-            #"(?i)\s*(son olarak|ayrıca|bunun yanında|bununla birlikte|ek olarak)[:\s]*"#
-        ]
-
         var prepared = cleaned
-        for kw in bulletKeywords {
-            prepared = replaceRegex(pattern: kw, in: prepared, with: "\n")
+        for kwRegex in Self.bulletKeywordRegexes {
+            prepared = replaceRegex(kwRegex, in: prepared, with: "\n")
         }
 
         // Cümle sonlarına göre de satır böl
-        prepared = replaceRegex(pattern: #"([.!?])\s+"#, in: prepared, with: "$1\n")
+        prepared = replaceRegex(Self.bulletSplitRegex, in: prepared, with: "$1\n")
 
         let lines = prepared
             .components(separatedBy: .newlines)
@@ -137,17 +169,17 @@ public final class TextPolisher {
         var res = text
 
         // Çift/çoklu boşlukları teke indir
-        res = replaceRegex(pattern: #"\s{2,}"#, in: res, with: " ")
+        res = replaceRegex(Self.whitespaceRegex, in: res, with: " ")
 
         // Noktalama işaretlerinden önceki gereksiz boşlukları sil (örn: "merhaba , nasılsın" -> "merhaba, nasılsın")
-        res = replaceRegex(pattern: #"\s+([.,!?:;])"#, in: res, with: "$1")
+        res = replaceRegex(Self.punctuationSpaceRegex, in: res, with: "$1")
 
         // Çift virgül veya virgül-nokta hatalarını düzelt
-        res = replaceRegex(pattern: #",\s*,"#, in: res, with: ",")
-        res = replaceRegex(pattern: #",\s*\."#, in: res, with: ".")
+        res = replaceRegex(Self.doubleCommaRegex, in: res, with: ",")
+        res = replaceRegex(Self.commaDotRegex, in: res, with: ".")
 
         // Cümle başındaki yetim virgülleri temizle
-        res = replaceRegex(pattern: #"^\s*[,:;\-]\s*"#, in: res, with: "")
+        res = replaceRegex(Self.leadPunctuationRegex, in: res, with: "")
 
         return res.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -158,13 +190,12 @@ public final class TextPolisher {
     }
 
     public func capitalizeSentences(_ string: String) -> String {
-        let pattern = #"(^|[.!?]\s+)([a-zçğıöşü])"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+        let nsString = string as NSString
+        let matches = Self.sentenceCapitalizeRegex.matches(in: string, options: [], range: NSRange(location: 0, length: nsString.length))
+        guard !matches.isEmpty else {
             return capitalizeFirstLetter(string)
         }
 
-        let nsString = string as NSString
-        let matches = regex.matches(in: string, options: [], range: NSRange(location: 0, length: nsString.length))
         let mutable = NSMutableString(string: string)
 
         for match in matches.reversed() {
@@ -179,8 +210,7 @@ public final class TextPolisher {
         return mutable as String
     }
 
-    private func replaceRegex(pattern: String, in string: String, with replacement: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return string }
+    private func replaceRegex(_ regex: NSRegularExpression, in string: String, with replacement: String) -> String {
         let range = NSRange(location: 0, length: (string as NSString).length)
         return regex.stringByReplacingMatches(in: string, options: [], range: range, withTemplate: replacement)
     }

@@ -8,7 +8,6 @@ public class AudioRecorder: NSObject {
     private var audioConverter: AVAudioConverter?
     private let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
 
-    private var tempFileURL: URL
     private var startTime: CFAbsoluteTime = 0
     private let lock = NSLock()
 
@@ -20,8 +19,6 @@ public class AudioRecorder: NSObject {
     public private(set) var isRecording: Bool = false
 
     override private init() {
-        let tempDir = FileManager.default.temporaryDirectory
-        self.tempFileURL = tempDir.appendingPathComponent("voice_typing_\(ProcessInfo.processInfo.processIdentifier).wav")
         super.init()
     }
 
@@ -32,8 +29,6 @@ public class AudioRecorder: NSObject {
         if isRecording {
             return false
         }
-
-        try? FileManager.default.removeItem(at: tempFileURL)
 
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
@@ -182,11 +177,9 @@ public class AudioRecorder: NSObject {
         self.audioConverter = nil
 
         let wavData = AudioRecorder.createWavData(pcmData: fullPCM, sampleRate: 16000, channels: 1, bitDepth: 16)
-        try? wavData.write(to: tempFileURL)
 
         // Akıllı sessizlik ve mikrofonsuzluk kontrolü (PCM 16-bit tepe genlik)
         if AudioRecorder.isAudioSilent(data: wavData) {
-            try? FileManager.default.removeItem(at: tempFileURL)
             return (nil, duration)
         }
 
@@ -272,6 +265,5 @@ public class AudioRecorder: NSObject {
         engine?.inputNode.removeTap(onBus: 0)
         self.audioEngine = nil
         self.audioConverter = nil
-        try? FileManager.default.removeItem(at: tempFileURL)
     }
 }

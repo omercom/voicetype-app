@@ -16,11 +16,15 @@ public struct DictationEntry: Identifiable, Codable {
         self.model = model
     }
 
-    /// Menüde gösterilecek kısa önizleme ve saat damgası (örn: "19:25 • Merhaba dünya...")
-    public var menuTitle: String {
+    private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
-        let timeStr = formatter.string(from: timestamp)
+        return formatter
+    }()
+
+    /// Menüde gösterilecek kısa önizleme ve saat damgası (örn: "19:25 • Merhaba dünya...")
+    public var menuTitle: String {
+        let timeStr = Self.timeFormatter.string(from: timestamp)
 
         var singleLine = text
             .replacingOccurrences(of: "\n", with: " ")

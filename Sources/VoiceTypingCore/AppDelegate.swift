@@ -497,8 +497,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Akustik ve Nöromüsküler Uzatma Penceresi (Optimize Edilmiş Grace Period):
+        // Canlı akışta (Gemini Live) ses anlık aktarıldığı için 100ms fazlasıyla yeterlidir (180ms hız kazancı).
+        // Groq / REST deşifrede ise son hecelerin tamponda kalmaması için 180ms uygulanır (100ms hız kazancı).
+        let postRollDelay: Double = (self.currentLiveSession != nil) ? 0.10 : 0.18
         self.postRollWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + postRollDelay, execute: workItem)
     }
 
     private func handleTranscriptionResult(result: TranscriptionResult, config: AppConfig) {
