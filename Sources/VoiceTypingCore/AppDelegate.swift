@@ -11,7 +11,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var smartModeMenuItem: NSMenuItem!
     private var toggleModeMenuItem: NSMenuItem!
     private var soundEffectsMenuItem: NSMenuItem!
-    private var restoreClipboardMenuItem: NSMenuItem!
+    private var restoreClipboardMenuItem: NSMenuItem?
     private var muteAudioMenuItem: NSMenuItem!
     private var launchAtLoginMenuItem: NSMenuItem!
     private var triggerKeyMenuItems: [NSMenuItem] = []
@@ -213,10 +213,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         saveHistoryMenuItem.target = self
         menu.addItem(saveHistoryMenuItem)
 
-        restoreClipboardMenuItem = NSMenuItem(title: "Panoyu Geri Yükle", action: #selector(toggleRestoreClipboard), keyEquivalent: "")
-        restoreClipboardMenuItem.target = self
-        menu.addItem(restoreClipboardMenuItem)
-
         launchAtLoginMenuItem = NSMenuItem(title: "Başlangıçta Otomatik Çalıştır", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLoginMenuItem.target = self
         menu.addItem(launchAtLoginMenuItem)
@@ -250,7 +246,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         fillerWordsMenuItem?.state = cfg.remove_filler_words ? .on : .off
         muteAudioMenuItem.state = cfg.mute_system_audio ? .on : .off
         saveHistoryMenuItem?.state = cfg.save_history ? .on : .off
-        restoreClipboardMenuItem.state = cfg.restore_clipboard ? .on : .off
+        restoreClipboardMenuItem?.state = cfg.restore_clipboard ? .on : .off
         launchAtLoginMenuItem.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
 
         SoundManager.shared.isEnabled = cfg.play_sounds
@@ -491,9 +487,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                         model: result.model
                     )
 
-                    TextInjector.shared.paste(
+                    TextInjector.shared.inject(
                         text: polishedText,
-                        restoreClipboard: config.restore_clipboard,
                         pasteDelayMs: config.paste_delay_ms
                     )
                     SoundManager.shared.playSuccess()

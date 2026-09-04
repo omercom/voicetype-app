@@ -60,7 +60,6 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var hapticFeedbackCheckbox: NSButton!
     private var removeFillerWordsCheckbox: NSButton!
     private var saveHistoryCheckbox: NSButton!
-    private var restoreClipboardCheckbox: NSButton!
     private var muteSystemAudioCheckbox: NSButton!
     private var launchAtLoginCheckbox: NSButton!
     private var showDockIconCheckbox: NSButton!
@@ -426,28 +425,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         playSoundsCheckbox.frame = NSRect(x: 175, y: 374, width: 440, height: 18)
         container.addSubview(playSoundsCheckbox)
 
-        restoreClipboardCheckbox = NSButton(checkboxWithTitle: "Metin yapıştırıldıktan sonra panoyu geri yükle", target: nil, action: nil)
-        restoreClipboardCheckbox.frame = NSRect(x: 175, y: 398, width: 310, height: 18)
-        restoreClipboardCheckbox.toolTip = "Dikte edilen metin aktif pencereye yapıştırıldıktan sonra, panonuzda önceden kopyalanmış olan içeriği (kod, resim, dosya) eski haline getirir. Panonuzdaki veriler kaybolmaz."
-        container.addSubview(restoreClipboardCheckbox)
-
-        let clipboardInfoBtn = NSButton(frame: NSRect(x: 488, y: 397, width: 22, height: 20))
-        clipboardInfoBtn.title = "ⓘ"
-        clipboardInfoBtn.bezelStyle = .inline
-        clipboardInfoBtn.isBordered = false
-        clipboardInfoBtn.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        clipboardInfoBtn.contentTintColor = .systemBlue
-        clipboardInfoBtn.target = self
-        clipboardInfoBtn.action = #selector(clipboardInfoClicked)
-        clipboardInfoBtn.toolTip = "Bilgi: Konuşmadan önce kopyaladığınız içeriği korur; dikte yapıştırılınca panonuzu eski haline getirir. Tıklayarak detaylı bilgi alabilirsiniz."
-        container.addSubview(clipboardInfoBtn)
-
         launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat", target: nil, action: nil)
-        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 422, width: 440, height: 18)
+        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 398, width: 440, height: 18)
         container.addSubview(launchAtLoginCheckbox)
 
         showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini kalıcı olarak göster", target: nil, action: nil)
-        showDockIconCheckbox.frame = NSRect(x: 175, y: 446, width: 440, height: 18)
+        showDockIconCheckbox.frame = NSRect(x: 175, y: 422, width: 440, height: 18)
         container.addSubview(showDockIconCheckbox)
 
         return container
@@ -665,15 +648,6 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         updateSystemPromptVisibility()
     }
 
-    @objc private func clipboardInfoClicked() {
-        let alert = NSAlert()
-        alert.messageText = "Panoyu Geri Yükle Ayarı"
-        alert.informativeText = "Bu seçenek işaretli olduğunda:\nKonuşmadan önce panonuzda kopyalı olan metin, resim, kod veya dosya korunur. Dikte edilen metin aktif uygulamaya yapıştırıldıktan sonra, eski içeriğiniz otomatik olarak panoya geri yüklenir.\n\nİşaretsiz olduğunda:\nDikte metni panoda kalır ve dilediğiniz yere Cmd+V ile tekrar yapıştırabilirsiniz."
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Anladım")
-        alert.runModal()
-    }
-
     @objc private func promptPresetChanged(_ sender: NSPopUpButton) {
         let idx = sender.indexOfSelectedItem
         if idx >= 0 && idx < promptPresets.count - 1 {
@@ -859,9 +833,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             "• Google Gemini 3.5 Transcribe Live (Gerçek Zamanlı WebSocket Akışı)",
             "• Groq Whisper Large v3 (Düşük Gecikmeli Bulut Deşifre Motoru)",
             "• Akustik Uzatma Penceresi (Son hece ve kelimelerin kesilmesini önler)",
+            "• Akıllı Metin Enjeksiyonu (Doğrudan imlece basma ve pano koruması)",
             "• Konuşurken arka plan sesini/müziği akıllıca duraklatma",
-            "• Kararlı metin algılama (Settled Silence Debounce)",
-            "• Sıfır telemetri ve güvenli yerel pano entegrasyonu"
+            "• Kararlı metin algılama (Settled Silence Debounce)"
         ]
         let featuresText = NSTextField(wrappingLabelWithString: featureItems.joined(separator: "\n"))
         featuresText.frame = NSRect(x: 16, y: 32, width: 528, height: 112)
@@ -1122,7 +1096,6 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         removeFillerWordsCheckbox.state = cfg.remove_filler_words ? .on : .off
         saveHistoryCheckbox.state = cfg.save_history ? .on : .off
         playSoundsCheckbox.state = cfg.play_sounds ? .on : .off
-        restoreClipboardCheckbox.state = cfg.restore_clipboard ? .on : .off
         muteSystemAudioCheckbox.state = cfg.mute_system_audio ? .on : .off
         launchAtLoginCheckbox.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
         showDockIconCheckbox.state = cfg.show_dock_icon ? .on : .off
@@ -1445,7 +1418,6 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let saveHistOn = saveHistoryCheckbox.state == .on
 
         let playSounds = playSoundsCheckbox.state == .on
-        let restoreClip = restoreClipboardCheckbox.state == .on
         let muteAudio = muteSystemAudioCheckbox.state == .on
         let launchLogin = launchAtLoginCheckbox.state == .on
         let showDock = showDockIconCheckbox.state == .on
@@ -1469,7 +1441,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.remove_filler_words = removeFillerOn
             cfg.save_history = saveHistOn
             cfg.play_sounds = playSounds
-            cfg.restore_clipboard = restoreClip
+            cfg.restore_clipboard = true
             cfg.mute_system_audio = muteAudio
             cfg.show_dock_icon = showDock
         }
