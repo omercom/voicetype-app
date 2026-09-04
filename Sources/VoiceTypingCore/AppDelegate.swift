@@ -300,9 +300,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         guard !isTranscribing else { return }
 
         let config = ConfigManager.shared.config
-        if config.mute_system_audio {
-            SystemAudioManager.shared.muteForDictation()
-        }
 
         let geminiModel = config.gemini_model.lowercased()
         let isGeminiLive = (config.provider.lowercased() == "gemini") &&
@@ -331,6 +328,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         if started {
             SoundManager.shared.playStart()
+            if config.mute_system_audio {
+                SystemAudioManager.shared.muteForDictation(delay: 0.15)
+            }
             setStatus(title: "🔴 Dinliyor...", menuText: "Durum: Dinleniyor (Konuşun)...")
             RecordingHUD.shared.showRecording()
         } else {

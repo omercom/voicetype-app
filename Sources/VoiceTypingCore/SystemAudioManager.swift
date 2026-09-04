@@ -93,8 +93,31 @@ public class SystemAudioManager {
         }
     }
 
-    /// Konuşma başladığında ana çıkış sesini anında kapatır
-    public func muteForDictation() {
+    private var pendingMuteWorkItem: DispatchWorkItem?
+
+    /// Konuşma başladığında ana çıkış sesini kapatır.
+    /// İsteğe bağlı delay parametresi verilirse (örn: 0.15s), başlangıç ses efektinin (dictation-start)
+    /// kullanıcı tarafından net olarak duyulmasına izin verir, ardından ortam sesini/müziği susturur.
+    public func muteForDictation(delay: TimeInterval = 0) {
+        lock.lock()
+        pendingMuteWorkItem?.cancel()
+        pendingMuteWorkItem = nil
+        lock.unlock()
+
+        if delay > 0 {
+            let item = DispatchWorkItem { [weak self] in
+                self?.performMute()
+            }
+            lock.lock()
+            pendingMuteWorkItem = item
+            lock.unlock()
+            DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + delay, execute: item)
+        } else {
+            performMute()
+        }
+    }
+
+    private func performMute() {
         lock.lock()
         defer { lock.unlock() }
 
@@ -110,6 +133,8 @@ public class SystemAudioManager {
     /// Konuşma bittiğinde, deşifre tamamlandığında veya iptal edildiğinde sesi eski durumuna getirir
     public func restoreAfterDictation() {
         lock.lock()
+        pendingMuteWorkItem?.cancel()
+        pendingMuteWorkItem = nil
         defer { lock.unlock() }
 
         if didMute {
