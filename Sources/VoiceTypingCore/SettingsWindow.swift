@@ -39,7 +39,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
     // Tab 3: Sistem & İzinler
     private var micStatusLabel: NSTextField!
+    private var micActionButton: NSButton!
     private var accStatusLabel: NSTextField!
+    private var accActionButton: NSButton!
+    private var accProgressIndicator: NSProgressIndicator!
+    private var accGuideLabel: NSTextField!
+    private var lastKnownAccStatus: Bool = false
     private var testStatusLabel: NSTextField!
     private var testAudioResultLabel: NSTextField!
     private var testRecordButton: NSButton!
@@ -253,7 +258,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let keyLabel = createSectionLabel(text: "Tetikleyici Tuş", y: 22)
         container.addSubview(keyLabel)
 
-        triggerKeyPopUp = NSPopUpButton(frame: NSRect(x: 190, y: 20, width: 260, height: 26), pullsDown: false)
+        triggerKeyPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 20, width: 260, height: 26), pullsDown: false)
         for opt in TriggerKeyOption.standardKeys {
             let item = NSMenuItem(title: opt.name, action: nil, keyEquivalent: "")
             item.tag = opt.keyCode
@@ -266,7 +271,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         triggerKeyPopUp.action = #selector(triggerKeyPopUpChanged(_:))
         container.addSubview(triggerKeyPopUp)
 
-        recordKeyButton = NSButton(frame: NSRect(x: 460, y: 19, width: 165, height: 28))
+        recordKeyButton = NSButton(frame: NSRect(x: 445, y: 19, width: 170, height: 28))
         recordKeyButton.title = "Özel Tuş Yakala"
         recordKeyButton.bezelStyle = .rounded
         recordKeyButton.target = self
@@ -274,7 +279,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(recordKeyButton)
 
         triggerKeyHintLabel = NSTextField(labelWithString: "Aktif Kısayol: Sağ Command (Right ⌘)")
-        triggerKeyHintLabel.frame = NSRect(x: 190, y: 50, width: 435, height: 18)
+        triggerKeyHintLabel.frame = NSRect(x: 175, y: 50, width: 440, height: 18)
         triggerKeyHintLabel.font = NSFont.systemFont(ofSize: 11)
         triggerKeyHintLabel.textColor = .secondaryLabelColor
         container.addSubview(triggerKeyHintLabel)
@@ -295,14 +300,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             target: self,
             action: #selector(modeSegmentedChanged(_:))
         )
-        modeSegmentedControl.frame = NSRect(x: 190, y: 116, width: 435, height: 26)
+        modeSegmentedControl.frame = NSRect(x: 175, y: 116, width: 440, height: 26)
         modeSegmentedControl.segmentStyle = .rounded
         modeSegmentedControl.segmentDistribution = .fillEqually
         modeSegmentedControl.selectedSegment = 0
         container.addSubview(modeSegmentedControl)
 
         // Gizli yedek popup (test ve geriye dönük uyumluluk için)
-        modePopUp = NSPopUpButton(frame: NSRect(x: 190, y: 116, width: 435, height: 26), pullsDown: false)
+        modePopUp = NSPopUpButton(frame: NSRect(x: 175, y: 116, width: 440, height: 26), pullsDown: false)
         modePopUp.addItem(withTitle: "Basılı Tut (Push-to-Talk) - Tuşa basılı tut konuş, bırak yaz")
         modePopUp.addItem(withTitle: "Akıllı Hibrit (Smart) - Kısa tıkla aç-kapa, uzun bas tut-konuş")
         modePopUp.addItem(withTitle: "Aç / Kapa (Toggle) - Tuşa tıkla başlasın, tıkla dursun")
@@ -319,14 +324,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let langLabel = createSectionLabel(text: "Konuşma Dili", y: 194)
         container.addSubview(langLabel)
 
-        languageField = NSTextField(frame: NSRect(x: 190, y: 192, width: 60, height: 24))
+        languageField = NSTextField(frame: NSRect(x: 175, y: 192, width: 60, height: 24))
         languageField.alignment = .center
         languageField.font = NSFont.systemFont(ofSize: 12)
         languageField.placeholderString = "tr"
         container.addSubview(languageField)
 
         let langHint = NSTextField(labelWithString: "('tr': Türkçe, 'en': İngilizce, 'auto': Otomatik Algıla)")
-        langHint.frame = NSRect(x: 260, y: 195, width: 365, height: 20)
+        langHint.frame = NSRect(x: 245, y: 195, width: 370, height: 20)
         langHint.font = NSFont.systemFont(ofSize: 11)
         langHint.textColor = .secondaryLabelColor
         container.addSubview(langHint)
@@ -339,27 +344,27 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(optsLabel)
 
         muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "Konuşurken arka plan medyasını/müziği sustur", target: nil, action: nil)
-        muteSystemAudioCheckbox.frame = NSRect(x: 190, y: 236, width: 435, height: 18)
+        muteSystemAudioCheckbox.frame = NSRect(x: 175, y: 236, width: 440, height: 18)
         container.addSubview(muteSystemAudioCheckbox)
         container.addSubview(createSubCheckboxNote(text: "YouTube, müzik veya video seslerinin mikrofona karışmasını önler.", y: 254))
 
         playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal", target: nil, action: nil)
-        playSoundsCheckbox.frame = NSRect(x: 190, y: 272, width: 435, height: 18)
+        playSoundsCheckbox.frame = NSRect(x: 175, y: 272, width: 440, height: 18)
         container.addSubview(playSoundsCheckbox)
         container.addSubview(createSubCheckboxNote(text: "Kayıt başlangıç, bitiş ve deşifre bildirim tonları.", y: 290))
 
         restoreClipboardCheckbox = NSButton(checkboxWithTitle: "Metin yapıştırıldıktan sonra panoyu geri yükle", target: nil, action: nil)
-        restoreClipboardCheckbox.frame = NSRect(x: 190, y: 308, width: 435, height: 18)
+        restoreClipboardCheckbox.frame = NSRect(x: 175, y: 308, width: 440, height: 18)
         container.addSubview(restoreClipboardCheckbox)
         container.addSubview(createSubCheckboxNote(text: "Önceden kopyalanmış pano içeriğini kaybetmeden korur.", y: 326))
 
         launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat", target: nil, action: nil)
-        launchAtLoginCheckbox.frame = NSRect(x: 190, y: 344, width: 435, height: 18)
+        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 344, width: 440, height: 18)
         container.addSubview(launchAtLoginCheckbox)
         container.addSubview(createSubCheckboxNote(text: "Menü çubuğunda arka planda sessizce hazır bekler.", y: 362))
 
         showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini göster (Alt görev çubuğu)", target: nil, action: nil)
-        showDockIconCheckbox.frame = NSRect(x: 190, y: 380, width: 435, height: 18)
+        showDockIconCheckbox.frame = NSRect(x: 175, y: 380, width: 440, height: 18)
         container.addSubview(showDockIconCheckbox)
         container.addSubview(createSubCheckboxNote(text: "Voice Typing'i ekranın altındaki Dock çubuğunda ve Cmd+Tab menüsünde gösterir.", y: 398))
 
@@ -398,14 +403,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             target: self,
             action: #selector(providerSegmentedChanged(_:))
         )
-        providerSegmentedControl.frame = NSRect(x: 190, y: 14, width: 435, height: 26)
+        providerSegmentedControl.frame = NSRect(x: 175, y: 14, width: 440, height: 26)
         providerSegmentedControl.segmentStyle = .rounded
         providerSegmentedControl.segmentDistribution = .fillEqually
         providerSegmentedControl.selectedSegment = 0
         container.addSubview(providerSegmentedControl)
 
         // Gizli yedek popup
-        providerPopUp = NSPopUpButton(frame: NSRect(x: 190, y: 14, width: 435, height: 26), pullsDown: false)
+        providerPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 14, width: 440, height: 26), pullsDown: false)
         providerPopUp.addItem(withTitle: "Groq Whisper (whisper-large-v3 - Yüksek Kalite)")
         providerPopUp.addItem(withTitle: "Google Gemini (Doğal Dil & Bağlamsal)")
         providerPopUp.isHidden = true
@@ -420,24 +425,24 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let geminiSection = createSectionLabel(text: "Google Gemini", y: 86)
         container.addSubview(geminiSection)
 
-        geminiKeyField = NSSecureTextField(frame: NSRect(x: 190, y: 84, width: 285, height: 24))
+        geminiKeyField = NSSecureTextField(frame: NSRect(x: 175, y: 84, width: 295, height: 24))
         geminiKeyField.placeholderString = "AIzaSy..."
         container.addSubview(geminiKeyField)
 
-        let getGeminiKeyBtn = NSButton(frame: NSRect(x: 485, y: 82, width: 140, height: 28))
+        let getGeminiKeyBtn = NSButton(frame: NSRect(x: 480, y: 82, width: 135, height: 28))
         getGeminiKeyBtn.title = "API Anahtarı Al"
         getGeminiKeyBtn.bezelStyle = .rounded
         getGeminiKeyBtn.target = self
         getGeminiKeyBtn.action = #selector(openGeminiConsoleClicked)
         container.addSubview(getGeminiKeyBtn)
 
-        geminiModelPopUp = NSPopUpButton(frame: NSRect(x: 190, y: 116, width: 435, height: 26), pullsDown: false)
+        geminiModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 116, width: 440, height: 26), pullsDown: false)
         for m in ConfigManager.availableGeminiModels {
             geminiModelPopUp.addItem(withTitle: "\(m.name) [\(m.price)] - \(m.speed)")
         }
         container.addSubview(geminiModelPopUp)
 
-        let testGeminiBtn = NSButton(frame: NSRect(x: 190, y: 150, width: 140, height: 28))
+        let testGeminiBtn = NSButton(frame: NSRect(x: 175, y: 150, width: 135, height: 28))
         testGeminiBtn.title = "Bağlantıyı Test Et"
         testGeminiBtn.bezelStyle = .rounded
         testGeminiBtn.target = self
@@ -445,7 +450,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(testGeminiBtn)
 
         geminiStatusLabel = NSTextField(wrappingLabelWithString: "")
-        geminiStatusLabel.frame = NSRect(x: 340, y: 152, width: 285, height: 38)
+        geminiStatusLabel.frame = NSRect(x: 320, y: 152, width: 295, height: 38)
         geminiStatusLabel.font = NSFont.systemFont(ofSize: 11)
         geminiStatusLabel.textColor = .secondaryLabelColor
         geminiStatusLabel.maximumNumberOfLines = 2
@@ -460,24 +465,24 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let groqSection = createSectionLabel(text: "Groq Whisper", y: 234)
         container.addSubview(groqSection)
 
-        groqKeyField = NSSecureTextField(frame: NSRect(x: 190, y: 232, width: 285, height: 24))
+        groqKeyField = NSSecureTextField(frame: NSRect(x: 175, y: 232, width: 295, height: 24))
         groqKeyField.placeholderString = "gsk_..."
         container.addSubview(groqKeyField)
 
-        let getGroqKeyBtn = NSButton(frame: NSRect(x: 485, y: 230, width: 140, height: 28))
+        let getGroqKeyBtn = NSButton(frame: NSRect(x: 480, y: 230, width: 135, height: 28))
         getGroqKeyBtn.title = "API Anahtarı Al"
         getGroqKeyBtn.bezelStyle = .rounded
         getGroqKeyBtn.target = self
         getGroqKeyBtn.action = #selector(openGroqConsoleClicked)
         container.addSubview(getGroqKeyBtn)
 
-        groqModelPopUp = NSPopUpButton(frame: NSRect(x: 190, y: 264, width: 435, height: 26), pullsDown: false)
+        groqModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 264, width: 440, height: 26), pullsDown: false)
         for m in ConfigManager.availableGroqModels {
             groqModelPopUp.addItem(withTitle: "\(m.name) [\(m.price)] - \(m.speed)")
         }
         container.addSubview(groqModelPopUp)
 
-        let testGroqBtn = NSButton(frame: NSRect(x: 190, y: 298, width: 140, height: 28))
+        let testGroqBtn = NSButton(frame: NSRect(x: 175, y: 298, width: 135, height: 28))
         testGroqBtn.title = "Bağlantıyı Test Et"
         testGroqBtn.bezelStyle = .rounded
         testGroqBtn.target = self
@@ -485,7 +490,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(testGroqBtn)
 
         groqStatusLabel = NSTextField(wrappingLabelWithString: "")
-        groqStatusLabel.frame = NSRect(x: 340, y: 300, width: 285, height: 38)
+        groqStatusLabel.frame = NSRect(x: 320, y: 300, width: 295, height: 38)
         groqStatusLabel.font = NSFont.systemFont(ofSize: 11)
         groqStatusLabel.textColor = .secondaryLabelColor
         groqStatusLabel.maximumNumberOfLines = 2
@@ -505,79 +510,152 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     // =========================================================================
-    // TAB 3: Sistem & İzinler (Two-Column Layout)
+    // TAB 3: Sistem & İzinler (Interactive Permission Cards & Hardware Test)
     // =========================================================================
     private func buildTab3PermissionsView() -> NSView {
         let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 435))
 
-        // 1. macOS İzinleri
-        let permLabel = createSectionLabel(text: "macOS İzinleri", y: 22)
-        container.addSubview(permLabel)
+        // Başlık
+        let headerLabel = NSTextField(labelWithString: "Gerekli macOS İzinleri")
+        headerLabel.frame = NSRect(x: 32, y: 12, width: 300, height: 20)
+        headerLabel.font = NSFont.systemFont(ofSize: 13, weight: .bold)
+        container.addSubview(headerLabel)
 
-        // Mikrofon
-        let micTitle = NSTextField(labelWithString: "Mikrofon İzni:")
-        micTitle.frame = NSRect(x: 190, y: 22, width: 100, height: 20)
-        micTitle.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        container.addSubview(micTitle)
+        let subLabel = NSTextField(labelWithString: "Voice Typing'in çalışması için gereken iki temel sistem izni aşağıdadır:")
+        subLabel.frame = NSRect(x: 32, y: 32, width: 586, height: 16)
+        subLabel.font = NSFont.systemFont(ofSize: 11)
+        subLabel.textColor = .secondaryLabelColor
+        container.addSubview(subLabel)
 
-        micStatusLabel = NSTextField(labelWithString: "🟢 Yetki Verildi (Aktif)")
-        micStatusLabel.frame = NSRect(x: 295, y: 22, width: 170, height: 20)
-        micStatusLabel.font = NSFont.systemFont(ofSize: 12)
-        container.addSubview(micStatusLabel)
+        // 1. KART: MİKROFON İZNİ
+        let micBox = NSBox(frame: NSRect(x: 32, y: 52, width: 586, height: 60))
+        micBox.boxType = .custom
+        micBox.cornerRadius = 8
+        micBox.borderWidth = 1
+        micBox.borderColor = NSColor.separatorColor.withAlphaComponent(0.25)
+        micBox.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.4)
+        micBox.titlePosition = .noTitle
+        let micContent = FlippedContentView(frame: micBox.bounds)
 
-        let micBtn = NSButton(frame: NSRect(x: 475, y: 18, width: 150, height: 28))
-        micBtn.title = "Sistem Ayarlarını Aç"
-        micBtn.bezelStyle = .rounded
-        micBtn.target = self
-        micBtn.action = #selector(openMicSettingsClicked)
-        container.addSubview(micBtn)
+        let micIcon = NSImageView(frame: NSRect(x: 14, y: 16, width: 28, height: 28))
+        if #available(macOS 11.0, *), let img = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: nil) {
+            micIcon.image = img
+            micIcon.contentTintColor = .systemBlue
+        }
+        micContent.addSubview(micIcon)
 
-        // Erişilebilirlik
-        let accTitle = NSTextField(labelWithString: "Erişilebilirlik:")
-        accTitle.frame = NSRect(x: 190, y: 56, width: 100, height: 20)
-        accTitle.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        container.addSubview(accTitle)
+        let micTitle = NSTextField(labelWithString: "Mikrofon Erişimi")
+        micTitle.frame = NSRect(x: 52, y: 11, width: 220, height: 18)
+        micTitle.font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
+        micContent.addSubview(micTitle)
 
-        accStatusLabel = NSTextField(labelWithString: "🟢 Yetki Verildi (Aktif)")
-        accStatusLabel.frame = NSRect(x: 295, y: 56, width: 170, height: 20)
-        accStatusLabel.font = NSFont.systemFont(ofSize: 12)
-        container.addSubview(accStatusLabel)
+        let micDesc = NSTextField(labelWithString: "Sesinizi kaydedip yapay zeka modeline aktarmak için zorunludur.")
+        micDesc.frame = NSRect(x: 52, y: 31, width: 310, height: 16)
+        micDesc.font = NSFont.systemFont(ofSize: 10.5)
+        micDesc.textColor = .secondaryLabelColor
+        micContent.addSubview(micDesc)
 
-        let accBtn = NSButton(frame: NSRect(x: 475, y: 52, width: 150, height: 28))
-        accBtn.title = "Sistem Ayarlarını Aç"
-        accBtn.bezelStyle = .rounded
-        accBtn.target = self
-        accBtn.action = #selector(openAccSettingsClicked)
-        container.addSubview(accBtn)
+        micStatusLabel = NSTextField(labelWithString: "🟢 Yetki Verildi")
+        micStatusLabel.frame = NSRect(x: 370, y: 19, width: 120, height: 20)
+        micStatusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        micStatusLabel.textColor = .systemGreen
+        micContent.addSubview(micStatusLabel)
 
-        let permNote = createNoteLabel(text: "Mikrofon ses kaydetmek, Erişilebilirlik ise kısayol dinlemek ve metni yapıştırmak için zorunludur.", y: 88)
-        container.addSubview(permNote)
+        micActionButton = NSButton(frame: NSRect(x: 495, y: 15, width: 80, height: 28))
+        micActionButton.title = "Ayarlar"
+        micActionButton.bezelStyle = .rounded
+        micActionButton.target = self
+        micActionButton.action = #selector(openMicSettingsClicked)
+        micContent.addSubview(micActionButton)
 
-        let refreshBtn = NSButton(frame: NSRect(x: 190, y: 122, width: 170, height: 28))
-        refreshBtn.title = "İzin Durumunu Yenile"
-        refreshBtn.bezelStyle = .rounded
-        refreshBtn.target = self
-        refreshBtn.action = #selector(refreshPermissionStatuses)
-        container.addSubview(refreshBtn)
+        micBox.contentView = micContent
+        container.addSubview(micBox)
 
-        container.addSubview(createSeparator(y: 165))
+        // 2. KART: ERİŞİLEBİLİRLİK İZNİ
+        let accBox = NSBox(frame: NSRect(x: 32, y: 118, width: 586, height: 60))
+        accBox.boxType = .custom
+        accBox.cornerRadius = 8
+        accBox.borderWidth = 1
+        accBox.borderColor = NSColor.separatorColor.withAlphaComponent(0.25)
+        accBox.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.4)
+        accBox.titlePosition = .noTitle
+        let accContent = FlippedContentView(frame: accBox.bounds)
 
-        // 2. Mikrofon Testi
-        let testLabel = createSectionLabel(text: "Mikrofon Testi", y: 180)
-        container.addSubview(testLabel)
+        let accIcon = NSImageView(frame: NSRect(x: 14, y: 16, width: 28, height: 28))
+        if #available(macOS 11.0, *), let img = NSImage(systemSymbolName: "hand.raised.fill", accessibilityDescription: nil) {
+            accIcon.image = img
+            accIcon.contentTintColor = .systemPurple
+        }
+        accContent.addSubview(accIcon)
 
-        testRecordButton = NSButton(frame: NSRect(x: 190, y: 178, width: 220, height: 28))
+        let accTitle = NSTextField(labelWithString: "Erişilebilirlik İzni")
+        accTitle.frame = NSRect(x: 52, y: 11, width: 220, height: 18)
+        accTitle.font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
+        accContent.addSubview(accTitle)
+
+        let accDesc = NSTextField(labelWithString: "Klavye kısayolunu dinlemek ve metni imlece yazmak için zorunludur.")
+        accDesc.frame = NSRect(x: 52, y: 31, width: 310, height: 16)
+        accDesc.font = NSFont.systemFont(ofSize: 10.5)
+        accDesc.textColor = .secondaryLabelColor
+        accContent.addSubview(accDesc)
+
+        accStatusLabel = NSTextField(labelWithString: "🟢 Yetki Verildi")
+        accStatusLabel.frame = NSRect(x: 370, y: 19, width: 120, height: 20)
+        accStatusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        accStatusLabel.textColor = .systemGreen
+        accContent.addSubview(accStatusLabel)
+
+        accActionButton = NSButton(frame: NSRect(x: 495, y: 15, width: 80, height: 28))
+        accActionButton.title = "Ayarlar"
+        accActionButton.bezelStyle = .rounded
+        accActionButton.target = self
+        accActionButton.action = #selector(openAccSettingsClicked)
+        accContent.addSubview(accActionButton)
+
+        accBox.contentView = accContent
+        container.addSubview(accBox)
+
+        // Canlı Rehber ve Spinner (Erişilebilirlik bekleme durumunda)
+        accProgressIndicator = NSProgressIndicator(frame: NSRect(x: 34, y: 184, width: 16, height: 16))
+        accProgressIndicator.style = .spinning
+        accProgressIndicator.controlSize = .small
+        accProgressIndicator.isDisplayedWhenStopped = false
+        container.addSubview(accProgressIndicator)
+
+        accGuideLabel = NSTextField(labelWithString: "İzinler Sistem Ayarları'ndan otomatik olarak anlık algılanmaktadır.")
+        accGuideLabel.frame = NSRect(x: 56, y: 183, width: 562, height: 18)
+        accGuideLabel.font = NSFont.systemFont(ofSize: 11)
+        accGuideLabel.textColor = .secondaryLabelColor
+        container.addSubview(accGuideLabel)
+
+        container.addSubview(createSeparator(y: 207))
+
+        // 3. BÖLÜM: MİKROFON DONANIM & SES TESTİ
+        let testHeader = NSTextField(labelWithString: "Mikrofon Donanım ve Deşifre Testi")
+        testHeader.frame = NSRect(x: 32, y: 217, width: 300, height: 20)
+        testHeader.font = NSFont.systemFont(ofSize: 13, weight: .bold)
+        container.addSubview(testHeader)
+
+        let testSub = NSTextField(labelWithString: "Mikrofonunuzun ses yakaladığından ve modelin metin ürettiğinden emin olun:")
+        testSub.frame = NSRect(x: 32, y: 237, width: 586, height: 16)
+        testSub.font = NSFont.systemFont(ofSize: 11)
+        testSub.textColor = .secondaryLabelColor
+        container.addSubview(testSub)
+
+        testRecordButton = NSButton(frame: NSRect(x: 32, y: 257, width: 210, height: 28))
         testRecordButton.title = "2 Saniyelik Test Kaydı Yap"
         testRecordButton.bezelStyle = .rounded
         testRecordButton.target = self
         testRecordButton.action = #selector(testRecordClicked)
         container.addSubview(testRecordButton)
 
-        let testNote = createNoteLabel(text: "Mikrofonunuzun ses yakaladığından ve deşifre motorunun çalıştığından emin olun.", y: 212)
-        container.addSubview(testNote)
+        testStatusLabel = NSTextField(labelWithString: "Durum: Hazır (Butona basıp konuşun)")
+        testStatusLabel.frame = NSRect(x: 252, y: 261, width: 366, height: 20)
+        testStatusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        testStatusLabel.textColor = .secondaryLabelColor
+        container.addSubview(testStatusLabel)
 
-        // TG Pro tarzı şık test geri bildirim paneli
-        let resultContainer = NSBox(frame: NSRect(x: 190, y: 238, width: 435, height: 160))
+        let resultContainer = NSBox(frame: NSRect(x: 32, y: 292, width: 586, height: 125))
         resultContainer.boxType = .custom
         resultContainer.isTransparent = false
         resultContainer.borderWidth = 1
@@ -587,17 +665,11 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         resultContainer.titlePosition = .noTitle
 
         let resultFlipped = FlippedContentView(frame: resultContainer.bounds)
-        testStatusLabel = NSTextField(labelWithString: "Durum: Hazır (Mikrofonu test etmek için butona basın)")
-        testStatusLabel.frame = NSRect(x: 14, y: 10, width: 407, height: 20)
-        testStatusLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        testStatusLabel.textColor = .secondaryLabelColor
-        resultFlipped.addSubview(testStatusLabel)
-
         testAudioResultLabel = NSTextField(wrappingLabelWithString: "")
-        testAudioResultLabel.frame = NSRect(x: 14, y: 34, width: 407, height: 115)
-        testAudioResultLabel.font = NSFont.systemFont(ofSize: 11)
+        testAudioResultLabel.frame = NSRect(x: 14, y: 10, width: 558, height: 105)
+        testAudioResultLabel.font = NSFont.systemFont(ofSize: 11.5)
         testAudioResultLabel.textColor = .labelColor
-        testAudioResultLabel.maximumNumberOfLines = 6
+        testAudioResultLabel.maximumNumberOfLines = 5
         resultFlipped.addSubview(testAudioResultLabel)
 
         resultContainer.contentView = resultFlipped
@@ -607,62 +679,101 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     // =========================================================================
-    // TAB 4: Hakkında (About View)
+    // TAB 4: Hakkında (Centered Apple Showcase)
     // =========================================================================
     private func buildTab4AboutView() -> NSView {
         let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 435))
 
-        let aboutLabel = createSectionLabel(text: "Uygulama", y: 30)
-        container.addSubview(aboutLabel)
-
-        // Uygulama ikonu
-        let iconView = NSImageView(frame: NSRect(x: 190, y: 26, width: 48, height: 48))
-        if let img = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Voice Typing") {
-            img.isTemplate = true
+        // 1. Ortalanmış Uygulama İkonu (64x64)
+        let iconView = NSImageView(frame: NSRect(x: (650 - 64) / 2, y: 16, width: 64, height: 64))
+        if let iconUrl = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") ??
+                         Bundle.main.url(forResource: "AppIcon", withExtension: "icns", subdirectory: "VoiceTyping_VoiceTypingCore.bundle"),
+           let img = NSImage(contentsOf: iconUrl) {
             iconView.image = img
-            iconView.contentTintColor = .labelColor
+        } else if #available(macOS 11.0, *), let img = NSImage(systemSymbolName: "waveform.circle.fill", accessibilityDescription: "Voice Typing") {
+            iconView.image = img
+            iconView.contentTintColor = .systemBlue
         }
+        iconView.imageScaling = .scaleProportionallyUpOrDown
         container.addSubview(iconView)
 
+        // 2. Ortalanmış Başlık ve Sürüm
         let appTitle = NSTextField(labelWithString: "Voice Typing for macOS")
-        appTitle.frame = NSRect(x: 250, y: 26, width: 375, height: 24)
-        appTitle.font = NSFont.systemFont(ofSize: 16, weight: .bold)
+        appTitle.frame = NSRect(x: (650 - 450) / 2, y: 88, width: 450, height: 24)
+        appTitle.font = NSFont.systemFont(ofSize: 17, weight: .bold)
+        appTitle.alignment = .center
         container.addSubview(appTitle)
 
-        let versionLabel = NSTextField(labelWithString: "Sürüm 2.0 (Native Swift 6 / Apple Silicon & Intel)")
-        versionLabel.frame = NSRect(x: 250, y: 52, width: 375, height: 18)
+        let versionLabel = NSTextField(labelWithString: "Sürüm 2.0 • Native Swift 6 / Apple Silicon & Intel")
+        versionLabel.frame = NSRect(x: (650 - 450) / 2, y: 114, width: 450, height: 18)
         versionLabel.font = NSFont.systemFont(ofSize: 11)
         versionLabel.textColor = .secondaryLabelColor
+        versionLabel.alignment = .center
         container.addSubview(versionLabel)
 
-        container.addSubview(createSeparator(y: 90))
+        // 3. Ortalanmış Özellikler Kartı
+        let featuresCard = NSBox(frame: NSRect(x: 45, y: 140, width: 560, height: 152))
+        featuresCard.boxType = .custom
+        featuresCard.cornerRadius = 8
+        featuresCard.borderWidth = 1
+        featuresCard.borderColor = NSColor.separatorColor.withAlphaComponent(0.22)
+        featuresCard.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.4)
+        featuresCard.titlePosition = .noTitle
 
-        let featuresTitle = createSectionLabel(text: "Özellikler", y: 104)
-        container.addSubview(featuresTitle)
+        let featuresContent = FlippedContentView(frame: featuresCard.bounds)
+        let cardTitle = NSTextField(labelWithString: "✨ Öne Çıkan Yetenekler")
+        cardTitle.frame = NSRect(x: 16, y: 10, width: 528, height: 18)
+        cardTitle.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        cardTitle.textColor = .labelColor
+        featuresContent.addSubview(cardTitle)
 
         let featureItems = [
-            "• Google Gemini 3.5 Transcribe Live (Gerçek Zamanlı WebSocket)",
-            "• Groq Whisper Large v3 (Düşük Gecikmeli Bulut Deşifre)",
+            "• Google Gemini 3.5 Transcribe Live (Gerçek Zamanlı WebSocket Akışı)",
+            "• Groq Whisper Large v3 (Düşük Gecikmeli Bulut Deşifre Motoru)",
             "• 280ms Akustik Uzatma Penceresi (Son kelimelerin kesilmesini önler)",
-            "• Konuşurken arka plan sesini/müziği akıllıca susturma",
-            "• Kararlı metin algılama (Settled Silence Debounce)"
+            "• Konuşurken arka plan sesini/müziği akıllıca duraklatma",
+            "• Kararlı metin algılama (Settled Silence Debounce)",
+            "• Sıfır telemetri ve güvenli yerel pano entegrasyonu"
         ]
-        let featuresBox = NSTextField(wrappingLabelWithString: featureItems.joined(separator: "\n"))
-        featuresBox.frame = NSRect(x: 190, y: 104, width: 435, height: 110)
-        featuresBox.font = NSFont.systemFont(ofSize: 12)
-        featuresBox.textColor = .labelColor
-        container.addSubview(featuresBox)
+        let featuresText = NSTextField(wrappingLabelWithString: featureItems.joined(separator: "\n"))
+        featuresText.frame = NSRect(x: 16, y: 32, width: 528, height: 112)
+        featuresText.font = NSFont.systemFont(ofSize: 11.5)
+        featuresText.textColor = .secondaryLabelColor
+        featuresContent.addSubview(featuresText)
+        featuresCard.contentView = featuresContent
+        container.addSubview(featuresCard)
 
-        container.addSubview(createSeparator(y: 228))
+        // 4. Ortalanmış Hızlı Kullanım İpucu Kartı
+        let tipCard = NSBox(frame: NSRect(x: 45, y: 304, width: 560, height: 72))
+        tipCard.boxType = .custom
+        tipCard.cornerRadius = 8
+        tipCard.borderWidth = 1
+        tipCard.borderColor = NSColor.separatorColor.withAlphaComponent(0.22)
+        tipCard.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.3)
+        tipCard.titlePosition = .noTitle
 
-        let usageTitle = createSectionLabel(text: "Kullanım", y: 242)
-        container.addSubview(usageTitle)
+        let tipContent = FlippedContentView(frame: tipCard.bounds)
+        let tipTitle = NSTextField(labelWithString: "💡 Hızlı Kullanım İpucu:")
+        tipTitle.frame = NSRect(x: 16, y: 8, width: 528, height: 18)
+        tipTitle.font = NSFont.systemFont(ofSize: 11.5, weight: .semibold)
+        tipTitle.textColor = .systemBlue
+        tipContent.addSubview(tipTitle)
 
-        let usageText = NSTextField(wrappingLabelWithString: "Herhangi bir metin alanında imlecinizi konumlandırın. Tetikleyici tuşa (varsayılan Sağ Command) basılı tutarak konuşun ve bırakın. Konuştuğunuz metin anında imlecin bulunduğu yere yapıştırılacaktır.")
-        usageText.frame = NSRect(x: 190, y: 242, width: 435, height: 60)
-        usageText.font = NSFont.systemFont(ofSize: 11.5)
-        usageText.textColor = .secondaryLabelColor
-        container.addSubview(usageText)
+        let tipText = NSTextField(wrappingLabelWithString: "Herhangi bir metin alanında imlecinizi konumlandırın. Tetikleyici tuşa (varsayılan Sağ Command ⌘) basılı tutarak konuşun ve bırakın. Konuştuğunuz metin anında imlecin bulunduğu yere yapıştırılır.")
+        tipText.frame = NSRect(x: 16, y: 28, width: 528, height: 36)
+        tipText.font = NSFont.systemFont(ofSize: 11)
+        tipText.textColor = .secondaryLabelColor
+        tipContent.addSubview(tipText)
+        tipCard.contentView = tipContent
+        container.addSubview(tipCard)
+
+        // 5. Ortalanmış Alt Bilgi
+        let footerLabel = NSTextField(labelWithString: "Antigravity AI • macOS için Optimize Edildi")
+        footerLabel.frame = NSRect(x: 45, y: 396, width: 560, height: 18)
+        footerLabel.font = NSFont.systemFont(ofSize: 10.5)
+        footerLabel.textColor = .tertiaryLabelColor
+        footerLabel.alignment = .center
+        container.addSubview(footerLabel)
 
         return container
     }
@@ -672,16 +783,16 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // =========================================================================
     private func createSectionLabel(text: String, y: CGFloat) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.frame = NSRect(x: 24, y: y, width: 150, height: 20)
+        label.frame = NSRect(x: 32, y: y, width: 135, height: 20)
         label.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        label.alignment = .right
+        label.alignment = .left
         label.textColor = .labelColor
         return label
     }
 
     private func createNoteLabel(text: String, y: CGFloat) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.frame = NSRect(x: 190, y: y, width: 435, height: 28)
+        label.frame = NSRect(x: 175, y: y, width: 440, height: 28)
         label.font = NSFont.systemFont(ofSize: 11)
         label.textColor = .secondaryLabelColor
         return label
@@ -689,14 +800,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
     private func createSubCheckboxNote(text: String, y: CGFloat) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.frame = NSRect(x: 210, y: y, width: 415, height: 16)
+        label.frame = NSRect(x: 175, y: y, width: 440, height: 16)
         label.font = NSFont.systemFont(ofSize: 10.5)
         label.textColor = .secondaryLabelColor
         return label
     }
 
     private func createSeparator(y: CGFloat) -> NSBox {
-        let box = NSBox(frame: NSRect(x: 24, y: y, width: 602, height: 1))
+        let box = NSBox(frame: NSRect(x: 32, y: y, width: 586, height: 1))
         box.boxType = .separator
         return box
     }
@@ -754,10 +865,16 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         switch mic.status {
         case .authorized:
             micStatusLabel.textColor = .systemGreen
+            micActionButton?.title = "Ayarlar"
         case .denied:
             micStatusLabel.textColor = .systemRed
+            micActionButton?.title = "Ayarları Aç"
+        case .notDetermined:
+            micStatusLabel.textColor = .systemOrange
+            micActionButton?.title = "İzin Ver"
         default:
             micStatusLabel.textColor = .systemOrange
+            micActionButton?.title = "İzin Ver"
         }
 
         let acc = PermissionManager.shared.getAccessibilityStatus()
@@ -765,10 +882,22 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         switch acc.status {
         case .authorized:
             accStatusLabel.textColor = .systemGreen
+            accActionButton?.title = "Ayarlar"
+            accProgressIndicator?.stopAnimation(nil)
+            if !lastKnownAccStatus && permissionPollTimer != nil {
+                accGuideLabel?.stringValue = "✅ Yetki verildi! Voice Typing kullanıma hazır."
+                accGuideLabel?.textColor = .systemGreen
+                SoundManager.shared.playSuccess()
+            }
+            lastKnownAccStatus = true
         case .denied:
             accStatusLabel.textColor = .systemRed
+            accActionButton?.title = "Ayarları Aç"
+            lastKnownAccStatus = false
         default:
             accStatusLabel.textColor = .systemOrange
+            accActionButton?.title = "İzin Ver"
+            lastKnownAccStatus = false
         }
     }
 
@@ -1078,17 +1207,30 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // SİSTEM AYARLARI BUTONLARI & KAYDET
     // =========================================================================
     @objc private func openMicSettingsClicked() {
-        PermissionManager.shared.openMicrophoneSettings()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.refreshPermissionStatuses()
+        let mic = PermissionManager.shared.getMicrophoneStatus()
+        if mic.status == .notDetermined {
+            PermissionManager.shared.requestMicrophonePermission { [weak self] granted in
+                self?.refreshPermissionStatuses()
+                if granted {
+                    SoundManager.shared.playSuccess()
+                }
+            }
+        } else {
+            PermissionManager.shared.openMicrophoneSettings()
         }
+        startPermissionPollTimer()
     }
 
     @objc private func openAccSettingsClicked() {
-        PermissionManager.shared.openAccessibilitySettings()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.refreshPermissionStatuses()
+        if !AXIsProcessTrusted() {
+            accGuideLabel?.stringValue = "Sistem Ayarları açıldı. 'VoiceTyping' anahtarını açın... (Otomatik algılanıyor)"
+            accGuideLabel?.textColor = .systemBlue
+            accProgressIndicator?.startAnimation(nil)
+            PermissionManager.shared.openAccessibilitySettings()
+        } else {
+            PermissionManager.shared.openAccessibilitySettings()
         }
+        startPermissionPollTimer()
     }
 
     @objc private func closeClicked() {
