@@ -596,6 +596,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         // Popüler macOS yardımcı uygulamaları standardı (Rectangle, 1Password, Raycast):
         // Ayarlar penceresi kapatıldığında uygulama asla sonlandırılmaz,
         // menü çubuğunda (taskbar) ve arka plan kısayol dinleyicisinde kesintisiz çalışmaya devam eder.
+        if !ConfigManager.shared.config.show_dock_icon {
+            AppDelegate.updateDockVisibility(false)
+        }
         return false
     }
 
@@ -649,6 +652,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 let isAccVisible = AccessibilityPromptController.shared.window?.isVisible ?? false
                 if !isSettingsVisible && !isAccVisible {
                     NSApp.setActivationPolicy(.accessory)
+                    NSApp.deactivate()
                 }
             }
         }
