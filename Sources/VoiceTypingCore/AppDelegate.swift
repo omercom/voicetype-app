@@ -4,6 +4,7 @@ import AppKit
 public class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var statusMenuItem: NSMenuItem!
+    private var toggleRecordMenuItem: NSMenuItem!
     private var groqMenuItem: NSMenuItem!
     private var geminiMenuItem: NSMenuItem!
     private var holdModeMenuItem: NSMenuItem!
@@ -56,8 +57,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         // Başlangıç izin kontrolü
         let mic = PermissionManager.shared.getMicrophoneStatus()
         let acc = PermissionManager.shared.getAccessibilityStatus()
+        print("[AppDelegate] Başlatıldı. İzinler: Mikrofon=\(mic.status), Erişilebilirlik=\(acc.status)")
 
         if !acc.status.isAuthorized || !mic.status.isAuthorized {
+            print("[AppDelegate] ⚠️ Eksik izin tespit edildi. Ayarlar penceresi açılıyor...")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 SettingsWindowController.shared.showWindow(nil)
             }
@@ -71,6 +74,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         statusMenuItem = NSMenuItem(title: readyMenuText, action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
+
+        // 1b. Doğrudan Kayıt Başlat / Bitir Menü Öğesi (Fareyle tek tıkla test)
+        toggleRecordMenuItem = NSMenuItem(title: "🎙️ Sesle Yazmayı Başlat (Kayıt)", action: #selector(toggleRecordAction), keyEquivalent: "r")
+        toggleRecordMenuItem.target = self
+        menu.addItem(toggleRecordMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -197,6 +205,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             button.title = ""
         }
         statusMenuItem.title = readyMenuText
+        toggleRecordMenuItem.title = AudioRecorder.shared.isRecording ? "⏹️ Kaydı Bitir ve Deşifre Et" : "🎙️ Sesle Yazmayı Başlat (Kayıt)"
+    }
+
+    @objc private func toggleRecordAction() {
+        if AudioRecorder.shared.isRecording {
+            let (_, dur) = AudioRecorder.shared.stop()
+            handleRecordStop(duration: dur)
+        } else {
+            handleRecordStart()
+        }
     }
 
     private func setupKeyListener() {
@@ -230,11 +248,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             // Menü çubuğundaki sabit premium waveform ikonu bozulmaz;
             // yalnızca açılan menü içerisindeki durum metni güncellenir.
             self.statusMenuItem.title = menuText
+            self.toggleRecordMenuItem.title = AudioRecorder.shared.isRecording ? "⏹️ Kaydı Bitir ve Deşifre Et" : "🎙️ Sesle Yazmayı Başlat (Kayıt)"
 
             if let delay = revertAfter {
                 self.revertStatusTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
                     guard let self = self else { return }
                     self.statusMenuItem.title = self.readyMenuText
+                    self.toggleRecordMenuItem.title = "🎙️ Sesle Yazmayı Başlat (Kayıt)"
                 }
             }
         }

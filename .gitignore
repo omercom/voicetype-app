@@ -27,3 +27,4 @@ config.json
 # Swift build artifacts
 .build/
 VoiceTyping
+VoiceTyping.app/

@@ -6,7 +6,10 @@ cd "$SCRIPT_DIR"
 
 PID_FILE="$SCRIPT_DIR/.app.pid"
 LOG_FILE="$SCRIPT_DIR/app.log"
-BINARY="$SCRIPT_DIR/VoiceTyping"
+BINARY="$SCRIPT_DIR/VoiceTyping.app/Contents/MacOS/VoiceTyping"
+if [ ! -f "$BINARY" ]; then
+    BINARY="$SCRIPT_DIR/VoiceTyping"
+fi
 
 # Halihazırda çalışan örnek varsa otomatik durdur ve yeniden başlat (Restart)
 RESTARTED=0
@@ -40,8 +43,11 @@ fi
 
 # Binary yoksa derle
 if [ ! -f "$BINARY" ]; then
-    echo "⚙️ Native Swift binary derleniyor..."
-    swift build -c release && cp .build/release/VoiceTyping ./VoiceTyping
+    echo "⚙️ Native Swift app bundle derleniyor..."
+    ./build.sh
+    if [ ! -f "$BINARY" ]; then
+        BINARY="$SCRIPT_DIR/VoiceTyping"
+    fi
     if [ ! -f "$BINARY" ]; then
         echo "❌ Derleme başarısız oldu!"
         exit 1
