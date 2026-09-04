@@ -35,15 +35,15 @@ public class PermissionManager {
         let auth = AVCaptureDevice.authorizationStatus(for: .audio)
         switch auth {
         case .authorized:
-            return (.authorized, "Yetki Verildi (Tam Erişim)", PermissionStatus.authorized.badge)
+            return (.authorized, "Yetki Verildi (Aktif)", PermissionStatus.authorized.badge)
         case .denied:
             return (.denied, "Erişim Reddedildi", PermissionStatus.denied.badge)
         case .restricted:
-            return (.restricted, "Kısıtlı (MDM / Ebeveyn)", PermissionStatus.restricted.badge)
+            return (.restricted, "Kısıtlı (MDM)", PermissionStatus.restricted.badge)
         case .notDetermined:
             return (.notDetermined, "Henüz İstenmedi", PermissionStatus.notDetermined.badge)
         @unknown default:
-            return (.unknown, "Bilinmeyen Durum", PermissionStatus.unknown.badge)
+            return (.unknown, "Bilinmeyen", PermissionStatus.unknown.badge)
         }
     }
 
@@ -73,9 +73,9 @@ public class PermissionManager {
     public func getAccessibilityStatus() -> (status: PermissionStatus, description: String, badge: String) {
         let trusted = AXIsProcessTrusted()
         if trusted {
-            return (.authorized, "Yetki Verildi (Kısayol ve Metin Yapıştırma Aktif)", PermissionStatus.authorized.badge)
+            return (.authorized, "Yetki Verildi (Aktif)", PermissionStatus.authorized.badge)
         } else {
-            return (.denied, "Yetki Verilmedi (Erişilebilirlik İzni Bekleniyor)", PermissionStatus.denied.badge)
+            return (.denied, "Yetki Verilmedi (Gerekli)", PermissionStatus.denied.badge)
         }
     }
 
