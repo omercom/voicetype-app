@@ -35,7 +35,15 @@ print("macOS Voice Typing Başlatıldı (PID: \(ProcessInfo.processInfo.processI
 print("============================================================")
 
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
+let showDock = ConfigManager.shared.config.show_dock_icon
+app.setActivationPolicy(showDock ? .regular : .accessory)
+
+// Dock ikonunu belirle
+if let iconUrl = Bundle.main.url(forResource: "AppIcon", withExtension: "icns") ??
+                 Bundle.main.url(forResource: "AppIcon", withExtension: "icns", subdirectory: "VoiceTyping_VoiceTypingCore.bundle"),
+   let image = NSImage(contentsOf: iconUrl) {
+    app.applicationIconImage = image
+}
 
 let delegate = AppDelegate()
 app.delegate = delegate

@@ -100,6 +100,7 @@ public struct AppConfig: Codable {
     public var paste_delay_ms: Int
     public var min_record_duration: Double
     public var mute_system_audio: Bool
+    public var show_dock_icon: Bool
 
     public static let defaultConfig = AppConfig(
         provider: "groq",
@@ -114,13 +115,14 @@ public struct AppConfig: Codable {
         restore_clipboard: false,
         paste_delay_ms: 20,
         min_record_duration: 0.20,
-        mute_system_audio: true
+        mute_system_audio: true,
+        show_dock_icon: true
     )
 
     enum CodingKeys: String, CodingKey {
         case provider, groq_api_key, gemini_api_key, groq_model, gemini_model
         case language, trigger_key, trigger_mode, play_sounds, restore_clipboard
-        case paste_delay_ms, min_record_duration, mute_system_audio
+        case paste_delay_ms, min_record_duration, mute_system_audio, show_dock_icon
     }
 
     public init(
@@ -136,7 +138,8 @@ public struct AppConfig: Codable {
         restore_clipboard: Bool,
         paste_delay_ms: Int,
         min_record_duration: Double,
-        mute_system_audio: Bool = true
+        mute_system_audio: Bool = true,
+        show_dock_icon: Bool = true
     ) {
         self.provider = provider
         self.groq_api_key = groq_api_key
@@ -151,6 +154,7 @@ public struct AppConfig: Codable {
         self.paste_delay_ms = paste_delay_ms
         self.min_record_duration = min_record_duration
         self.mute_system_audio = mute_system_audio
+        self.show_dock_icon = show_dock_icon
     }
 
     public init(from decoder: Decoder) throws {
@@ -168,6 +172,7 @@ public struct AppConfig: Codable {
         paste_delay_ms = try container.decodeIfPresent(Int.self, forKey: .paste_delay_ms) ?? 20
         min_record_duration = try container.decodeIfPresent(Double.self, forKey: .min_record_duration) ?? 0.20
         mute_system_audio = try container.decodeIfPresent(Bool.self, forKey: .mute_system_audio) ?? true
+        show_dock_icon = try container.decodeIfPresent(Bool.self, forKey: .show_dock_icon) ?? true
     }
 }
 

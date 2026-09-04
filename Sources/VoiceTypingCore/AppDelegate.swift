@@ -576,4 +576,37 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         RecordingHUD.shared.dismiss(animated: false)
         NSApplication.shared.terminate(nil)
     }
+
+    // MARK: - Dock & Görev Çubuğu Yönetimi
+
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        if let accWindow = AccessibilityPromptController.shared.window, accWindow.isVisible {
+            accWindow.makeKeyAndOrderFront(nil)
+        } else {
+            SettingsWindowController.shared.showWindow(nil)
+        }
+        return true
+    }
+
+    public func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let settingsItem = NSMenuItem(title: "Ayarlar...", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+        menu.addItem(NSMenuItem.separator())
+        let quitItem = NSMenuItem(title: "Çıkış", action: #selector(quitApp), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+        return menu
+    }
+
+    public static func updateDockVisibility(_ show: Bool) {
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(show ? .regular : .accessory)
+            if show {
+                NSApp.activate(ignoringOtherApps: true)
+            }
+        }
+    }
 }

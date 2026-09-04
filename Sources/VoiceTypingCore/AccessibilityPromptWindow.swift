@@ -20,7 +20,7 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
         )
         window.title = "Voice Typing - Kurulum & İzin"
         window.isReleasedWhenClosed = false
-        window.level = .normal
+        window.level = .floating
         window.hidesOnDeactivate = false
         super.init(window: window)
         window.delegate = self
