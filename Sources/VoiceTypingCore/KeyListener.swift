@@ -116,27 +116,47 @@ public class KeyListener {
 
         while isRunning {
             guard AXIsProcessTrusted() else {
-                Thread.sleep(forTimeInterval: 1.0)
+                print("[KeyListener] ⚠️ Erişilebilirlik (Accessibility) izni bekleniyor... (Sistem Ayarları > Gizlilik ve Güvenlik > Erişilebilirlik)")
+                let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+                _ = AXIsProcessTrustedWithOptions(options)
+                Thread.sleep(forTimeInterval: 2.0)
                 continue
             }
 
-            guard let tap = CGEvent.tapCreate(
-                tap: .cghidEventTap,
+            // Önce kullanıcı oturumu tap'ini (.cgSessionEventTap - root gerektirmez), ardından HID tap'ini dene
+            var tap = CGEvent.tapCreate(
+                tap: .cgSessionEventTap,
                 place: .headInsertEventTap,
                 options: .defaultTap,
                 eventsOfInterest: CGEventMask(eventMask),
                 callback: callback,
                 userInfo: observer
-            ) else {
+            )
+
+            if tap == nil {
+                tap = CGEvent.tapCreate(
+                    tap: .cghidEventTap,
+                    place: .headInsertEventTap,
+                    options: .defaultTap,
+                    eventsOfInterest: CGEventMask(eventMask),
+                    callback: callback,
+                    userInfo: observer
+                )
+            }
+
+            guard let createdTap = tap else {
+                print("[KeyListener] ⚠️ Event tap oluşturulamadı. 1 sn sonra tekrar denenecek...")
                 Thread.sleep(forTimeInterval: 1.0)
                 continue
             }
 
-            self.eventTap = tap
-            let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+            self.eventTap = createdTap
+            let keyName = TriggerKeyOption.name(for: Int(targetKeyCode))
+            print("[KeyListener] ✅ Klavye dinleyicisi kuruldu. Aktif tetikleyici tuş: \(keyName) (KeyCode: \(targetKeyCode))")
+            let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, createdTap, 0)
             self.runLoopSource = runLoopSource
             CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-            CGEvent.tapEnable(tap: tap, enable: true)
+            CGEvent.tapEnable(tap: createdTap, enable: true)
 
             self.runLoop = CFRunLoopGetCurrent()
             CFRunLoopRun()
@@ -230,6 +250,7 @@ public class KeyListener {
     }
 
     private func handleKeyDown() {
+        print("[KeyListener] 🎙️ Tetikleyici tuşa basıldı! (Kayıt tetikleniyor)")
         lock.lock()
         let config = ConfigManager.shared.config
         let mode = config.trigger_mode.lowercased()
@@ -286,6 +307,7 @@ public class KeyListener {
     }
 
     private func handleKeyUp() {
+        print("[KeyListener] ⏹️ Tetikleyici tuş bırakıldı!")
         lock.lock()
         let config = ConfigManager.shared.config
         let mode = config.trigger_mode.lowercased()

@@ -132,9 +132,10 @@ public class AudioRecorder: NSObject {
         do {
             try engine.start()
             isRecording = true
+            print("[AudioRecorder] ✅ Mikrofon başarıyla aktif edildi (Örnekleme: \(hwFormat.sampleRate)Hz, Kanal: \(hwFormat.channelCount)).")
             return true
         } catch {
-            print("[Hata] Mikrofon motoru başlatılamadı: \(error.localizedDescription)")
+            print("[AudioRecorder] ❌ Mikrofon motoru başlatılamadı: \(error.localizedDescription)")
             inputNode.removeTap(onBus: 0)
             self.audioEngine = nil
             self.audioConverter = nil
