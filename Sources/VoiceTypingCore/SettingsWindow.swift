@@ -806,6 +806,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         if !ConfigManager.shared.config.show_dock_icon && !(AccessibilityPromptController.shared.window?.isVisible ?? false) {
             DispatchQueue.main.async {
                 NSApp.setActivationPolicy(.accessory)
+                NSApp.deactivate()
             }
         }
     }

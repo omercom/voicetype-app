@@ -146,6 +146,7 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
         if !ConfigManager.shared.config.show_dock_icon && !(SettingsWindowController.shared.window?.isVisible ?? false) {
             DispatchQueue.main.async {
                 NSApp.setActivationPolicy(.accessory)
+                NSApp.deactivate()
             }
         }
     }
