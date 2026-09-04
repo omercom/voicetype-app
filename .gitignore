@@ -17,3 +17,5 @@ samples/custom/
 !samples/custom/.gitkeep
 test_*.mp3
 test_*.wav
+*.wav
+*.mp3
