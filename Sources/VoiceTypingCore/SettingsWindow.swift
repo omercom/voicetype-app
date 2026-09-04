@@ -331,10 +331,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let langLabel = createSectionLabel(text: "Konuşma Dili", y: 194)
         container.addSubview(langLabel)
 
-        languageField = NSTextField(frame: NSRect(x: 175, y: 192, width: 60, height: 24))
+        languageField = createSingleLineInputField(
+            frame: NSRect(x: 175, y: 192, width: 60, height: 24),
+            placeholder: "tr",
+            isMonospaced: false
+        )
         languageField.alignment = .center
-        languageField.font = NSFont.systemFont(ofSize: 12)
-        languageField.placeholderString = "tr"
         container.addSubview(languageField)
 
         let langHint = NSTextField(labelWithString: "('tr': Türkçe, 'en': İngilizce, 'auto': Otomatik Algıla)")
@@ -432,17 +434,11 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let geminiSection = createSectionLabel(text: "Google Gemini", y: 86)
         container.addSubview(geminiSection)
 
-        geminiKeyField = NSTextField(frame: NSRect(x: 175, y: 84, width: 295, height: 24))
-        geminiKeyField.placeholderString = "AIzaSy..."
-        geminiKeyField.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        geminiKeyField = createSingleLineInputField(
+            frame: NSRect(x: 175, y: 84, width: 440, height: 24),
+            placeholder: "AIzaSy..."
+        )
         container.addSubview(geminiKeyField)
-
-        let getGeminiKeyBtn = NSButton(frame: NSRect(x: 480, y: 82, width: 135, height: 28))
-        getGeminiKeyBtn.title = "API Anahtarı Al"
-        getGeminiKeyBtn.bezelStyle = .rounded
-        getGeminiKeyBtn.target = self
-        getGeminiKeyBtn.action = #selector(openGeminiConsoleClicked)
-        container.addSubview(getGeminiKeyBtn)
 
         geminiModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 116, width: 440, height: 26), pullsDown: false)
         for m in ConfigManager.availableGeminiModels {
@@ -450,62 +446,70 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
         container.addSubview(geminiModelPopUp)
 
-        let testGeminiBtn = NSButton(frame: NSRect(x: 175, y: 150, width: 135, height: 28))
+        let testGeminiBtn = NSButton(frame: NSRect(x: 175, y: 150, width: 145, height: 28))
         testGeminiBtn.title = "Bağlantıyı Test Et"
         testGeminiBtn.bezelStyle = .rounded
         testGeminiBtn.target = self
         testGeminiBtn.action = #selector(testGeminiConnectionClicked)
         container.addSubview(testGeminiBtn)
 
+        let getGeminiKeyBtn = NSButton(frame: NSRect(x: 326, y: 150, width: 140, height: 28))
+        getGeminiKeyBtn.title = "API Anahtarı Al ↗"
+        getGeminiKeyBtn.bezelStyle = .rounded
+        getGeminiKeyBtn.target = self
+        getGeminiKeyBtn.action = #selector(openGeminiConsoleClicked)
+        container.addSubview(getGeminiKeyBtn)
+
         geminiStatusLabel = NSTextField(wrappingLabelWithString: "")
-        geminiStatusLabel.frame = NSRect(x: 320, y: 152, width: 295, height: 38)
+        geminiStatusLabel.frame = NSRect(x: 175, y: 182, width: 440, height: 32)
         geminiStatusLabel.font = NSFont.systemFont(ofSize: 11)
         geminiStatusLabel.textColor = .secondaryLabelColor
         geminiStatusLabel.maximumNumberOfLines = 2
         container.addSubview(geminiStatusLabel)
 
-        let geminiNote = createNoteLabel(text: "WebSocket canlı akışı sayesinde konuşurken kelimeler doğrudan canlı işlenir.", y: 194)
+        let geminiNote = createNoteLabel(text: "WebSocket canlı akışı sayesinde konuşurken kelimeler doğrudan canlı işlenir.", y: 218)
         container.addSubview(geminiNote)
 
-        container.addSubview(createSeparator(y: 220))
+        container.addSubview(createSeparator(y: 242))
 
         // 3. Groq Whisper
-        let groqSection = createSectionLabel(text: "Groq Whisper", y: 234)
+        let groqSection = createSectionLabel(text: "Groq Whisper", y: 256)
         container.addSubview(groqSection)
 
-        groqKeyField = NSTextField(frame: NSRect(x: 175, y: 232, width: 295, height: 24))
-        groqKeyField.placeholderString = "gsk_..."
-        groqKeyField.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        groqKeyField = createSingleLineInputField(
+            frame: NSRect(x: 175, y: 254, width: 440, height: 24),
+            placeholder: "gsk_..."
+        )
         container.addSubview(groqKeyField)
 
-        let getGroqKeyBtn = NSButton(frame: NSRect(x: 480, y: 230, width: 135, height: 28))
-        getGroqKeyBtn.title = "API Anahtarı Al"
-        getGroqKeyBtn.bezelStyle = .rounded
-        getGroqKeyBtn.target = self
-        getGroqKeyBtn.action = #selector(openGroqConsoleClicked)
-        container.addSubview(getGroqKeyBtn)
-
-        groqModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 264, width: 440, height: 26), pullsDown: false)
+        groqModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 286, width: 440, height: 26), pullsDown: false)
         for m in ConfigManager.availableGroqModels {
             groqModelPopUp.addItem(withTitle: "\(m.name) [\(m.price)] - \(m.speed)")
         }
         container.addSubview(groqModelPopUp)
 
-        let testGroqBtn = NSButton(frame: NSRect(x: 175, y: 298, width: 135, height: 28))
+        let testGroqBtn = NSButton(frame: NSRect(x: 175, y: 320, width: 145, height: 28))
         testGroqBtn.title = "Bağlantıyı Test Et"
         testGroqBtn.bezelStyle = .rounded
         testGroqBtn.target = self
         testGroqBtn.action = #selector(testGroqConnectionClicked)
         container.addSubview(testGroqBtn)
 
+        let getGroqKeyBtn = NSButton(frame: NSRect(x: 326, y: 320, width: 140, height: 28))
+        getGroqKeyBtn.title = "API Anahtarı Al ↗"
+        getGroqKeyBtn.bezelStyle = .rounded
+        getGroqKeyBtn.target = self
+        getGroqKeyBtn.action = #selector(openGroqConsoleClicked)
+        container.addSubview(getGroqKeyBtn)
+
         groqStatusLabel = NSTextField(wrappingLabelWithString: "")
-        groqStatusLabel.frame = NSRect(x: 320, y: 300, width: 295, height: 38)
+        groqStatusLabel.frame = NSRect(x: 175, y: 352, width: 440, height: 32)
         groqStatusLabel.font = NSFont.systemFont(ofSize: 11)
         groqStatusLabel.textColor = .secondaryLabelColor
         groqStatusLabel.maximumNumberOfLines = 2
         container.addSubview(groqStatusLabel)
 
-        let groqNote = createNoteLabel(text: "Whisper Large modelini Groq LPU bulut donanımında ~0.3 saniyede tamamlar.", y: 342)
+        let groqNote = createNoteLabel(text: "Whisper Large modelini Groq LPU bulut donanımında ~0.3 saniyede tamamlar.", y: 388)
         container.addSubview(groqNote)
 
         return container
@@ -759,6 +763,26 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let box = NSBox(frame: NSRect(x: 32, y: y, width: 586, height: 1))
         box.boxType = .separator
         return box
+    }
+
+    private func createSingleLineInputField(frame: NSRect, placeholder: String, isMonospaced: Bool = true) -> NSTextField {
+        let textField = NSTextField(frame: frame)
+        textField.placeholderString = placeholder
+        if isMonospaced {
+            textField.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        } else {
+            textField.font = NSFont.systemFont(ofSize: 12)
+        }
+        textField.maximumNumberOfLines = 1
+        textField.usesSingleLineMode = true
+        textField.lineBreakMode = .byClipping
+        if let cell = textField.cell as? NSTextFieldCell {
+            cell.wraps = false
+            cell.isScrollable = true
+            cell.usesSingleLineMode = true
+            cell.lineBreakMode = .byClipping
+        }
+        return textField
     }
 
     // =========================================================================

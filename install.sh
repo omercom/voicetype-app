@@ -44,6 +44,9 @@ else
     codesign --force --deep --sign - "$TARGET_APP"
 fi
 
+# macOS LaunchServices önbelleğini yenile (LSUIElement / Dinamik Dock için)
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$TARGET_APP" 2>/dev/null || true
+
 # 4.5. Kullanıcı yapılandırmasını ve API anahtarlarını otomatik aktar / koru
 echo "🔑 4.5/5. API anahtarları ve kullanıcı yapılandırması kontrol ediliyor..."
 USER_CONFIG_DIR="$HOME/.voice_typing"

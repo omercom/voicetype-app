@@ -36,6 +36,9 @@ else
     codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
 fi
 
+# macOS LaunchServices önbelleğini yenile (LSUIElement / Dinamik Dock için)
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_BUNDLE" 2>/dev/null || true
+
 echo "✅ Build complete! Binary located at ./VoiceTyping ($(ls -lh ./VoiceTyping | awk '{print $5}'))"
 echo "✅ App bundle created at ./$APP_BUNDLE"
 
