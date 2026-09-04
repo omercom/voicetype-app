@@ -24,6 +24,9 @@ public class SoundManager {
         for name in soundNames {
             if let sound = loadSound(named: name) {
                 soundCache[name] = sound
+                print("[SoundManager] ✅ Ses belleğe yüklendi: \(name)")
+            } else {
+                print("[SoundManager] ⚠️ Ses yüklenemedi: \(name)")
             }
         }
     }
@@ -103,7 +106,10 @@ public class SoundManager {
     }
 
     public func play(_ name: String) {
-        guard isEnabled else { return }
+        guard isEnabled else {
+            print("[SoundManager] 🔇 Sesler devre dışı (isEnabled = false): \(name)")
+            return
+        }
 
         // Legacy name mapping
         let normalizedName: String
@@ -136,7 +142,11 @@ public class SoundManager {
             if let sound = sound {
                 sound.stop()
                 sound.currentTime = 0
-                sound.play()
+                sound.volume = 1.0
+                let ok = sound.play()
+                print("[SoundManager] 🔊 Ses çalındı: \(normalizedName) (Sonuç: \(ok))")
+            } else {
+                print("[SoundManager] ⚠️ Ses yüklenemedi: \(normalizedName)")
             }
         }
     }
