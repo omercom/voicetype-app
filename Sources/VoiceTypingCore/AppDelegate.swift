@@ -308,6 +308,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         var started = false
         if isGeminiLive {
+            print("[AppDelegate] Sağlayıcı: Google Gemini Live (gemini-3.5-transcribe-live) canlı akış oturumu başlatılıyor...")
             let session = Transcriber.shared.startLiveGeminiSession(
                 config: config,
                 onInterim: nil,
@@ -320,6 +321,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.currentLiveSession?.sendAudioChunk(chunk)
             }
         } else {
+            print("[AppDelegate] Sağlayıcı: \(config.provider) (\(config.provider == "gemini" ? config.gemini_model : config.groq_model)) ses kaydı başlatılıyor...")
             self.currentLiveSession = nil
             started = AudioRecorder.shared.start()
         }
@@ -396,6 +398,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self.isTranscribing = false
                 self.currentLiveSession = nil
                 self.lastRecordedAudioData = nil
+
+                print("[Deşifre Başarılı] [\(result.provider.uppercased()) - \(result.model)] (\(String(format: "%.2f", result.latency))s): \"\(result.text)\"")
 
                 if !result.text.isEmpty {
                     TextInjector.shared.paste(
