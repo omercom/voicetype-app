@@ -14,6 +14,78 @@ public struct ModelOption: Identifiable, Codable {
     }
 }
 
+public struct TriggerKeyOption: Identifiable, Equatable {
+    public var id: Int { return keyCode }
+    public var keyCode: Int
+    public var name: String
+    public var shortName: String
+    public var isModifier: Bool
+
+    public init(keyCode: Int, name: String, shortName: String, isModifier: Bool) {
+        self.keyCode = keyCode
+        self.name = name
+        self.shortName = shortName
+        self.isModifier = isModifier
+    }
+
+    public static let standardKeys: [TriggerKeyOption] = [
+        TriggerKeyOption(keyCode: 54, name: "Sağ Command (Right ⌘) - Varsayılan", shortName: "Sağ Cmd", isModifier: true),
+        TriggerKeyOption(keyCode: 58, name: "Sol Option (Left ⌥)", shortName: "Sol Option", isModifier: true),
+        TriggerKeyOption(keyCode: 61, name: "Sağ Option (Right ⌥)", shortName: "Sağ Option", isModifier: true),
+        TriggerKeyOption(keyCode: 62, name: "Sağ Control (Right ⌃)", shortName: "Sağ Ctrl", isModifier: true),
+        TriggerKeyOption(keyCode: 59, name: "Sol Control (Left ⌃)", shortName: "Sol Ctrl", isModifier: true),
+        TriggerKeyOption(keyCode: 63, name: "Fn / Globe (Fonksiyon / 🌐 fn)", shortName: "Fn/Globe", isModifier: true),
+        TriggerKeyOption(keyCode: 55, name: "Sol Command (Left ⌘)", shortName: "Sol Cmd", isModifier: true),
+        TriggerKeyOption(keyCode: 96, name: "F5 Tuşu", shortName: "F5", isModifier: false),
+        TriggerKeyOption(keyCode: 97, name: "F6 Tuşu", shortName: "F6", isModifier: false),
+        TriggerKeyOption(keyCode: 98, name: "F7 Tuşu", shortName: "F7", isModifier: false),
+        TriggerKeyOption(keyCode: 100, name: "F8 Tuşu", shortName: "F8", isModifier: false)
+    ]
+
+    public static func name(for keyCode: Int) -> String {
+        if let found = standardKeys.first(where: { $0.keyCode == keyCode }) {
+            return found.name
+        }
+        switch keyCode {
+        case 49: return "Boşluk (Space)"
+        case 36: return "Return / Enter (⏎)"
+        case 53: return "Escape (Esc)"
+        case 56: return "Sol Shift (Left ⇧)"
+        case 60: return "Sağ Shift (Right ⇧)"
+        case 122: return "F1 Tuşu"
+        case 120: return "F2 Tuşu"
+        case 99: return "F3 Tuşu"
+        case 118: return "F4 Tuşu"
+        case 101: return "F9 Tuşu"
+        case 109: return "F10 Tuşu"
+        case 103: return "F11 Tuşu"
+        case 111: return "F12 Tuşu"
+        default: return "Özel Tuş (KeyCode: \(keyCode))"
+        }
+    }
+
+    public static func shortName(for keyCode: Int) -> String {
+        if let found = standardKeys.first(where: { $0.keyCode == keyCode }) {
+            return found.shortName
+        }
+        switch keyCode {
+        case 49: return "Space"
+        case 36: return "Enter"
+        case 56: return "Sol Shift"
+        case 60: return "Sağ Shift"
+        case 122: return "F1"
+        case 120: return "F2"
+        case 99: return "F3"
+        case 118: return "F4"
+        case 101: return "F9"
+        case 109: return "F10"
+        case 103: return "F11"
+        case 111: return "F12"
+        default: return "Tuş #\(keyCode)"
+        }
+    }
+}
+
 public struct AppConfig: Codable {
     public var provider: String
     public var groq_api_key: String

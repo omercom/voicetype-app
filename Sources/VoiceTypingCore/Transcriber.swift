@@ -372,4 +372,84 @@ public class Transcriber {
         lock.unlock()
         task.resume()
     }
+
+    // MARK: - Bağlantı ve API Anahtarı Doğrulama
+
+    public func testGroqConnection(apiKey: String, completion: @escaping (Bool, String) -> Void) {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            completion(false, "Lütfen Groq API anahtarını girin.")
+            return
+        }
+
+        guard let url = URL(string: "https://api.groq.com/openai/v1/models") else {
+            completion(false, "Geçersiz Groq URL'i.")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10.0
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(false, "Bağlantı hatası: \(error.localizedDescription)")
+                return
+            }
+
+            guard let http = response as? HTTPURLResponse else {
+                completion(false, "Sunucudan yanıt alınamadı.")
+                return
+            }
+
+            if http.statusCode == 200 {
+                completion(true, "Bağlantı başarılı! Groq API hazır.")
+            } else if http.statusCode == 401 {
+                completion(false, "Yetkilendirme hatası (401): Geçersiz Groq API anahtarı.")
+            } else {
+                let msg = (data != nil) ? (String(data: data!, encoding: .utf8) ?? "") : ""
+                completion(false, "Groq HTTP \(http.statusCode): \(msg.prefix(80))")
+            }
+        }.resume()
+    }
+
+    public func testGeminiConnection(apiKey: String, completion: @escaping (Bool, String) -> Void) {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            completion(false, "Lütfen Gemini API anahtarını girin.")
+            return
+        }
+
+        let urlString = "https://generativelanguage.googleapis.com/v1beta/models?key=\(key)"
+        guard let url = URL(string: urlString) else {
+            completion(false, "Geçersiz Gemini URL'i.")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10.0
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                completion(false, "Bağlantı hatası: \(error.localizedDescription)")
+                return
+            }
+
+            guard let http = response as? HTTPURLResponse else {
+                completion(false, "Sunucudan yanıt alınamadı.")
+                return
+            }
+
+            if http.statusCode == 200 {
+                completion(true, "Bağlantı başarılı! Gemini API hazır.")
+            } else if http.statusCode == 400 || http.statusCode == 403 {
+                completion(false, "Yetkilendirme hatası (\(http.statusCode)): Geçersiz Gemini API anahtarı.")
+            } else {
+                let msg = (data != nil) ? (String(data: data!, encoding: .utf8) ?? "") : ""
+                completion(false, "Gemini HTTP \(http.statusCode): \(msg.prefix(80))")
+            }
+        }.resume()
+    }
 }

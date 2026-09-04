@@ -214,4 +214,116 @@ final class VoiceTypingTests: XCTestCase {
         let isSilentLoud = AudioRecorder.isAudioSilent(data: loudWav)
         XCTAssertFalse(isSilentLoud, "Yüksek genlikli ses kaydı sessiz işaretlenmemelidir.")
     }
+
+    func testTriggerKeyOptionHelpers() {
+        // Standart tuşlar listesi doğrulaması
+        let standardKeys = TriggerKeyOption.standardKeys
+        XCTAssertTrue(standardKeys.contains(where: { $0.keyCode == 54 }), "Sağ Command (54) bulunmalı.")
+        XCTAssertTrue(standardKeys.contains(where: { $0.keyCode == 58 }), "Sol Option (58) bulunmalı.")
+        XCTAssertTrue(standardKeys.contains(where: { $0.keyCode == 61 }), "Sağ Option (61) bulunmalı.")
+        XCTAssertTrue(standardKeys.contains(where: { $0.keyCode == 62 }), "Sağ Control (62) bulunmalı.")
+        XCTAssertTrue(standardKeys.contains(where: { $0.keyCode == 63 }), "Fn / Globe (63) bulunmalı.")
+
+        // İsim üretimi
+        XCTAssertTrue(TriggerKeyOption.name(for: 54).contains("Sağ Command"))
+        XCTAssertTrue(TriggerKeyOption.name(for: 58).contains("Sol Option"))
+        XCTAssertTrue(TriggerKeyOption.name(for: 61).contains("Sağ Option"))
+        XCTAssertTrue(TriggerKeyOption.name(for: 62).contains("Sağ Control"))
+        XCTAssertTrue(TriggerKeyOption.name(for: 63).contains("Fn"))
+        XCTAssertEqual(TriggerKeyOption.name(for: 122), "F1 Tuşu")
+        XCTAssertTrue(TriggerKeyOption.name(for: 999).contains("999"))
+
+        // Kısa isim kontrolü
+        XCTAssertEqual(TriggerKeyOption.shortName(for: 54), "Sağ Cmd")
+        XCTAssertEqual(TriggerKeyOption.shortName(for: 58), "Sol Option")
+        XCTAssertEqual(TriggerKeyOption.shortName(for: 61), "Sağ Option")
+        XCTAssertEqual(TriggerKeyOption.shortName(for: 62), "Sağ Ctrl")
+        XCTAssertEqual(TriggerKeyOption.shortName(for: 63), "Fn/Globe")
+    }
+
+    func testKeyListenerModifierDetection() {
+        // Modifier tuşlar
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 54)) // Right Cmd
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 55)) // Left Cmd
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 58)) // Left Option
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 61)) // Right Option
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 59)) // Left Control
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 62)) // Right Control
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 63)) // Fn / Globe
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 56)) // Left Shift
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 60)) // Right Shift
+
+        // Normal tuşlar (modifier olmayan)
+        XCTAssertFalse(KeyListener.isModifier(keyCode: 96)) // F5
+        XCTAssertFalse(KeyListener.isModifier(keyCode: 49)) // Space
+        XCTAssertFalse(KeyListener.isModifier(keyCode: 36)) // Return
+
+        // resetState çökmemeli
+        KeyListener.shared.resetState()
+    }
+
+    func testGroqConnectionValidation() {
+        let expectation = XCTestExpectation(description: "Groq connection test responds")
+
+        // Boş anahtar testi
+        Transcriber.shared.testGroqConnection(apiKey: "") { success, message in
+            XCTAssertFalse(success)
+            XCTAssertTrue(message.contains("Groq API"))
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2.0)
+
+        // Canlı anahtar testi (mevcutsa)
+        let liveKey = ConfigManager.shared.config.groq_api_key
+        if !liveKey.isEmpty {
+            let liveExpectation = XCTestExpectation(description: "Live Groq connection responds")
+            Transcriber.shared.testGroqConnection(apiKey: liveKey) { success, message in
+                XCTAssertTrue(success, "Groq canlı bağlantı testi başarılı olmalı: \(message)")
+                liveExpectation.fulfill()
+            }
+            wait(for: [liveExpectation], timeout: 6.0)
+        }
+    }
+
+    func testGeminiConnectionValidation() {
+        let expectation = XCTestExpectation(description: "Gemini connection test responds")
+
+        // Boş anahtar testi
+        Transcriber.shared.testGeminiConnection(apiKey: "") { success, message in
+            XCTAssertFalse(success)
+            XCTAssertTrue(message.contains("Gemini API"))
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2.0)
+
+        // Canlı anahtar testi (mevcutsa)
+        let liveKey = ConfigManager.shared.config.gemini_api_key
+        if !liveKey.isEmpty {
+            let liveExpectation = XCTestExpectation(description: "Live Gemini connection responds")
+            Transcriber.shared.testGeminiConnection(apiKey: liveKey) { success, message in
+                XCTAssertTrue(success, "Gemini canlı bağlantı testi başarılı olmalı: \(message)")
+                liveExpectation.fulfill()
+            }
+            wait(for: [liveExpectation], timeout: 6.0)
+        }
+    }
+
+    func testConfigTriggerKeyPersistence() {
+        let originalKey = ConfigManager.shared.config.trigger_key
+
+        // Tuşu 58 (Sol Option) olarak güncelle
+        ConfigManager.shared.update { $0.trigger_key = 58 }
+        XCTAssertEqual(ConfigManager.shared.config.trigger_key, 58)
+
+        // Geri orijinaline döndür (54)
+        ConfigManager.shared.update { $0.trigger_key = originalKey }
+        XCTAssertEqual(ConfigManager.shared.config.trigger_key, originalKey)
+    }
+
+    func testSettingsWindowInitialization() {
+        let controller = SettingsWindowController.shared
+        XCTAssertNotNil(controller.window)
+        XCTAssertEqual(controller.window?.title, "⚙️ Voice Typing - Ayarlar ve Tercihler")
+        controller.refreshPermissionStatuses()
+    }
 }
