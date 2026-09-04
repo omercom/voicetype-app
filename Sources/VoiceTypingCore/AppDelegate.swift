@@ -22,6 +22,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var currentLiveSession: LiveGeminiStreamSession?
     private var lastRecordedAudioData: Data?
     private var revertStatusTimer: Timer?
+    private var isExplicitQuit: Bool = false
 
     public override init() {
         super.init()
@@ -38,6 +39,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // Sistem kapanışı / oturum kapatma durumunda temiz çıkışa izin ver
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.isExplicitQuit = true
+        }
+
         // Menu Bar Status Item Oluştur (Sabit premium ses dalgası ikonu)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
@@ -86,6 +92,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.setupKeyListener()
                 SoundManager.shared.playStartup()
                 self?.refreshMenuStates()
+
+                // İzinler tamamlandığında doğrudan Ayarlar penceresindeki İzinler sekmesine git
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    SettingsWindowController.shared.showWindow(nil)
+                    SettingsWindowController.shared.selectTab(index: 2) // İzinler sekmesi
+                }
             }
         }
     }
@@ -571,6 +583,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quitApp() {
+        isExplicitQuit = true
         KeyListener.shared.stop()
         AudioRecorder.shared.cancel()
         RecordingHUD.shared.dismiss(animated: false)
@@ -578,6 +591,26 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Dock & Görev Çubuğu Yönetimi
+
+    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        // Popüler macOS yardımcı uygulamaları standardı (Rectangle, 1Password, Raycast):
+        // Ayarlar penceresi kapatıldığında uygulama asla sonlandırılmaz,
+        // menü çubuğunda (taskbar) ve arka plan kısayol dinleyicisinde kesintisiz çalışmaya devam eder.
+        return false
+    }
+
+    public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if isExplicitQuit {
+            return .terminateNow
+        }
+
+        // Kullanıcı Dock ikonuna sağ tıklayıp "Çıkış" dediğinde veya Cmd+Q yaptığında:
+        // Menü çubuğundaki (taskbar) arka plan servisinin kesilmemesi için
+        // yalnızca açık pencereleri kapat, uygulamayı sonlandırma.
+        SettingsWindowController.shared.window?.close()
+        AccessibilityPromptController.shared.window?.close()
+        return .terminateCancel
+    }
 
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         NSApp.activate(ignoringOtherApps: true)
@@ -594,8 +627,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Ayarlar...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let toggleItem = NSMenuItem(title: "Sesle Yazmayı Başlat", action: #selector(toggleRecordAction), keyEquivalent: "r")
+        toggleItem.target = self
+        menu.addItem(toggleItem)
+
         menu.addItem(NSMenuItem.separator())
-        let quitItem = NSMenuItem(title: "Çıkış", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Uygulamadan Tamamen Çık", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
         return menu
