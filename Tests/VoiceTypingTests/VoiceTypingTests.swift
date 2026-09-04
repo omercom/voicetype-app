@@ -668,5 +668,27 @@ final class VoiceTypingTests: XCTestCase {
             interim: ""
         )
         XCTAssertEqual(t6, "")
+
+        // Durum 7: Kullanıcının bildirdiği hata senaryosu (ara interim daha kısa kalmış ve birikmiş cümlenin alt kümesi)
+        let t7 = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: "Sen harika bir insansın. Seni çok seviyorum. Çok güzel.",
+            interim: "Sen harika bir insansın. Seni çok seviyorum. Çok"
+        )
+        XCTAssertEqual(
+            t7,
+            "Sen harika bir insansın. Seni çok seviyorum. Çok güzel.",
+            "Daha kısa kalan ara interim asla tamamlanmış cümlenin sonuna yinelenerek eklenmemeli!"
+        )
+
+        // Durum 8: Kelime örtüşmesi (overlap) birleştirme kontrolü
+        let t8 = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: "Sen harika bir insansın.",
+            interim: "insansın seni çok seviyorum"
+        )
+        XCTAssertEqual(
+            t8,
+            "Sen harika bir insansın. seni çok seviyorum",
+            "Örtüşen kelimeler mükerrer eklenmeden akıcı birleştirilmeli."
+        )
     }
 }

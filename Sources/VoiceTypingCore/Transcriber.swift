@@ -228,14 +228,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                     let endSent = self.hasSentStreamEnd
                     lock.unlock()
 
-                    let preview: String
-                    if currentAccum.isEmpty {
-                        preview = trimmed
-                    } else if trimmed.lowercased().hasPrefix(currentAccum.lowercased()) {
-                        preview = trimmed
-                    } else {
-                        preview = "\(currentAccum) \(trimmed)"
-                    }
+                    let preview = Self.reconcileTranscriptionText(accumulated: currentAccum, interim: trimmed)
                     onInterim?(preview)
 
                     if endSent {
@@ -252,13 +245,15 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                     lock.lock()
                     if self.accumulatedText.isEmpty {
                         self.accumulatedText = trimmed
-                    } else if trimmed.lowercased().hasPrefix(self.accumulatedText.lowercased()) {
+                    } else if trimmed.lowercased().contains(self.accumulatedText.lowercased()) {
                         self.accumulatedText = trimmed
-                    } else if !self.accumulatedText.lowercased().hasSuffix(trimmed.lowercased()) {
-                        self.accumulatedText += " \(trimmed)"
+                    } else if self.accumulatedText.lowercased().contains(trimmed.lowercased()) {
+                        // Zaten birikmiş metinde mevcut, tekrar ekleme yapma
+                    } else {
+                        self.accumulatedText = Self.reconcileTranscriptionText(accumulated: self.accumulatedText, interim: trimmed)
                     }
                     if self.latestInterimText.lowercased() == trimmed.lowercased() ||
-                       self.accumulatedText.lowercased().hasSuffix(self.latestInterimText.lowercased()) {
+                       self.accumulatedText.lowercased().contains(self.latestInterimText.lowercased()) {
                         self.latestInterimText = ""
                     }
                     let current = self.accumulatedText
@@ -272,27 +267,26 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 }
             }
 
-            // Model Turn metin yedeği (eğer transcription yerine modelTurn gelirse)
+            // Model Turn metin yedeği (yalnızca inputTranscription hiç gelmediyse yedek olarak kullanılır)
             if let modelTurn = serverContent["modelTurn"] as? [String: Any],
                let parts = modelTurn["parts"] as? [[String: Any]] {
                 let textParts = parts.filter { ($0["thought"] as? Bool) != true }
                 let text = textParts.compactMap { $0["text"] as? String }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
                     lock.lock()
+                    // Eğer kullanıcı konuşma metni zaten inputTranscription ile geldiyse modelTurn cevabını ASLA ekleme!
                     if self.accumulatedText.isEmpty {
                         self.accumulatedText = text
-                    } else if text.lowercased().hasPrefix(self.accumulatedText.lowercased()) {
-                        self.accumulatedText = text
-                    } else if !self.accumulatedText.lowercased().hasSuffix(text.lowercased()) {
-                        self.accumulatedText += " \(text)"
-                    }
-                    let current = self.accumulatedText
-                    let endSent = self.hasSentStreamEnd
-                    lock.unlock()
-                    onInterim?(current)
+                        let current = self.accumulatedText
+                        let endSent = self.hasSentStreamEnd
+                        lock.unlock()
+                        onInterim?(current)
 
-                    if endSent {
-                        scheduleFinalization(delayMs: 400)
+                        if endSent {
+                            scheduleFinalization(delayMs: 400)
+                        }
+                    } else {
+                        lock.unlock()
                     }
                 }
             }
@@ -449,24 +443,71 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     }
 
     public static func reconcileTranscriptionText(accumulated: String, interim: String) -> String {
-        var text = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAccum = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedInterim = interim.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if text.isEmpty {
-            text = trimmedInterim
-        } else if !trimmedInterim.isEmpty {
-            if trimmedInterim.lowercased().hasPrefix(text.lowercased()) {
-                text = trimmedInterim
-            } else if !text.lowercased().hasSuffix(trimmedInterim.lowercased()) {
-                text = "\(text) \(trimmedInterim)"
+        var result: String
+
+        if trimmedAccum.isEmpty {
+            result = trimmedInterim
+        } else if trimmedInterim.isEmpty {
+            result = trimmedAccum
+        } else {
+            let lowerAccum = trimmedAccum.lowercased()
+            let lowerInterim = trimmedInterim.lowercased()
+
+            if lowerAccum == lowerInterim {
+                result = trimmedAccum
+            } else if lowerAccum.contains(lowerInterim) {
+                // Interim zaten birikmiş metnin içinde tamamen var (örneğin kullanıcının cümlesi biterken interim daha kısa kalmış)
+                result = trimmedAccum
+            } else if lowerInterim.contains(lowerAccum) {
+                // Interim daha güncel ve birikmiş metnin tamamını kapsıyor
+                result = trimmedInterim
+            } else if lowerAccum.hasSuffix(lowerInterim) {
+                result = trimmedAccum
+            } else if lowerInterim.hasPrefix(lowerAccum) {
+                result = trimmedInterim
+            } else {
+                // Kelime düzeyinde örtüşme (overlap) kontrolü:
+                // Örneğin accum: "Sen harika bir insansın", interim: "insansın seni çok seviyorum"
+                let accumWords = trimmedAccum.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+                let interimWords = trimmedInterim.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+
+                let puncSet = CharacterSet(charactersIn: ".,!?;:…\"'()[]{}")
+                var overlapCount = 0
+                let maxCheck = min(accumWords.count, interimWords.count)
+                for count in stride(from: maxCheck, through: 1, by: -1) {
+                    let accumTail = accumWords.suffix(count).map {
+                        $0.lowercased().trimmingCharacters(in: puncSet)
+                    }
+                    let interimHead = interimWords.prefix(count).map {
+                        $0.lowercased().trimmingCharacters(in: puncSet)
+                    }
+                    if accumTail == interimHead {
+                        overlapCount = count
+                        break
+                    }
+                }
+
+                if overlapCount > 0 {
+                    let newWords = interimWords.dropFirst(overlapCount)
+                    if newWords.isEmpty {
+                        result = trimmedAccum
+                    } else {
+                        result = "\(trimmedAccum) \(newWords.joined(separator: " "))"
+                    }
+                } else {
+                    result = "\(trimmedAccum) \(trimmedInterim)"
+                }
             }
         }
 
-        let lower = text.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]().,"))
+        let lower = result.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]().,"))
         if lower == "blank_audio" || lower == "sessizlik" || lower == "ses yok" || lower == "boşluk" || lower == "gürültü" {
             return ""
         }
-        return text
+        return result
     }
 
     private func finishAndComplete() {
