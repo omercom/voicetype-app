@@ -15,6 +15,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var triggerKeyMenuItems: [NSMenuItem] = []
 
     private var isTranscribing: Bool = false
+    private var currentLiveSession: LiveGeminiStreamSession?
+    private var lastRecordedAudioData: Data?
     private var revertStatusTimer: Timer?
 
     public override init() {
@@ -85,7 +87,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         groqMenuItem.target = self
         providerMenu.addItem(groqMenuItem)
 
-        geminiMenuItem = NSMenuItem(title: "Google Gemini (Doğal Dil)", action: #selector(selectGeminiProvider), keyEquivalent: "")
+        geminiMenuItem = NSMenuItem(title: "Google Gemini (Canlı Akış & Doğal Dil)", action: #selector(selectGeminiProvider), keyEquivalent: "")
         geminiMenuItem.target = self
         providerMenu.addItem(geminiMenuItem)
 
@@ -279,12 +281,39 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             SystemAudioManager.shared.muteForDictation()
         }
 
-        let started = AudioRecorder.shared.start()
+        let geminiModel = config.gemini_model.lowercased()
+        let isGeminiLive = (config.provider.lowercased() == "gemini") &&
+                           (geminiModel.isEmpty || geminiModel.contains("gemini-3.5-transcribe-live")) &&
+                           !config.gemini_api_key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        var started = false
+        if isGeminiLive {
+            let session = Transcriber.shared.startLiveGeminiSession(
+                config: config,
+                onInterim: { interimText in
+                    RecordingHUD.shared.updateInterimText(interimText)
+                },
+                completion: { [weak self] result in
+                    self?.handleTranscriptionResult(result: result, config: config)
+                }
+            )
+            self.currentLiveSession = session
+            started = AudioRecorder.shared.start { [weak self] chunk in
+                self?.currentLiveSession?.sendAudioChunk(chunk)
+            }
+        } else {
+            self.currentLiveSession = nil
+            started = AudioRecorder.shared.start()
+        }
+
         if started {
             SoundManager.shared.playStart()
             setStatus(title: "🔴 Dinliyor...", menuText: "Durum: Dinleniyor (Konuşun)...")
             RecordingHUD.shared.showRecording()
         } else {
+            currentLiveSession?.cancel()
+            currentLiveSession = nil
+            lastRecordedAudioData = nil
             SystemAudioManager.shared.restoreAfterDictation()
             SoundManager.shared.playCancel()
             setStatus(title: "⚠️ Hata", menuText: "Durum: Mikrofon Başlatılamadı!", revertAfter: 2.0)
@@ -302,15 +331,32 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard actualDuration >= config.min_record_duration else {
             // Çok kısa basma - kazara dokunma
+            currentLiveSession?.cancel()
+            currentLiveSession = nil
+            lastRecordedAudioData = nil
             RecordingHUD.shared.dismiss(animated: true)
             setStatus(title: "🎙️", menuText: readyMenuText)
             return
         }
 
         guard let audioData = data, !audioData.isEmpty else {
-            // Sessizlik veya ses alınamadı
+            // Sessizlik veya ses alınamadı (mikrofon kapalı veya kullanıcı konuşmadı)
+            currentLiveSession?.cancel()
+            currentLiveSession = nil
+            lastRecordedAudioData = nil
             RecordingHUD.shared.dismiss(animated: true)
             setStatus(title: "🎙️", menuText: readyMenuText)
+            return
+        }
+
+        self.lastRecordedAudioData = audioData
+
+        if let liveSession = currentLiveSession {
+            SoundManager.shared.playStop()
+            isTranscribing = true
+            setStatus(title: "⏳ Yazıyor...", menuText: "Durum: Deşifre Ediliyor...")
+            RecordingHUD.shared.showTranscribing()
+            liveSession.finishAudio()
             return
         }
 
@@ -320,39 +366,66 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         RecordingHUD.shared.showTranscribing()
 
         Transcriber.shared.transcribe(audioData: audioData, config: config) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.isTranscribing = false
+            self?.handleTranscriptionResult(result: result, config: config)
+        }
+    }
 
-                if result.success {
-                    if !result.text.isEmpty {
-                        TextInjector.shared.paste(
-                            text: result.text,
-                            restoreClipboard: config.restore_clipboard,
-                            pasteDelayMs: config.paste_delay_ms
-                        )
-                        SoundManager.shared.playSuccess()
-                        RecordingHUD.shared.showSuccess(text: "Yapıştırıldı")
-                        self.setStatus(
-                            title: "✅",
-                            menuText: "Durum: Yapıştırıldı (\(String(format: "%.2f", result.latency))s)",
-                            revertAfter: 1.5
-                        )
-                    } else {
-                        RecordingHUD.shared.dismiss(animated: true)
-                        self.setStatus(title: "🎙️", menuText: self.readyMenuText)
-                    }
+    private func handleTranscriptionResult(result: TranscriptionResult, config: AppConfig) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+
+            if result.success {
+                self.isTranscribing = false
+                self.currentLiveSession = nil
+                self.lastRecordedAudioData = nil
+
+                if !result.text.isEmpty {
+                    TextInjector.shared.paste(
+                        text: result.text,
+                        restoreClipboard: config.restore_clipboard,
+                        pasteDelayMs: config.paste_delay_ms
+                    )
+                    SoundManager.shared.playSuccess()
+                    RecordingHUD.shared.showSuccess(text: "Yapıştırıldı")
+                    self.setStatus(
+                        title: "✅",
+                        menuText: "Durum: Yapıştırıldı (\(String(format: "%.2f", result.latency))s)",
+                        revertAfter: 1.5
+                    )
                 } else {
-                    SoundManager.shared.playCancel()
-                    RecordingHUD.shared.showError(message: "Deşifre Hatası")
-                    let err = result.error ?? "Bilinmeyen hata"
-                    self.setStatus(title: "⚠️ Hata", menuText: "Hata: \(err)", revertAfter: 3.0)
+                    RecordingHUD.shared.dismiss(animated: true)
+                    self.setStatus(title: "🎙️", menuText: self.readyMenuText)
                 }
+            } else {
+                let err = result.error ?? ""
+                let isQuota = err.contains("quota") || err.contains("exceeded") || err.contains("429")
+                if !isQuota, let fallbackAudio = self.lastRecordedAudioData {
+                    // WebSocket ağ/bağlantı kopması durumunda REST fallback ile kurtar
+                    self.lastRecordedAudioData = nil
+                    self.currentLiveSession = nil
+                    print("[GeminiLive] WebSocket bağlantısı kesildi, REST API ile kurtarılıyor...")
+                    self.setStatus(title: "⏳ Yeniden deneniyor...", menuText: "Durum: REST ile deneniyor...")
+                    Transcriber.shared.transcribeGemini(audioData: fallbackAudio, config: config) { [weak self] restResult in
+                        self?.handleTranscriptionResult(result: restResult, config: config)
+                    }
+                    return
+                }
+
+                self.isTranscribing = false
+                self.currentLiveSession = nil
+                self.lastRecordedAudioData = nil
+                SoundManager.shared.playCancel()
+                RecordingHUD.shared.showError(message: "Deşifre Hatası")
+                let errMsg = result.error ?? "Bilinmeyen hata"
+                self.setStatus(title: "⚠️ Hata", menuText: "Hata: \(errMsg)", revertAfter: 3.0)
             }
         }
     }
 
     private func handleCancel() {
+        currentLiveSession?.cancel()
+        currentLiveSession = nil
+        lastRecordedAudioData = nil
         SystemAudioManager.shared.restoreAfterDictation()
         AudioRecorder.shared.cancel()
         Transcriber.shared.cancel()

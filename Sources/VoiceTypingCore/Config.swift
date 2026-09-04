@@ -106,7 +106,7 @@ public struct AppConfig: Codable {
         groq_api_key: "",
         gemini_api_key: "",
         groq_model: "whisper-large-v3",
-        gemini_model: "gemini-3.5-flash",
+        gemini_model: "gemini-3.5-transcribe-live",
         language: "tr",
         trigger_key: 54,
         trigger_mode: "hold",
@@ -159,7 +159,7 @@ public struct AppConfig: Codable {
         groq_api_key = try container.decodeIfPresent(String.self, forKey: .groq_api_key) ?? ""
         gemini_api_key = try container.decodeIfPresent(String.self, forKey: .gemini_api_key) ?? ""
         groq_model = try container.decodeIfPresent(String.self, forKey: .groq_model) ?? "whisper-large-v3"
-        gemini_model = try container.decodeIfPresent(String.self, forKey: .gemini_model) ?? "gemini-3.5-flash"
+        gemini_model = try container.decodeIfPresent(String.self, forKey: .gemini_model) ?? "gemini-3.5-transcribe-live"
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? "tr"
         trigger_key = try container.decodeIfPresent(Int.self, forKey: .trigger_key) ?? 54
         trigger_mode = try container.decodeIfPresent(String.self, forKey: .trigger_mode) ?? "hold"
@@ -187,6 +187,18 @@ public class ConfigManager {
     ]
 
     public static let availableGeminiModels: [ModelOption] = [
+        ModelOption(
+            id: "gemini-3.5-transcribe-live",
+            name: "Gemini 3.5 Transcribe Live (Canlı Akış / Düşük Gecikme)",
+            price: "Ücretsiz Kota / Standart",
+            speed: "0.05s - 0.2s (Canlı Akış)"
+        ),
+        ModelOption(
+            id: "gemini-3.5-transcribe",
+            name: "Gemini 3.5 Transcribe (REST)",
+            price: "Ücretsiz Kota / Standart",
+            speed: "~0.4s (Hızlı REST)"
+        ),
         ModelOption(
             id: "gemini-3.5-flash",
             name: "Gemini 3.5 Flash",
