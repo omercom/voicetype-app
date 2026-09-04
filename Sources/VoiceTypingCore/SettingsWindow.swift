@@ -5,7 +5,7 @@ private class FlippedContentView: NSView {
     override var isFlipped: Bool { return true }
 }
 
-public class SettingsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
+public class SettingsWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSTextFieldDelegate, NSTextViewDelegate {
     public static let shared = SettingsWindowController()
 
     // Header & Tab Navigation
@@ -89,6 +89,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
     // Footer
     private var statusMessageLabel: NSTextField!
+
+    // Auto-Save & Debounce Timers
+    private var autoSaveDebounceTimer: Timer?
+    private var statusResetTimer: Timer?
 
     // Custom Key Capture State
     private var selectedTriggerKeyCode: Int = 54
@@ -249,26 +253,19 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         bottomSeparator.boxType = .separator
         mainContainer.addSubview(bottomSeparator)
 
-        statusMessageLabel = NSTextField(labelWithString: "")
-        statusMessageLabel.frame = NSRect(x: 24, y: 554, width: 380, height: 22)
+        statusMessageLabel = NSTextField(labelWithString: "Değişiklikler anında kaydedilir.")
+        statusMessageLabel.frame = NSRect(x: 24, y: 554, width: 480, height: 22)
         statusMessageLabel.font = NSFont.systemFont(ofSize: 11)
         statusMessageLabel.textColor = .secondaryLabelColor
         mainContainer.addSubview(statusMessageLabel)
 
-        let cancelBtn = NSButton(frame: NSRect(x: 420, y: 550, width: 95, height: 32))
-        cancelBtn.title = "Kapat"
-        cancelBtn.bezelStyle = .rounded
-        cancelBtn.target = self
-        cancelBtn.action = #selector(closeClicked)
-        mainContainer.addSubview(cancelBtn)
-
-        let saveBtn = NSButton(frame: NSRect(x: 525, y: 550, width: 100, height: 32))
-        saveBtn.title = "Kaydet"
-        saveBtn.bezelStyle = .rounded
-        saveBtn.keyEquivalent = "\r"
-        saveBtn.target = self
-        saveBtn.action = #selector(saveClicked)
-        mainContainer.addSubview(saveBtn)
+        let closeBtn = NSButton(frame: NSRect(x: 525, y: 550, width: 100, height: 32))
+        closeBtn.title = "Kapat"
+        closeBtn.bezelStyle = .rounded
+        closeBtn.keyEquivalent = "\u{1b}"
+        closeBtn.target = self
+        closeBtn.action = #selector(closeClicked)
+        mainContainer.addSubview(closeBtn)
 
         window.initialFirstResponder = mainContainer
     }
@@ -279,6 +276,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
     public func selectTab(index: Int) {
         guard index >= 0 && index < tabView.numberOfTabViewItems else { return }
+
+        // Sekme değişirken bekleyen metin alanı otomatik kayıtlarını anında diske yaz
+        if autoSaveDebounceTimer != nil {
+            autoSaveDebounceTimer?.invalidate()
+            autoSaveDebounceTimer = nil
+            autoSave(showMessage: false)
+        }
+
         tabView.selectTabViewItem(at: index)
         if index < toolbarTabIdentifiers.count {
             toolbar?.selectedItemIdentifier = toolbarTabIdentifiers[index]
@@ -372,6 +377,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             frame: NSRect(x: 175, y: 170, width: 440, height: 24),
             placeholder: "Kubernetes, PostgreSQL, Next.js, SPM..."
         )
+        customVocabField.delegate = self
         container.addSubview(customVocabField)
 
         let vocabNote = createNoteLabel(text: "Teknik terimleri virgülle ayırarak girin. Whisper ve Gemini modelleri bu kelimeleri öncelikli tanır.", y: 196)
@@ -390,6 +396,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             isMonospaced: false
         )
         languageField.alignment = .center
+        languageField.delegate = self
         container.addSubview(languageField)
 
         let langHint = NSTextField(labelWithString: "('tr': Türkçe, 'en': İngilizce, 'auto': Otomatik Algıla)")
@@ -405,31 +412,31 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let optsLabel = createSectionLabel(text: "Seçenekler", y: 280)
         container.addSubview(optsLabel)
 
-        hapticFeedbackCheckbox = NSButton(checkboxWithTitle: "Dokunsal titreşim (Trackpad Force Touch tıkı)", target: nil, action: nil)
+        hapticFeedbackCheckbox = NSButton(checkboxWithTitle: "Dokunsal titreşim (Trackpad Force Touch tıkı)", target: self, action: #selector(checkboxChanged(_:)))
         hapticFeedbackCheckbox.frame = NSRect(x: 175, y: 278, width: 440, height: 18)
         container.addSubview(hapticFeedbackCheckbox)
 
-        removeFillerWordsCheckbox = NSButton(checkboxWithTitle: "Dolgu kelimelerini otomatik temizle ('ııı', 'şey', 'yani', 'hımm')", target: nil, action: nil)
+        removeFillerWordsCheckbox = NSButton(checkboxWithTitle: "Dolgu kelimelerini otomatik temizle ('ııı', 'şey', 'yani', 'hımm')", target: self, action: #selector(checkboxChanged(_:)))
         removeFillerWordsCheckbox.frame = NSRect(x: 175, y: 302, width: 440, height: 18)
         container.addSubview(removeFillerWordsCheckbox)
 
-        saveHistoryCheckbox = NSButton(checkboxWithTitle: "Dikte geçmişini menü çubuğunda sakla (Son 15 dikte)", target: nil, action: nil)
+        saveHistoryCheckbox = NSButton(checkboxWithTitle: "Dikte geçmişini menü çubuğunda sakla (Son 15 dikte)", target: self, action: #selector(checkboxChanged(_:)))
         saveHistoryCheckbox.frame = NSRect(x: 175, y: 326, width: 440, height: 18)
         container.addSubview(saveHistoryCheckbox)
 
-        muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "Konuşurken arka plan medyasını/müziği duraklat", target: nil, action: nil)
+        muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "Konuşurken arka plan medyasını/müziği duraklat", target: self, action: #selector(checkboxChanged(_:)))
         muteSystemAudioCheckbox.frame = NSRect(x: 175, y: 350, width: 440, height: 18)
         container.addSubview(muteSystemAudioCheckbox)
 
-        playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal", target: nil, action: nil)
+        playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal", target: self, action: #selector(checkboxChanged(_:)))
         playSoundsCheckbox.frame = NSRect(x: 175, y: 374, width: 440, height: 18)
         container.addSubview(playSoundsCheckbox)
 
-        launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat", target: nil, action: nil)
+        launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat", target: self, action: #selector(checkboxChanged(_:)))
         launchAtLoginCheckbox.frame = NSRect(x: 175, y: 398, width: 440, height: 18)
         container.addSubview(launchAtLoginCheckbox)
 
-        showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini kalıcı olarak göster", target: nil, action: nil)
+        showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini kalıcı olarak göster", target: self, action: #selector(checkboxChanged(_:)))
         showDockIconCheckbox.frame = NSRect(x: 175, y: 422, width: 440, height: 18)
         container.addSubview(showDockIconCheckbox)
 
@@ -439,6 +446,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     @objc private func modeSegmentedChanged(_ sender: NSSegmentedControl) {
         modePopUp.selectItem(at: sender.selectedSegment)
         updateModeInfoText(for: sender.selectedSegment)
+        autoSave()
     }
 
     private func updateModeInfoText(for index: Int) {
@@ -494,6 +502,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             frame: NSRect(x: 175, y: 84, width: 440, height: 24),
             placeholder: "AIzaSy..."
         )
+        geminiKeyField.delegate = self
         container.addSubview(geminiKeyField)
 
         geminiModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 116, width: 440, height: 26), pullsDown: false)
@@ -538,6 +547,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             frame: NSRect(x: 175, y: 254, width: 440, height: 24),
             placeholder: "gsk_..."
         )
+        groqKeyField.delegate = self
         container.addSubview(groqKeyField)
 
         groqModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 286, width: 440, height: 26), pullsDown: false)
@@ -603,6 +613,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         geminiPromptTextView.textContainer?.widthTracksTextView = true
         geminiPromptTextView.font = NSFont.systemFont(ofSize: 11)
         geminiPromptTextView.isRichText = false
+        geminiPromptTextView.delegate = self
         geminiPromptScrollView.documentView = geminiPromptTextView
         container.addSubview(geminiPromptScrollView)
 
@@ -642,10 +653,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
     @objc private func geminiModelChanged(_ sender: NSPopUpButton) {
         updateSystemPromptVisibility()
+        autoSave()
     }
 
     @objc private func groqModelChanged(_ sender: NSPopUpButton) {
         updateSystemPromptVisibility()
+        autoSave()
     }
 
     @objc private func promptPresetChanged(_ sender: NSPopUpButton) {
@@ -653,6 +666,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         if idx >= 0 && idx < promptPresets.count - 1 {
             geminiPromptTextView.string = promptPresets[idx].prompt
         }
+        autoSave()
     }
 
     @objc private func providerSegmentedChanged(_ sender: NSSegmentedControl) {
@@ -661,6 +675,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let popUpIndex = (sender.selectedSegment == 0) ? 1 : 0
         providerPopUp.selectItem(at: popUpIndex)
         updateSystemPromptVisibility()
+        autoSave()
     }
 
     // =========================================================================
@@ -954,6 +969,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     public func windowWillClose(_ notification: Notification) {
+        autoSaveDebounceTimer?.invalidate()
+        autoSaveDebounceTimer = nil
+        statusResetTimer?.invalidate()
+        statusResetTimer = nil
+        autoSave(showMessage: false)
+
         stopPermissionPollTimer()
         if isCapturingKey {
             stopCapturingKey(cancelled: true)
@@ -1030,6 +1051,11 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     public func loadValues() {
+        autoSaveDebounceTimer?.invalidate()
+        autoSaveDebounceTimer = nil
+        statusResetTimer?.invalidate()
+        statusResetTimer = nil
+
         let cfg = ConfigManager.shared.config
 
         // Provider
@@ -1102,7 +1128,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         updateSystemPromptVisibility()
 
-        statusMessageLabel.stringValue = "Ayarlar başarıyla yüklendi."
+        statusMessageLabel.stringValue = "Değişiklikler anında kaydedilir."
         statusMessageLabel.textColor = .secondaryLabelColor
     }
 
@@ -1116,6 +1142,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         } else if tag > 0 {
             selectedTriggerKeyCode = tag
             updateTriggerKeyHint()
+            autoSave()
         }
     }
 
@@ -1178,6 +1205,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             selectedTriggerKeyCode = code
             SoundManager.shared.playSuccess()
             updateTriggerKeyUI()
+            autoSave()
         } else {
             updateTriggerKeyUI()
         }
@@ -1385,7 +1413,35 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         window?.close()
     }
 
-    @objc private func saveClicked() {
+    // =========================================================================
+    // OTOMATİK KAYIT & METİN DELEGELERİ (Modeless Auto-Save & Debounce)
+    // =========================================================================
+    @objc private func checkboxChanged(_ sender: NSButton) {
+        autoSave()
+    }
+
+    public func controlTextDidChange(_ obj: Notification) {
+        scheduleAutoSave()
+    }
+
+    public func controlTextDidEndEditing(_ obj: Notification) {
+        autoSaveDebounceTimer?.invalidate()
+        autoSaveDebounceTimer = nil
+        autoSave()
+    }
+
+    public func textDidChange(_ notification: Notification) {
+        scheduleAutoSave()
+    }
+
+    private func scheduleAutoSave() {
+        autoSaveDebounceTimer?.invalidate()
+        autoSaveDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+            self?.autoSave()
+        }
+    }
+
+    @objc public func autoSave(showMessage: Bool = true) {
         let selectedProvider = providerPopUp.indexOfSelectedItem == 1 ? "gemini" : "groq"
         let groqKey = groqKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let geminiKey = geminiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1451,17 +1507,28 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         KeyListener.shared.resetState()
 
         if success {
-            statusMessageLabel.stringValue = "✅ Ayarlar kaydedildi ve uygulandı!"
-            statusMessageLabel.textColor = .systemGreen
-            SoundManager.shared.playSuccess()
             onConfigUpdated?()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                self?.window?.close()
+            if showMessage {
+                statusMessageLabel.stringValue = "✓ Kaydedildi"
+                statusMessageLabel.textColor = .systemGreen
+                statusResetTimer?.invalidate()
+                statusResetTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+                    self?.statusMessageLabel.stringValue = "Değişiklikler anında kaydedilir."
+                    self?.statusMessageLabel.textColor = .secondaryLabelColor
+                }
             }
         } else {
-            statusMessageLabel.stringValue = "❌ Kayıt başarısız oldu! config.json yazılamadı."
-            statusMessageLabel.textColor = .systemRed
-            SoundManager.shared.playCancel()
+            if showMessage {
+                statusMessageLabel.stringValue = "❌ Kayıt başarısız oldu! config.json yazılamadı."
+                statusMessageLabel.textColor = .systemRed
+            }
+        }
+    }
+
+    @objc public func saveClicked() {
+        autoSave(showMessage: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.window?.close()
         }
     }
 }

@@ -366,6 +366,24 @@ final class VoiceTypingTests: XCTestCase {
         controller.selectTab(index: 0)
     }
 
+    func testSettingsWindowAutoSave() {
+        let controller = SettingsWindowController.shared
+        controller.loadValues()
+
+        var callbackFired = false
+        controller.onConfigUpdated = {
+            callbackFired = true
+        }
+
+        controller.autoSave(showMessage: true)
+        XCTAssertTrue(callbackFired, "autoSave çağrıldığında onConfigUpdated callback'i tetiklenmeli.")
+
+        // Geriye uyumluluk için saveClicked() metodunun sorunsuz çalışmasını test et
+        callbackFired = false
+        controller.saveClicked()
+        XCTAssertTrue(callbackFired, "saveClicked çağrıldığında autoSave üzerinden callback tetiklenmeli.")
+    }
+
     func testCapsLockAndModifierDetection() {
         // Caps Lock (57) modifier listesinde olmalı
         XCTAssertTrue(KeyListener.isModifier(keyCode: 57), "Caps Lock (57) modifier olarak algılanmalı.")
