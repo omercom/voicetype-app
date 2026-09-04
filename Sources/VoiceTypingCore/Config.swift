@@ -101,6 +101,11 @@ public struct AppConfig: Codable {
     public var min_record_duration: Double
     public var mute_system_audio: Bool
     public var show_dock_icon: Bool
+    public var haptic_feedback: Bool
+    public var remove_filler_words: Bool
+    public var custom_vocabulary: String
+    public var dictation_mode: String
+    public var save_history: Bool
 
     public static let defaultConfig = AppConfig(
         provider: "groq",
@@ -116,13 +121,19 @@ public struct AppConfig: Codable {
         paste_delay_ms: 20,
         min_record_duration: 0.20,
         mute_system_audio: true,
-        show_dock_icon: false
+        show_dock_icon: false,
+        haptic_feedback: true,
+        remove_filler_words: true,
+        custom_vocabulary: "",
+        dictation_mode: "direct",
+        save_history: true
     )
 
     enum CodingKeys: String, CodingKey {
         case provider, groq_api_key, gemini_api_key, groq_model, gemini_model
         case language, trigger_key, trigger_mode, play_sounds, restore_clipboard
         case paste_delay_ms, min_record_duration, mute_system_audio, show_dock_icon
+        case haptic_feedback, remove_filler_words, custom_vocabulary, dictation_mode, save_history
     }
 
     public init(
@@ -139,7 +150,12 @@ public struct AppConfig: Codable {
         paste_delay_ms: Int,
         min_record_duration: Double,
         mute_system_audio: Bool = true,
-        show_dock_icon: Bool = false
+        show_dock_icon: Bool = false,
+        haptic_feedback: Bool = true,
+        remove_filler_words: Bool = true,
+        custom_vocabulary: String = "",
+        dictation_mode: String = "direct",
+        save_history: Bool = true
     ) {
         self.provider = provider
         self.groq_api_key = groq_api_key
@@ -155,6 +171,11 @@ public struct AppConfig: Codable {
         self.min_record_duration = min_record_duration
         self.mute_system_audio = mute_system_audio
         self.show_dock_icon = show_dock_icon
+        self.haptic_feedback = haptic_feedback
+        self.remove_filler_words = remove_filler_words
+        self.custom_vocabulary = custom_vocabulary
+        self.dictation_mode = dictation_mode
+        self.save_history = save_history
     }
 
     public init(from decoder: Decoder) throws {
@@ -173,6 +194,11 @@ public struct AppConfig: Codable {
         min_record_duration = try container.decodeIfPresent(Double.self, forKey: .min_record_duration) ?? 0.20
         mute_system_audio = try container.decodeIfPresent(Bool.self, forKey: .mute_system_audio) ?? true
         show_dock_icon = try container.decodeIfPresent(Bool.self, forKey: .show_dock_icon) ?? false
+        haptic_feedback = try container.decodeIfPresent(Bool.self, forKey: .haptic_feedback) ?? true
+        remove_filler_words = try container.decodeIfPresent(Bool.self, forKey: .remove_filler_words) ?? true
+        custom_vocabulary = try container.decodeIfPresent(String.self, forKey: .custom_vocabulary) ?? ""
+        dictation_mode = try container.decodeIfPresent(String.self, forKey: .dictation_mode) ?? "direct"
+        save_history = try container.decodeIfPresent(Bool.self, forKey: .save_history) ?? true
     }
 }
 

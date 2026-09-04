@@ -42,6 +42,7 @@ public class RecordingHUD: NSObject {
     // Zamanlayıcılar & Animasyonlar
     private var meterTimer: Timer?
     private var dismissTimer: Timer?
+    private var smoothedAudioLevel: CGFloat = 0.0
 
     // Orantılı Minimal Kapsül Ölçüleri
     private let hudWidth: CGFloat = 152.0
@@ -395,26 +396,36 @@ public class RecordingHUD: NSObject {
     private func stopMeterTimer() {
         meterTimer?.invalidate()
         meterTimer = nil
+        smoothedAudioLevel = 0.0
     }
 
     private func updateWaveform() {
         guard currentState == .recording else { return }
 
         let power = AudioRecorder.shared.averagePower()
-        let normalized = max(0.0, min(1.0, CGFloat((power + 50.0) / 45.0)))
+        // -48 dB altı sessizlik, -6 dB ve üzeri yüksek ses
+        let rawNormalized = max(0.0, min(1.0, CGFloat((power + 48.0) / 42.0)))
+
+        // Üstel yumuşatma (EMA): Ses yükselirken hızlı reaksiyon, düşerken yumuşak iniş
+        if rawNormalized > smoothedAudioLevel {
+            smoothedAudioLevel = smoothedAudioLevel * 0.40 + rawNormalized * 0.60
+        } else {
+            smoothedAudioLevel = smoothedAudioLevel * 0.75 + rawNormalized * 0.25
+        }
+
+        let level = smoothedAudioLevel < 0.03 ? 0.0 : smoothedAudioLevel
 
         let barWidth: CGFloat = 2.0
         let spacing: CGFloat = 1.8
         let maxHeight: CGFloat = 13.0
-        let minHeight: CGFloat = 3.0
+        let minHeight: CGFloat = 2.5
 
-        let multipliers: [CGFloat] = [0.75, 1.35, 1.20, 0.80]
-        let baseFluctuations: [CGFloat] = [1.5, 3.0, 2.5, 1.5]
+        // Çubukların frekans dağılımı (Siri / Voice Memos tarzı orantı)
+        let multipliers: [CGFloat] = [0.65, 1.25, 1.10, 0.70]
 
         for (i, bar) in waveformBars.enumerated() {
             let mult = multipliers[i % multipliers.count]
-            let fluc = baseFluctuations[i % baseFluctuations.count]
-            var h = minHeight + (maxHeight - minHeight) * normalized * mult + (normalized < 0.1 ? fluc : 0.0)
+            var h = minHeight + (maxHeight - minHeight) * level * mult
             h = max(minHeight, min(maxHeight, h))
 
             let y = (14.0 - h) / 2.0
