@@ -99,8 +99,8 @@ public class RecordingHUD: NSObject {
         darkTintView.fillColor = NSColor.black.withAlphaComponent(0.38)
         contentView.addSubview(darkTintView)
 
-        // 3. Sol Gösterge Alanı: Kırmızı Nokta + Dalga Çubukları
-        let indicatorArea = NSView(frame: NSRect(x: 13, y: (hudHeight - 14) / 2.0, width: 28, height: 14))
+        // 3. Sol Gösterge Alanı: Kırmızı Nokta + 4'lü Dalga Çubukları
+        let indicatorArea = NSView(frame: NSRect(x: 12, y: (hudHeight - 14) / 2.0, width: 31, height: 14))
         indicatorArea.wantsLayer = true
         contentView.addSubview(indicatorArea)
 
@@ -111,20 +111,21 @@ public class RecordingHUD: NSObject {
         pulsingDot.layer?.backgroundColor = NSColor(red: 1.0, green: 0.23, blue: 0.20, alpha: 1.0).cgColor
         indicatorArea.addSubview(pulsingDot)
 
-        // 3b. Dinamik 3'lü Ses Dalga Çubukları (Micro Waveform Bars - Kırmızı nokta ile arası 8px ferah boşluk)
-        waveformContainer = NSView(frame: NSRect(x: 14, y: 0, width: 12, height: 14))
+        // 3b. Dinamik 4'lü Ses Dalga Çubukları (Micro Waveform Bars - Kırmızı nokta ile arası 10px ferah boşluk)
+        waveformContainer = NSView(frame: NSRect(x: 16, y: 0, width: 14, height: 14))
         waveformContainer.wantsLayer = true
         indicatorArea.addSubview(waveformContainer)
 
         let barWidth: CGFloat = 2.0
-        let spacing: CGFloat = 2.0
-        for i in 0..<3 {
+        let spacing: CGFloat = 1.8
+        let initialHeights: [CGFloat] = [3.5, 7.5, 10.5, 5.0]
+        for i in 0..<4 {
             let bar = NSView()
             bar.wantsLayer = true
             bar.layer?.cornerRadius = barWidth / 2.0
             // Çok hafif grimsi beyaz (Soft Grayish-White / Silver)
             bar.layer?.backgroundColor = NSColor(white: 0.88, alpha: 0.95).cgColor
-            let initialH: CGFloat = CGFloat(4 + (i % 2) * 5)
+            let initialH = initialHeights[i]
             bar.frame = NSRect(
                 x: CGFloat(i) * (barWidth + spacing),
                 y: (14.0 - initialH) / 2.0,
@@ -162,7 +163,7 @@ public class RecordingHUD: NSObject {
 
         // 6. Durum Metni (Status Label - SF Pro 12pt Medium, Kusursuz Dikey Ortalı)
         statusLabel = NSTextField(labelWithString: "Dinliyor...")
-        statusLabel.frame = NSRect(x: 48, y: (hudHeight - 16) / 2.0 - 0.5, width: 95, height: 16)
+        statusLabel.frame = NSRect(x: 46, y: (hudHeight - 16) / 2.0 - 0.5, width: 95, height: 16)
         statusLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         statusLabel.textColor = .white
         statusLabel.lineBreakMode = .byTruncatingTail
@@ -187,7 +188,7 @@ public class RecordingHUD: NSObject {
         let x = round(screenFrame.midX - (currentW / 2.0))
         let y = round(screenFrame.minY + 64.0)
         panel.setFrame(NSRect(x: x, y: y, width: currentW, height: hudHeight), display: true)
-        statusLabel.frame = NSRect(x: 48, y: (hudHeight - 16) / 2.0 - 0.5, width: max(50, currentW - 56), height: 16)
+        statusLabel.frame = NSRect(x: 46, y: (hudHeight - 16) / 2.0 - 0.5, width: max(50, currentW - 54), height: 16)
     }
 
     private func executeOnMainThread(_ block: @escaping () -> Void) {
@@ -403,12 +404,12 @@ public class RecordingHUD: NSObject {
         let normalized = max(0.0, min(1.0, CGFloat((power + 50.0) / 45.0)))
 
         let barWidth: CGFloat = 2.0
-        let spacing: CGFloat = 2.0
+        let spacing: CGFloat = 1.8
         let maxHeight: CGFloat = 13.0
-        let minHeight: CGFloat = 3.5
+        let minHeight: CGFloat = 3.0
 
-        let multipliers: [CGFloat] = [0.85, 1.35, 1.05]
-        let baseFluctuations: [CGFloat] = [1.5, 3.0, 1.5]
+        let multipliers: [CGFloat] = [0.75, 1.35, 1.20, 0.80]
+        let baseFluctuations: [CGFloat] = [1.5, 3.0, 2.5, 1.5]
 
         for (i, bar) in waveformBars.enumerated() {
             let mult = multipliers[i % multipliers.count]
