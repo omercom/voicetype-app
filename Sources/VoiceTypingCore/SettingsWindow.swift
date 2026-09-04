@@ -22,9 +22,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var modeInfoLabel: NSTextField!
     private var customVocabField: NSTextField!
     // Tab 2: Gemini Sistem İstemi & Prompt Şablonları
+    private var promptSectionLabel: NSTextField!
     private var geminiPromptPresetPopUp: NSPopUpButton!
     private var geminiPromptTextView: NSTextView!
     private var geminiPromptScrollView: NSScrollView!
+    private var promptNoteLabel: NSTextField!
+    private var promptUnsupportedLabel: NSTextField!
 
     private let promptPresets: [(name: String, prompt: String)] = [
         (
@@ -424,8 +427,20 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(playSoundsCheckbox)
 
         restoreClipboardCheckbox = NSButton(checkboxWithTitle: "Metin yapıştırıldıktan sonra panoyu geri yükle", target: nil, action: nil)
-        restoreClipboardCheckbox.frame = NSRect(x: 175, y: 398, width: 440, height: 18)
+        restoreClipboardCheckbox.frame = NSRect(x: 175, y: 398, width: 310, height: 18)
+        restoreClipboardCheckbox.toolTip = "Dikte edilen metin aktif pencereye yapıştırıldıktan sonra, panonuzda önceden kopyalanmış olan içeriği (kod, resim, dosya) eski haline getirir. Panonuzdaki veriler kaybolmaz."
         container.addSubview(restoreClipboardCheckbox)
+
+        let clipboardInfoBtn = NSButton(frame: NSRect(x: 488, y: 397, width: 22, height: 20))
+        clipboardInfoBtn.title = "ⓘ"
+        clipboardInfoBtn.bezelStyle = .inline
+        clipboardInfoBtn.isBordered = false
+        clipboardInfoBtn.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        clipboardInfoBtn.contentTintColor = .systemBlue
+        clipboardInfoBtn.target = self
+        clipboardInfoBtn.action = #selector(clipboardInfoClicked)
+        clipboardInfoBtn.toolTip = "Bilgi: Konuşmadan önce kopyaladığınız içeriği korur; dikte yapıştırılınca panonuzu eski haline getirir. Tıklayarak detaylı bilgi alabilirsiniz."
+        container.addSubview(clipboardInfoBtn)
 
         launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat", target: nil, action: nil)
         launchAtLoginCheckbox.frame = NSRect(x: 175, y: 422, width: 440, height: 18)
@@ -500,8 +515,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         geminiModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 116, width: 440, height: 26), pullsDown: false)
         for m in ConfigManager.availableGeminiModels {
-            geminiModelPopUp.addItem(withTitle: "\(m.name) [\(m.price)] - \(m.speed)")
+            geminiModelPopUp.addItem(withTitle: m.name)
         }
+        geminiModelPopUp.target = self
+        geminiModelPopUp.action = #selector(geminiModelChanged(_:))
         container.addSubview(geminiModelPopUp)
 
         let testGeminiBtn = NSButton(frame: NSRect(x: 175, y: 150, width: 145, height: 28))
@@ -542,8 +559,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         groqModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 286, width: 440, height: 26), pullsDown: false)
         for m in ConfigManager.availableGroqModels {
-            groqModelPopUp.addItem(withTitle: "\(m.name) [\(m.price)] - \(m.speed)")
+            groqModelPopUp.addItem(withTitle: m.name)
         }
+        groqModelPopUp.target = self
+        groqModelPopUp.action = #selector(groqModelChanged(_:))
         container.addSubview(groqModelPopUp)
 
         let testGroqBtn = NSButton(frame: NSRect(x: 175, y: 320, width: 145, height: 28))
@@ -573,8 +592,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(createSeparator(y: 410))
 
         // 4. Gemini Sistem İstemi (System Instruction / Cevap & Yazım Tarzı)
-        let promptSection = createSectionLabel(text: "Sistem İstemi", y: 422)
-        container.addSubview(promptSection)
+        promptSectionLabel = createSectionLabel(text: "Sistem İstemi", y: 422)
+        container.addSubview(promptSectionLabel)
 
         geminiPromptPresetPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 420, width: 440, height: 26), pullsDown: false)
         for preset in promptPresets {
@@ -604,10 +623,55 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         geminiPromptScrollView.documentView = geminiPromptTextView
         container.addSubview(geminiPromptScrollView)
 
-        let promptNote = createNoteLabel(text: "Gemini bu sistem talimatına (systemInstruction) göre çıktıyı biçimlendirir ve üslubu belirler.", y: 508)
-        container.addSubview(promptNote)
+        promptNoteLabel = createNoteLabel(text: "Gemini bu sistem talimatına (systemInstruction) göre çıktıyı biçimlendirir ve üslubu belirler.", y: 508)
+        container.addSubview(promptNoteLabel)
+
+        promptUnsupportedLabel = NSTextField(wrappingLabelWithString: "ℹ️ Seçili model saf ses deşifre (ASR) modelidir; konuşulanları doğrudan birebir metne döker. Sistem istemi, üslup ve anında çeviri özellikleri yalnızca Gemini Flash modellerinde (örn: Gemini 3.6 Flash) desteklenir.")
+        promptUnsupportedLabel.frame = NSRect(x: 175, y: 422, width: 440, height: 42)
+        promptUnsupportedLabel.font = NSFont.systemFont(ofSize: 11)
+        promptUnsupportedLabel.textColor = .secondaryLabelColor
+        promptUnsupportedLabel.isHidden = true
+        container.addSubview(promptUnsupportedLabel)
 
         return container
+    }
+
+    private func updateSystemPromptVisibility() {
+        let isGemini = (providerSegmentedControl.selectedSegment == 0)
+        let geminiIdx = max(0, geminiModelPopUp.indexOfSelectedItem)
+        let modelId = (geminiIdx < ConfigManager.availableGeminiModels.count)
+            ? ConfigManager.availableGeminiModels[geminiIdx].id
+            : "gemini-3.5-transcribe-live"
+
+        let isSupported = isGemini && ConfigManager.supportsSystemPrompt(model: modelId)
+
+        geminiPromptPresetPopUp.isHidden = !isSupported
+        geminiPromptScrollView.isHidden = !isSupported
+        promptNoteLabel.isHidden = !isSupported
+        promptUnsupportedLabel.isHidden = isSupported
+
+        if isSupported {
+            promptSectionLabel.textColor = .labelColor
+        } else {
+            promptSectionLabel.textColor = .secondaryLabelColor
+        }
+    }
+
+    @objc private func geminiModelChanged(_ sender: NSPopUpButton) {
+        updateSystemPromptVisibility()
+    }
+
+    @objc private func groqModelChanged(_ sender: NSPopUpButton) {
+        updateSystemPromptVisibility()
+    }
+
+    @objc private func clipboardInfoClicked() {
+        let alert = NSAlert()
+        alert.messageText = "Panoyu Geri Yükle Ayarı"
+        alert.informativeText = "Bu seçenek işaretli olduğunda:\nKonuşmadan önce panonuzda kopyalı olan metin, resim, kod veya dosya korunur. Dikte edilen metin aktif uygulamaya yapıştırıldıktan sonra, eski içeriğiniz otomatik olarak panoya geri yüklenir.\n\nİşaretsiz olduğunda:\nDikte metni panoda kalır ve dilediğiniz yere Cmd+V ile tekrar yapıştırabilirsiniz."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Anladım")
+        alert.runModal()
     }
 
     @objc private func promptPresetChanged(_ sender: NSPopUpButton) {
@@ -622,6 +686,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         // providerPopUp index 0 -> Groq, index 1 -> Gemini
         let popUpIndex = (sender.selectedSegment == 0) ? 1 : 0
         providerPopUp.selectItem(at: popUpIndex)
+        updateSystemPromptVisibility()
     }
 
     // =========================================================================
@@ -1074,6 +1139,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         muteSystemAudioCheckbox.state = cfg.mute_system_audio ? .on : .off
         launchAtLoginCheckbox.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
         showDockIconCheckbox.state = cfg.show_dock_icon ? .on : .off
+
+        updateSystemPromptVisibility()
 
         statusMessageLabel.stringValue = "Ayarlar başarıyla yüklendi."
         statusMessageLabel.textColor = .secondaryLabelColor

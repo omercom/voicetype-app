@@ -960,4 +960,13 @@ final class VoiceTypingTests: XCTestCase {
             XCTAssertFalse(decoded?.save_history ?? true)
         }
     }
+
+    func testSupportsSystemPromptHelper() {
+        XCTAssertFalse(ConfigManager.supportsSystemPrompt(model: "gemini-3.5-transcribe-live"))
+        XCTAssertFalse(ConfigManager.supportsSystemPrompt(model: "gemini-3.5-transcribe"))
+        XCTAssertFalse(ConfigManager.supportsSystemPrompt(model: "whisper-large-v3"))
+        XCTAssertTrue(ConfigManager.supportsSystemPrompt(model: "gemini-3.6-flash"))
+        XCTAssertTrue(ConfigManager.supportsSystemPrompt(model: "gemini-3.5-flash"))
+        XCTAssertTrue(ConfigManager.supportsSystemPrompt(model: "gemini-3.5-flash-lite"))
+    }
 }
