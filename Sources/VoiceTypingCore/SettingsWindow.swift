@@ -25,6 +25,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var restoreClipboardCheckbox: NSButton!
     private var muteSystemAudioCheckbox: NSButton!
     private var launchAtLoginCheckbox: NSButton!
+    private var showDockIconCheckbox: NSButton!
 
     // Tab 2: Yapay Zeka & Modeller
     private var providerSegmentedControl: NSSegmentedControl!
@@ -334,28 +335,33 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(createSeparator(y: 228))
 
         // 4. Tercihler (TG Pro tarzı sol başlık + sağ onay kutuları)
-        let optsLabel = createSectionLabel(text: "Seçenekler", y: 242)
+        let optsLabel = createSectionLabel(text: "Seçenekler", y: 238)
         container.addSubview(optsLabel)
 
         muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "Konuşurken arka plan medyasını/müziği sustur", target: nil, action: nil)
-        muteSystemAudioCheckbox.frame = NSRect(x: 190, y: 242, width: 435, height: 20)
+        muteSystemAudioCheckbox.frame = NSRect(x: 190, y: 236, width: 435, height: 18)
         container.addSubview(muteSystemAudioCheckbox)
-        container.addSubview(createSubCheckboxNote(text: "YouTube, müzik veya video seslerinin mikrofona karışmasını önler.", y: 264))
+        container.addSubview(createSubCheckboxNote(text: "YouTube, müzik veya video seslerinin mikrofona karışmasını önler.", y: 254))
 
         playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal", target: nil, action: nil)
-        playSoundsCheckbox.frame = NSRect(x: 190, y: 284, width: 435, height: 20)
+        playSoundsCheckbox.frame = NSRect(x: 190, y: 272, width: 435, height: 18)
         container.addSubview(playSoundsCheckbox)
-        container.addSubview(createSubCheckboxNote(text: "Kayıt başlangıç, bitiş ve deşifre bildirim tonları.", y: 306))
+        container.addSubview(createSubCheckboxNote(text: "Kayıt başlangıç, bitiş ve deşifre bildirim tonları.", y: 290))
 
         restoreClipboardCheckbox = NSButton(checkboxWithTitle: "Metin yapıştırıldıktan sonra panoyu geri yükle", target: nil, action: nil)
-        restoreClipboardCheckbox.frame = NSRect(x: 190, y: 326, width: 435, height: 20)
+        restoreClipboardCheckbox.frame = NSRect(x: 190, y: 308, width: 435, height: 18)
         container.addSubview(restoreClipboardCheckbox)
-        container.addSubview(createSubCheckboxNote(text: "Önceden kopyalanmış pano içeriğini kaybetmeden korur.", y: 348))
+        container.addSubview(createSubCheckboxNote(text: "Önceden kopyalanmış pano içeriğini kaybetmeden korur.", y: 326))
 
         launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat", target: nil, action: nil)
-        launchAtLoginCheckbox.frame = NSRect(x: 190, y: 368, width: 435, height: 20)
+        launchAtLoginCheckbox.frame = NSRect(x: 190, y: 344, width: 435, height: 18)
         container.addSubview(launchAtLoginCheckbox)
-        container.addSubview(createSubCheckboxNote(text: "Menü çubuğunda arka planda sessizce hazır bekler.", y: 390))
+        container.addSubview(createSubCheckboxNote(text: "Menü çubuğunda arka planda sessizce hazır bekler.", y: 362))
+
+        showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini göster (Alt görev çubuğu)", target: nil, action: nil)
+        showDockIconCheckbox.frame = NSRect(x: 190, y: 380, width: 435, height: 18)
+        container.addSubview(showDockIconCheckbox)
+        container.addSubview(createSubCheckboxNote(text: "Voice Typing'i ekranın altındaki Dock çubuğunda ve Cmd+Tab menüsünde gösterir.", y: 398))
 
         return container
     }
@@ -820,6 +826,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         restoreClipboardCheckbox.state = cfg.restore_clipboard ? .on : .off
         muteSystemAudioCheckbox.state = cfg.mute_system_audio ? .on : .off
         launchAtLoginCheckbox.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
+        showDockIconCheckbox.state = cfg.show_dock_icon ? .on : .off
 
         statusMessageLabel.stringValue = "Ayarlar başarıyla yüklendi."
         statusMessageLabel.textColor = .secondaryLabelColor
@@ -1119,6 +1126,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let restoreClip = restoreClipboardCheckbox.state == .on
         let muteAudio = muteSystemAudioCheckbox.state == .on
         let launchLogin = launchAtLoginCheckbox.state == .on
+        let showDock = showDockIconCheckbox.state == .on
         let triggerKey = selectedTriggerKeyCode
 
         LaunchAtLoginManager.shared.setEnabled(launchLogin)
@@ -1135,8 +1143,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.play_sounds = playSounds
             cfg.restore_clipboard = restoreClip
             cfg.mute_system_audio = muteAudio
+            cfg.show_dock_icon = showDock
         }
 
+        AppDelegate.updateDockVisibility(showDock)
         SoundManager.shared.isEnabled = playSounds
         KeyListener.shared.resetState()
 
