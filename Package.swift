@@ -15,7 +15,10 @@ let package = Package(
         .target(
             name: "VoiceTypingCore",
             dependencies: [],
-            path: "Sources/VoiceTypingCore"
+            path: "Sources/VoiceTypingCore",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .executableTarget(
             name: "VoiceTyping",

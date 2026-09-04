@@ -54,6 +54,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         // KeyListener bağla
         setupKeyListener()
 
+        // Başlangıç açılış sesi çal (Wispr Flow success.wav)
+        SoundManager.shared.playStartup()
+
         // Başlangıç izin kontrolü
         let mic = PermissionManager.shared.getMicrophoneStatus()
         let acc = PermissionManager.shared.getAccessibilityStatus()

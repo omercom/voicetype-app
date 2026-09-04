@@ -12,6 +12,16 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp ./VoiceTyping "$APP_BUNDLE/Contents/MacOS/VoiceTyping"
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 
+# Ses ve kaynak dosyalarını kopyala
+BUNDLE_DIR=$(find .build -name "VoiceTyping_VoiceTypingCore.bundle" | head -n 1)
+if [ -n "$BUNDLE_DIR" ] && [ -d "$BUNDLE_DIR" ]; then
+    cp -R "$BUNDLE_DIR" ./VoiceTyping_VoiceTypingCore.bundle
+    cp -R "$BUNDLE_DIR" "$APP_BUNDLE/Contents/Resources/"
+fi
+if [ -d "Sources/VoiceTypingCore/Resources" ]; then
+    cp -R Sources/VoiceTypingCore/Resources/Sounds/*.wav "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
+fi
+
 echo "✅ Build complete! Binary located at ./VoiceTyping ($(ls -lh ./VoiceTyping | awk '{print $5}'))"
 echo "✅ App bundle created at ./$APP_BUNDLE"
 
