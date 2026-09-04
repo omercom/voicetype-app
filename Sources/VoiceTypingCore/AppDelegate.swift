@@ -433,9 +433,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         setStatus(title: "⏳ Yazıyor...", menuText: "Durum: Deşifre Ediliyor...")
         RecordingHUD.shared.showTranscribing()
 
-        // Akustik ve Nöromüsküler Uzatma Penceresi (Post-Roll Grace Period: 280ms):
-        // Kullanıcı konuşmayı bitirdiği anda tuşu bıraksa dahi, son hecelerin / son 1-2 kelimenin
-        // ve CoreAudio donanım tamponundaki seslerin eksiksiz alınması için mikrofonu 280ms daha dinle.
+        // Akustik uzatma geçici olarak devre dışı (0ms - tuş bırakıldığı anda beklemeden anında deşifreye geç):
+        // Kullanıcı isteği doğrultusunda akustik bekleme iptal edildi. Geri ihtiyaç olursa süre eklenebilir.
         postRollWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, self.isFinishingRecord else { return }
@@ -472,12 +471,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Akustik ve Nöromüsküler Uzatma Penceresi (Optimize Edilmiş Grace Period):
-        // Canlı akışta (Gemini Live) ses anlık aktarıldığı için 100ms fazlasıyla yeterlidir (180ms hız kazancı).
-        // Groq / REST deşifrede ise son hecelerin tamponda kalmaması için 180ms uygulanır (100ms hız kazancı).
-        let postRollDelay: Double = (self.currentLiveSession != nil) ? 0.10 : 0.18
         self.postRollWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + postRollDelay, execute: workItem)
+        workItem.perform()
     }
 
     private func handleTranscriptionResult(result: TranscriptionResult, config: AppConfig) {
