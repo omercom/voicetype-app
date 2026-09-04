@@ -769,4 +769,59 @@ final class VoiceTypingTests: XCTestCase {
             in: "Sen harika bir insansın. Seni çok seviyorum. Çok güzel."
         ))
     }
+
+    func testRealGeminiLiveUserPhraseNoDuplication() {
+        var cfg = ConfigManager.shared.config
+        cfg.gemini_model = "gemini-3.5-transcribe-live"
+        guard !cfg.gemini_api_key.isEmpty else { return }
+
+        let sampleURL = URL(fileURLWithPath: "/tmp/user_phrase.wav")
+        guard let audioData = try? Data(contentsOf: sampleURL) else { return }
+
+        let pcmData: Data
+        if audioData.count > 44, String(data: audioData.prefix(4), encoding: .ascii) == "RIFF" {
+            pcmData = audioData.subdata(in: 44..<audioData.count)
+        } else {
+            pcmData = audioData
+        }
+
+        let expectation = XCTestExpectation(description: "User phrase live transcription completes with zero duplicates")
+
+        guard let session = Transcriber.shared.startLiveGeminiSession(
+            config: cfg,
+            onInterim: { text in },
+            completion: { result in
+                if !result.success, let err = result.error, err.contains("503") || err.contains("429") || err.contains("quota") || err.contains("exceeded") {
+                    expectation.fulfill()
+                    return
+                }
+                XCTAssertTrue(result.success)
+                print("Canlı Kullanıcı Cümlesi Sonucu: \"\(result.text)\"")
+                // Asla mükerrer cümle içermemeli
+                let lower = result.text.lowercased()
+                let countHarika = lower.components(separatedBy: "harika").count - 1
+                XCTAssertLessThanOrEqual(countHarika, 1, "Cümle asla 2 kez yinelenmemeli! Sonuç: \(result.text)")
+                expectation.fulfill()
+            }
+        ) else {
+            XCTFail("Canlı oturum başlatılamadı.")
+            return
+        }
+
+        // Parçaları 80ms aralıklarla gerçek konuşma hızında akıt
+        DispatchQueue.global().async {
+            let chunkSize = 3200
+            var offset = 0
+            while offset < pcmData.count {
+                let end = min(offset + chunkSize, pcmData.count)
+                let chunk = pcmData.subdata(in: offset..<end)
+                session.sendAudioChunk(chunk)
+                offset = end
+                usleep(80_000)
+            }
+            session.finishAudio()
+        }
+
+        wait(for: [expectation], timeout: 20.0)
+    }
 }

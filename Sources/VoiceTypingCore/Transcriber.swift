@@ -218,55 +218,52 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         }
 
         if let serverContent = json["serverContent"] as? [String: Any] {
-            // Anlık ara metin (Interim transcription)
+            // Anlık ara metin (Interim transcription - Yalnızca canlı HUD görsel önizlemesi içindir)
             if let interimObj = serverContent["interimInputTranscription"] as? [String: Any],
                let interimText = interimObj["text"] as? String {
-                let trimmed = interimText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmed = Self.cleanNoiseTags(interimText)
                 if !trimmed.isEmpty {
                     lock.lock()
+                    self.latestInterimText = trimmed
                     let currentAccum = self.accumulatedText
-                    let endSent = self.hasSentStreamEnd
+                    lock.unlock()
 
-                    // Eğer birikmiş kesinleşmiş metin zaten bu ara metni tamamen kapsıyorsa,
-                    // ara metni bayat/mükerrer olarak değerlendirip sıfırla
-                    if !currentAccum.isEmpty && Self.isCovered(subText: trimmed, in: currentAccum) {
-                        self.latestInterimText = ""
-                        lock.unlock()
-                        onInterim?(currentAccum)
+                    // Canlı HUD önizlemesini güncelle
+                    let preview: String
+                    if currentAccum.isEmpty {
+                        preview = trimmed
+                    } else if Self.isCovered(subText: trimmed, in: currentAccum) {
+                        preview = currentAccum
+                    } else if Self.isCovered(subText: currentAccum, in: trimmed) {
+                        preview = trimmed
                     } else {
-                        self.latestInterimText = trimmed
-                        lock.unlock()
-                        let preview = Self.reconcileTranscriptionText(accumulated: currentAccum, interim: trimmed)
-                        onInterim?(preview)
+                        preview = "\(currentAccum) \(trimmed)"
                     }
-
-                    if endSent {
-                        scheduleFinalization(delayMs: 450)
-                    }
+                    onInterim?(preview)
                 }
             }
 
             // Kesinleşmiş parça (Finalized turn input transcription)
             if let inputObj = serverContent["inputTranscription"] as? [String: Any],
                let text = inputObj["text"] as? String {
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmed = Self.cleanNoiseTags(text)
                 if !trimmed.isEmpty {
                     lock.lock()
                     self.accumulatedText = Self.reconcileTranscriptionText(accumulated: self.accumulatedText, interim: trimmed)
 
-                    // Kesinleşmiş metin güncellendiğinde, eğer latestInterimText artık birikmiş metnin
-                    // içindeyse veya kapsanıyorsa derhal temizle ki mükerrer eklenmesin
-                    if self.latestInterimText.isEmpty || Self.isCovered(subText: self.latestInterimText, in: self.accumulatedText) {
-                        self.latestInterimText = ""
-                    }
+                    // Kesinleşmiş metin güncellendiğinde ara önizleme metnini tamamen sıfırla
+                    self.latestInterimText = ""
 
                     let current = self.accumulatedText
                     let endSent = self.hasSentStreamEnd
                     lock.unlock()
                     onInterim?(current)
 
+                    // Eğer kullanıcı konuşmayı bitirdiyse (streamEnd yollandıysa),
+                    // generationComplete sinyali beklenir. Eğer generationComplete gecikirse
+                    // bu son inputTranscription'dan 750ms sonra otomatik tamamla:
                     if endSent {
-                        scheduleFinalization(delayMs: 350)
+                        scheduleFinalization(delayMs: 750)
                     }
                 }
             }
@@ -288,7 +285,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                     }
 
                     if endSent {
-                        scheduleFinalization(delayMs: 350)
+                        scheduleFinalization(delayMs: 500)
                     }
                 }
             }
@@ -299,13 +296,13 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
             if isTurnComplete {
                 lock.lock()
                 let endSent = self.hasSentStreamEnd
-                let timeSinceEnd = CFAbsoluteTimeGetCurrent() - self.streamEndSentTime
                 lock.unlock()
 
-                // Yalnızca stream end gönderildikten sonra ve sunucunun stream end'i işlemesine yetecek süre (>= 150ms) geçtikten sonra
-                // gelen turnComplete sinyali oturumun sonlandırılması için geçerlidir.
-                if endSent && timeSinceEnd >= 0.15 {
-                    scheduleFinalization(delayMs: 100)
+                // Kullanıcı konuşmayı bitirdikten sonra gelen generationComplete / turnComplete,
+                // Gemini'nin tüm ses akışını başarıyla işleyip bitirdiğini gösterir.
+                // Son paketlerin düşmesi için 50ms tanı ve derhal tamamla!
+                if endSent {
+                    scheduleFinalization(delayMs: 50)
                 }
             }
         }
@@ -395,15 +392,10 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
             }
         }
 
-        // Akıllı bekleme:
-        // Eğer halihazırda metin geldiyse, son kelimelerin akması için 650ms bekle.
-        // Eğer sunucu henüz ilk kelimeleri üretme aşamasındaysa (örn. dosya akışı veya konuşma sonu),
-        // ilk kelimelerin gelmesi için 2500ms tanı (metin geldiğinde sayaç 400ms'ye çekilecektir).
-        lock.lock()
-        let hasText = !accumulatedText.isEmpty || !latestInterimText.isEmpty || !modelTurnFallbackText.isEmpty
-        lock.unlock()
-        let delay = hasText ? 650 : 2500
-        scheduleFinalization(delayMs: delay)
+        // Kullanıcının belirttiği gibi: Gemini Live'ın yanıtı tamamlamasını (generationComplete / turnComplete)
+        // bekliyoruz. Normalde sunucu bu sinyali 150-300ms içinde gönderir ve 50ms içinde anında tamamlanır.
+        // Olası bir ağ veya sunucu gecikmesinde erken kesilip eksik/mükerrer olmaması için güvenlik süresini 3000ms yapıyoruz.
+        scheduleFinalization(delayMs: 3000)
     }
 
     private func startSafetyTimeout(seconds: Double) {
@@ -668,16 +660,15 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         let latency = CFAbsoluteTimeGetCurrent() - startTime
 
         var text = accumulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // YALNIZCA VE YALNIZCA inputTranscription hiç gelmediyse yedek olarak interim metne başvur:
         if text.isEmpty {
             text = latestInterimText.trimmingCharacters(in: .whitespacesAndNewlines)
-        } else if !latestInterimText.isEmpty && !Self.isCovered(subText: latestInterimText, in: text) {
-            text = Self.reconcileTranscriptionText(accumulated: text, interim: latestInterimText)
         }
-
         if text.isEmpty {
             text = modelTurnFallbackText.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
+        text = Self.cleanNoiseTags(text)
         text = Self.deduplicateRepeatedPhrases(text)
 
         let ws = webSocketTask
