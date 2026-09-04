@@ -1,67 +1,63 @@
-# Türkçe Konuşma Deşifre (STT) Benchmark: Groq Whisper vs. Google Gemini
+# VoiceType 🎙️ (macOS)
 
-Bu proje, Türkçe ses kayıtlarını metne dökmede (transcription / Speech-to-Text) **Groq Whisper** (`whisper-large-v3`, `whisper-large-v3-turbo`) ile **Google Gemini** (`gemini-2.5-flash` / multimodal ses) modellerinin doğruluk, hız ve Türkçe dil kurallarına uyumunu kıyaslamak için tasarlanmış bağımsız bir benchmark altyapısıdır.
+**Mac için tamamen ücretsiz, ışık hızında ve sorunsuz sesle yazma (dikte) uygulaması.**
 
----
-
-## 1. Test Kategorileri ve Zorluk Kriterleri
-
-Benchmark seti, Türkçede ses modellerinin en çok zorlandığı 5 kritik senaryoyu içerir:
-
-1. **Günlük Konuşma & Soru Ekleri (`01_gunluk_konusma.mp3`):**
-   - Soru eki ayrımı (`-mı / -mi`), kesme işaretli özel isimler (`Kadıköy'deki`), günlük iş jargonu.
-2. **Hızlı Konuşma & Fonetik Zorluk (`02_hizli_tekerleme.mp3`):**
-   - %30 artırılmış konuşma hızı, Türkçe sert sessizler (`ş`, `ç`, `s`), birbirini tekrar eden heceler ve tekerlemeler.
-3. **Teknik & İngilizce Melez Terimler (`03_teknik_hibrit_terimler.mp3`):**
-   - Türkçe cümle içinde geçen yabancı yazılışlı teknik terimler (`FastAPI`, `Docker`, `PostgreSQL`, `endpoint'ler`, `cache`).
-4. **Sayılar, Tarihler, Saat & Para Birimleri (`04_sayilar_ve_tarihler.mp3`):**
-   - Rakamların yazıyla mı sayıyla mı yazıldığı, oranlar (`yüzde 18`), saat (`14.30`), takvim tarihleri ve para tutarları.
-5. **Aglütinatif Morfoloji & Bağlaçlar (`05_morfoloji_ve_ekler.mp3`):**
-   - Uzun çekim/yapım ekleri (`netleştiremediklerimizden`), `de/da` bağlaç ayrımı ve soru kalıpları.
+Google Gemini Live ve Groq Whisper altyapısını kullanarak, sistem genelinde herhangi bir metin alanında (Word, Notlar, Slack, Chrome, VS Code, WhatsApp vb.) klavyeye dokunmadan yalnızca konuşarak yazmanızı sağlar.
 
 ---
 
-## 2. Değerlendirilen Metrikler
+## ✨ Öne Çıkan Özellikler
 
-- **WER (Word Error Rate - Kelime Hata Oranı):** Standartlaştırılmış Türkçe metin üzerinden kelime düzeyinde hata oranı. (Düşük olması daha iyidir)
-- **CER (Character Error Rate - Karakter Hata Oranı):** Türkçe gibi eklemeli (aglütinatif) dillerde morfolojik doğruluğu en iyi yansıtan karakter düzeyinde hata oranı.
-- **Türkçe Özel Karakter Başarımı:** `ç, ğ, ı, ö, ş, ü` harflerinin ASCII'ye bozulmadan korunma yüzdesi.
-- **Gecikme (Latency):** İstek başına geçen süre (saniye).
-- **Maliyet / Kota Verimliliği:** Groq'un günlük 8 saat ücretsiz Whisper kotası ile Gemini'ın ücretsiz RPM limitleri.
+* **⚡ Işık Hızında & Sıfır Gecikme:** Google Gemini Live (WebSocket canlı akış) ve Groq Whisper bulut LPU donanımı sayesinde kelimeler siz konuşurken anında işlenir.
+* **🇹🇷 Kusursuz Türkçe & Çoklu Dil:** Türkçe ekleri, imla ve noktalama kurallarını eksiksiz uygular. İster Türkçe (`tr`), ister İngilizce (`en`), isterseniz otomatik dil algılama (`auto`) kullanın.
+* **💸 %100 Ücretsiz (Kendi API Anahtarınla):** Abonelik veya ücretli planlar yok. Kendi ücretsiz Google Gemini veya Groq API anahtarınızı girin ve sınırsızca kullanın.
+* **🎯 Evrensel ve Sorunsuz Yapıştırma:** Tüm Mac uygulamalarında (Electron, Web ve Native) imlecin bulunduğu yere donanım düzeyinde anında yapıştırır.
+* **⌨️ Bas-Konuş (Push-to-Talk) Kolaylığı:** Varsayılan **Sağ Command (⌘)** tuşuna basılı tutarak konuşun, bıraktığınız anda metniniz yazılsın.
+* **🔇 Konuşurken Müziği Susturma:** Konuşmaya başladığınızda çalan müziği veya medyayı otomatik olarak duraklatır, dikte bitince kaldığı yerden devam ettirir.
+* **💎 Minimal Dinamik Ada Tasarımı:** Ekranda yer kaplamayan, zarif ve modern mikro durum göstergesi (Dynamic Island / Siri Pill estetiği).
+* **⚙️ Modern macOS Standartları:** Her yaptığınız ayar anında otomatik olarak kaydedilir; karmaşık menüler veya kaydet butonları yoktur.
 
 ---
 
-## 3. Kurulum ve Çalıştırma
+## 🚀 Hızlı Başlangıç (Kurulum)
 
-### A) API Anahtarlarını Ayarlama
-Proje dizininde bir `.env` dosyası oluşturun:
-```bash
-cp .env.example .env
-```
-`.env` dosyasını açıp anahtarlarınızı girin:
-```ini
-GROQ_API_KEY=gsk_...
-GEMINI_API_KEY=AIza...
-```
+### 1. Derleme ve Çalıştırma
 
-### B) Sentetik Test Seslerini Yeniden Üretmek (İsteğe Bağlı)
+Terminal'i açın ve şu komutları çalıştırın:
+
 ```bash
-python3 generate_samples.py
+# Projeyi derleyin
+./build.sh
+
+# Uygulamayı Uygulamalar klasörüne kurup başlatın
+./install.sh
 ```
 
-### C) Tam Benchmark Testini Başlatma
-```bash
-python3 run_benchmark.py
-```
+### 2. Ücretsiz API Anahtarınızı Girin
 
-İsterseniz anahtarları doğrudan komut satırından da verebilirsiniz:
-```bash
-python3 run_benchmark.py --groq-key gsk_xxx --gemini-key AIza_xxx
-```
+1. Menü çubuğundaki **VoiceType** simgesine tıklayın ve **Ayarlar...** seçeneğini açın.
+2. Ücretsiz aldığınız **Google Gemini** veya **Groq** API anahtarınızı yapıştırın.
+3. Ayarlar anında otomatik kaydedilir.
 
-### D) Kendi Özel Ses Dosyanızı Test Etme
-Elinizdeki herhangi bir ses dosyasını (`.mp3`, `.wav`) test etmek için:
-```bash
-python3 run_benchmark.py --audio sesim.mp3 --ground-truth "Burada konuşulan metin"
-```
-*(Ground truth verilmezse modellerin deşifreleri yan yana yazdırılır ve süreleri kıyaslanır).*
+*(Mikrofon ve Erişilebilirlik izinlerini Sistem Ayarları'ndan bir defaya mahsus onaylayın).*
+
+---
+
+## 💡 Nasıl Kullanılır?
+
+1. İmlecinizi yazmak istediğiniz yere konumlandırın (örneğin bir mesaj kutusu, arama çubuğu veya belge).
+2. Klavyenizdeki **Sağ Command (⌘)** tuşuna basılı tutun ve konuşun.
+3. Konuşmanız bittiğinde tuşu bırakın; metniniz imlecin olduğu yere anında yapıştırılır.
+
+---
+
+## 🛠️ Sistem Gereksinimleri
+
+* macOS 13.0+ (Ventura, Sonoma, Sequoia)
+* Apple Silicon (M1/M2/M3/M4) veya Intel Mac
+
+---
+
+## 📄 Lisans
+
+MIT License. Tamamen açık kaynak ve ücretsizdir.
