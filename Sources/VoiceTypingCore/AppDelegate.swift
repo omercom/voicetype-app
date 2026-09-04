@@ -13,6 +13,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var soundEffectsMenuItem: NSMenuItem!
     private var restoreClipboardMenuItem: NSMenuItem!
     private var muteAudioMenuItem: NSMenuItem!
+    private var launchAtLoginMenuItem: NSMenuItem!
     private var triggerKeyMenuItems: [NSMenuItem] = []
 
     private var isTranscribing: Bool = false
@@ -165,6 +166,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         muteAudioMenuItem.target = self
         menu.addItem(muteAudioMenuItem)
 
+        // 7c. Başlangıçta Otomatik Çalıştır (Launch at Login)
+        launchAtLoginMenuItem = NSMenuItem(title: "🚀 Başlangıçta Otomatik Çalıştır", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchAtLoginMenuItem.target = self
+        menu.addItem(launchAtLoginMenuItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // 8. Test Kaydı
@@ -199,6 +205,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         soundEffectsMenuItem.state = cfg.play_sounds ? .on : .off
         restoreClipboardMenuItem.state = cfg.restore_clipboard ? .on : .off
         muteAudioMenuItem.state = cfg.mute_system_audio ? .on : .off
+        launchAtLoginMenuItem.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
 
         SoundManager.shared.isEnabled = cfg.play_sounds
 
@@ -506,6 +513,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleMuteSystemAudio() {
         let current = ConfigManager.shared.config.mute_system_audio
         ConfigManager.shared.update { $0.mute_system_audio = !current }
+        refreshMenuStates()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        let currentlyEnabled = LaunchAtLoginManager.shared.isEnabled
+        LaunchAtLoginManager.shared.setEnabled(!currentlyEnabled)
         refreshMenuStates()
     }
 
