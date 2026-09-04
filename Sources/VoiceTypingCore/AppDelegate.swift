@@ -359,7 +359,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             print("[AppDelegate] Sağlayıcı: Google Gemini Live (gemini-3.5-transcribe-live) canlı akış oturumu başlatılıyor...")
             let session = Transcriber.shared.startLiveGeminiSession(
                 config: config,
-                onInterim: nil,
+                onInterim: { interimText in
+                    RecordingHUD.shared.updateInterimText(interimText)
+                },
                 completion: { [weak self] result in
                     self?.handleTranscriptionResult(result: result, config: config)
                 }

@@ -25,6 +25,9 @@ public class RecordingHUD: NSObject {
     public var isVisible: Bool {
         return panel.isVisible && panel.alphaValue > 0.05
     }
+    public var currentStatusText: String {
+        return statusLabel?.stringValue ?? ""
+    }
 
     private var panel: FloatingHUDPanel!
     private var visualEffectView: NSVisualEffectView!
@@ -219,7 +222,9 @@ public class RecordingHUD: NSObject {
             self.errorIconLabel.isHidden = true
 
             self.statusLabel.stringValue = "Dinliyor..."
+            self.statusLabel.lineBreakMode = .byTruncatingTail
             self.statusLabel.textColor = .white
+            self.updatePosition(width: self.hudWidth)
 
             self.startPulseAnimation()
             self.startMeterTimer()
@@ -233,10 +238,30 @@ public class RecordingHUD: NSObject {
         }
     }
 
-    /// Kullanıcı isteği doğrultusunda gösterge kapsülü sade ve minimal tutulur;
-    /// deşifre/çeviri metni indikatörün içerisine yazılmaz, kapsül genişliği ve "Dinliyor..." durumu sabit kalır.
+    /// Canlı ses akışı sırasında (örn: Gemini Live) tanınan kelimeleri
+    /// kullanıcı daha konuşurken anlık olarak gösterge kapsülünde gösterir.
     public func updateInterimText(_ text: String) {
-        // İndikatör içerisine çevrilen/deşifre edilen metin yazılmaz, kapsül boyutu ve sade görünüm korunur.
+        executeOnMainThread { [weak self] in
+            guard let self = self else { return }
+            guard self.currentState == .recording || self.currentState == .transcribing else { return }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+
+            self.statusLabel.stringValue = trimmed
+            self.statusLabel.textColor = .white
+            self.statusLabel.lineBreakMode = .byTruncatingHead
+
+            let font = self.statusLabel.font ?? NSFont.systemFont(ofSize: 12, weight: .medium)
+            let textWidth = (trimmed as NSString).size(withAttributes: [.font: font]).width
+            // Sol ikon alanı: ~46px, sağ kenar boşluğu: ~18px => toplam +64px
+            let targetWidth = min(max(self.hudWidth, textWidth + 64.0), 520.0)
+
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.08
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                self.updatePosition(width: targetWidth)
+            }
+        }
     }
 
     // MARK: - Durum 2: Deşifre Ediliyor (Transcribing)
@@ -257,9 +282,15 @@ public class RecordingHUD: NSObject {
             self.spinner.isHidden = false
             self.spinner.startAnimation(nil)
 
-            self.statusLabel.stringValue = "Yazılıyor..."
-            self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
-            self.updatePosition(width: self.hudWidth)
+            if self.statusLabel.stringValue == "Dinliyor..." || self.statusLabel.stringValue.isEmpty {
+                self.statusLabel.stringValue = "Yazılıyor..."
+                self.statusLabel.lineBreakMode = .byTruncatingTail
+                self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
+                self.updatePosition(width: self.hudWidth)
+            } else {
+                // Eğer canlı ara metin ekrandaysa, o metni koru
+                self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
+            }
 
             if !self.panel.isVisible || self.panel.alphaValue < 0.1 {
                 self.updatePosition(width: self.hudWidth)
@@ -282,6 +313,7 @@ public class RecordingHUD: NSObject {
             self.stopPulseAnimation()
             self.currentState = .success
 
+            self.statusLabel.lineBreakMode = .byTruncatingTail
             self.updatePosition(width: self.hudWidth)
 
             self.pulsingDot.isHidden = true
@@ -312,6 +344,7 @@ public class RecordingHUD: NSObject {
             self.stopPulseAnimation()
             self.currentState = .error(message)
 
+            self.statusLabel.lineBreakMode = .byTruncatingTail
             self.updatePosition(width: self.hudWidth)
 
             self.pulsingDot.isHidden = true
