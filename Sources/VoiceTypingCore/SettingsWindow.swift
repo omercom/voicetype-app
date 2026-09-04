@@ -370,10 +370,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(launchAtLoginCheckbox)
         container.addSubview(createSubCheckboxNote(text: "Menü çubuğunda arka planda sessizce hazır bekler.", y: 362))
 
-        showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini göster (Alt görev çubuğu)", target: nil, action: nil)
+        showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini kalıcı olarak göster", target: nil, action: nil)
         showDockIconCheckbox.frame = NSRect(x: 175, y: 380, width: 440, height: 18)
         container.addSubview(showDockIconCheckbox)
-        container.addSubview(createSubCheckboxNote(text: "Voice Typing'i ekranın altındaki Dock çubuğunda ve Cmd+Tab menüsünde gösterir.", y: 398))
+        container.addSubview(createSubCheckboxNote(text: "Kapalıyken Dinamik Mod etkindir: Yalnızca Ayarlar açıkken Dock'ta görünür, kapanınca gizlenir.", y: 398))
 
         return container
     }
@@ -535,59 +535,59 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(micStatusLabel)
 
         micActionButton = NSButton(frame: NSRect(x: 465, y: 19, width: 150, height: 28))
-        micActionButton.title = "Sistem Ayarlarını Aç"
+        micActionButton.title = "Sistem Ayarları"
         micActionButton.bezelStyle = .rounded
         micActionButton.target = self
         micActionButton.action = #selector(openMicSettingsClicked)
         container.addSubview(micActionButton)
 
-        let micNote = createNoteLabel(text: "Konuşmanızı yakalamak ve AI modeline aktarmak için mikrofon erişimi zorunludur.", y: 49)
+        let micNote = createNoteLabel(text: "Ses kaydı ve yapay zeka ile deşifre için gereklidir.", y: 48)
         container.addSubview(micNote)
 
         // Ayırıcı
-        container.addSubview(createSeparator(y: 85))
+        container.addSubview(createSeparator(y: 78))
 
         // 2. ERİŞİLEBİLİRLİK İZNİ
-        let accSectionLabel = createSectionLabel(text: "Erişilebilirlik", y: 102)
+        let accSectionLabel = createSectionLabel(text: "Erişilebilirlik", y: 94)
         container.addSubview(accSectionLabel)
 
         accStatusLabel = NSTextField(labelWithString: "🟢 Yetki Verildi (Aktif)")
-        accStatusLabel.frame = NSRect(x: 175, y: 102, width: 275, height: 22)
+        accStatusLabel.frame = NSRect(x: 175, y: 94, width: 275, height: 22)
         accStatusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         accStatusLabel.textColor = .systemGreen
         container.addSubview(accStatusLabel)
 
-        accActionButton = NSButton(frame: NSRect(x: 465, y: 99, width: 150, height: 28))
-        accActionButton.title = "Sistem Ayarlarını Aç"
+        accActionButton = NSButton(frame: NSRect(x: 465, y: 91, width: 150, height: 28))
+        accActionButton.title = "Sistem Ayarları"
         accActionButton.bezelStyle = .rounded
         accActionButton.target = self
         accActionButton.action = #selector(openAccSettingsClicked)
         container.addSubview(accActionButton)
 
-        let accNote = createNoteLabel(text: "Klavye kısayolunu dinlemek ve deşifre edilen metni imlecin olduğu yere yazmak için zorunludur.", y: 129)
+        let accNote = createNoteLabel(text: "Kısayol tuşunu dinlemek ve metni imlece yazmak için gereklidir.", y: 120)
         container.addSubview(accNote)
 
-        // Canlı Algılama Göstergesi
-        accProgressIndicator = NSProgressIndicator(frame: NSRect(x: 175, y: 161, width: 14, height: 14))
+        // Canlı Algılama Göstergesi (Yalnızca izin beklenirken görünür)
+        accProgressIndicator = NSProgressIndicator(frame: NSRect(x: 175, y: 147, width: 14, height: 14))
         accProgressIndicator.style = .spinning
         accProgressIndicator.controlSize = .small
         accProgressIndicator.isDisplayedWhenStopped = false
         container.addSubview(accProgressIndicator)
 
-        accGuideLabel = NSTextField(labelWithString: "İzinler Sistem Ayarları'ndan otomatik olarak anlık algılanmaktadır.")
-        accGuideLabel.frame = NSRect(x: 195, y: 159, width: 420, height: 18)
+        accGuideLabel = NSTextField(labelWithString: "")
+        accGuideLabel.frame = NSRect(x: 195, y: 145, width: 420, height: 18)
         accGuideLabel.font = NSFont.systemFont(ofSize: 10.5)
         accGuideLabel.textColor = .secondaryLabelColor
         container.addSubview(accGuideLabel)
 
         // Ayırıcı
-        container.addSubview(createSeparator(y: 187))
+        container.addSubview(createSeparator(y: 168))
 
         // 3. MİKROFON DONANIM VE DEŞİFRE TESTİ
-        let testSectionLabel = createSectionLabel(text: "Donanım Testi", y: 204)
+        let testSectionLabel = createSectionLabel(text: "Donanım Testi", y: 184)
         container.addSubview(testSectionLabel)
 
-        testRecordButton = NSButton(frame: NSRect(x: 175, y: 201, width: 170, height: 28))
+        testRecordButton = NSButton(frame: NSRect(x: 175, y: 181, width: 170, height: 28))
         testRecordButton.title = "2 Sn Test Kaydı Yap"
         testRecordButton.bezelStyle = .rounded
         testRecordButton.target = self
@@ -595,18 +595,18 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(testRecordButton)
 
         testStatusLabel = NSTextField(labelWithString: "Durum: Hazır (Butona basıp konuşun)")
-        testStatusLabel.frame = NSRect(x: 355, y: 205, width: 260, height: 20)
+        testStatusLabel.frame = NSRect(x: 355, y: 185, width: 260, height: 20)
         testStatusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
         testStatusLabel.textColor = .secondaryLabelColor
         container.addSubview(testStatusLabel)
 
-        let testNote = NSTextField(wrappingLabelWithString: "Mikrofonun ses aldığını ve seçili AI modelinin metin ürettiğini buradan canlı test edin:")
-        testNote.frame = NSRect(x: 175, y: 233, width: 440, height: 18)
+        let testNote = NSTextField(labelWithString: "Mikrofon ve seçili yapay zeka modelini 2 saniyelik sesle test edin.")
+        testNote.frame = NSRect(x: 175, y: 213, width: 440, height: 18)
         testNote.font = NSFont.systemFont(ofSize: 11)
         testNote.textColor = .secondaryLabelColor
         container.addSubview(testNote)
 
-        let resultContainer = NSBox(frame: NSRect(x: 175, y: 257, width: 440, height: 115))
+        let resultContainer = NSBox(frame: NSRect(x: 175, y: 237, width: 440, height: 125))
         resultContainer.boxType = .custom
         resultContainer.isTransparent = false
         resultContainer.borderWidth = 1
@@ -616,8 +616,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         resultContainer.titlePosition = .noTitle
 
         let resultFlipped = FlippedContentView(frame: resultContainer.bounds)
-        testAudioResultLabel = NSTextField(wrappingLabelWithString: "Test butonuna bastığınızda 2 saniyelik ses kaydedilir ve aktif yapay zeka modeliyle deşifre edilir. Çıktı burada listelenir.")
-        testAudioResultLabel.frame = NSRect(x: 12, y: 10, width: 416, height: 95)
+        testAudioResultLabel = NSTextField(wrappingLabelWithString: "Test butonuna bastıktan sonra konuşun; ses seviyesi ve model deşifresi burada görüntülenir.")
+        testAudioResultLabel.frame = NSRect(x: 12, y: 10, width: 416, height: 105)
         testAudioResultLabel.font = NSFont.systemFont(ofSize: 11.5)
         testAudioResultLabel.textColor = .secondaryLabelColor
         testAudioResultLabel.maximumNumberOfLines = 5
@@ -626,8 +626,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         resultContainer.contentView = resultFlipped
         container.addSubview(resultContainer)
 
-        let tipLabel = NSTextField(labelWithString: "💡 Sistem Ayarları'nda izin anahtarlarını değiştirdiğinizde durum anında güncellenir.")
-        tipLabel.frame = NSRect(x: 175, y: 382, width: 440, height: 20)
+        let tipLabel = NSTextField(labelWithString: "💡 İzin verildiğinde macOS Sistem Ayarları penceresi otomatik kapatılır.")
+        tipLabel.frame = NSRect(x: 175, y: 372, width: 440, height: 20)
         tipLabel.font = NSFont.systemFont(ofSize: 10.5)
         tipLabel.textColor = .tertiaryLabelColor
         container.addSubview(tipLabel)
@@ -724,14 +724,6 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         tipCard.contentView = tipContent
         container.addSubview(tipCard)
 
-        // 5. Ortalanmış Alt Bilgi
-        let footerLabel = NSTextField(labelWithString: "Antigravity AI • macOS için Optimize Edildi")
-        footerLabel.frame = NSRect(x: 45, y: 396, width: 560, height: 18)
-        footerLabel.font = NSFont.systemFont(ofSize: 10.5)
-        footerLabel.textColor = .tertiaryLabelColor
-        footerLabel.alignment = .center
-        container.addSubview(footerLabel)
-
         return container
     }
 
@@ -775,6 +767,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     public override func showWindow(_ sender: Any?) {
         refreshPermissionStatuses()
         loadValues()
+
+        // Dinamik Dock İkonu: Pencere açıldığında Dock'ta görün
+        if !ConfigManager.shared.config.show_dock_icon {
+            NSApp.setActivationPolicy(.regular)
+        }
+
         super.showWindow(sender)
 
         // Apple TG Pro standardı: Ekranın tam ortasında (visibleFrame merkezinde) konumlandır
@@ -802,6 +800,13 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
         if AudioRecorder.shared.isRecording {
             _ = AudioRecorder.shared.stop()
+        }
+
+        // Dinamik Dock İkonu: Pencere kapandığında Dock ikonunu otomatik kaldır (sessiz arka plan modu)
+        if !ConfigManager.shared.config.show_dock_icon && !(AccessibilityPromptController.shared.window?.isVisible ?? false) {
+            DispatchQueue.main.async {
+                NSApp.setActivationPolicy(.accessory)
+            }
         }
     }
 

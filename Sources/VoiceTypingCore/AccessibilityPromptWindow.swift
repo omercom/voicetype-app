@@ -100,6 +100,11 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
             return
         }
 
+        // Dinamik Dock: Kurulum penceresi açıldığında Dock'ta görün
+        if !ConfigManager.shared.config.show_dock_icon {
+            NSApp.setActivationPolicy(.regular)
+        }
+
         guard let window = window else { return }
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -137,6 +142,12 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
 
     public func windowWillClose(_ notification: Notification) {
         stopPolling()
+        // Dinamik Dock: Başka pencere yoksa Dock ikonunu kaldır
+        if !ConfigManager.shared.config.show_dock_icon && !(SettingsWindowController.shared.window?.isVisible ?? false) {
+            DispatchQueue.main.async {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
     }
 
     private func startPolling() {

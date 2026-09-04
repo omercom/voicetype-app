@@ -116,7 +116,7 @@ public struct AppConfig: Codable {
         paste_delay_ms: 20,
         min_record_duration: 0.20,
         mute_system_audio: true,
-        show_dock_icon: true
+        show_dock_icon: false
     )
 
     enum CodingKeys: String, CodingKey {
@@ -139,7 +139,7 @@ public struct AppConfig: Codable {
         paste_delay_ms: Int,
         min_record_duration: Double,
         mute_system_audio: Bool = true,
-        show_dock_icon: Bool = true
+        show_dock_icon: Bool = false
     ) {
         self.provider = provider
         self.groq_api_key = groq_api_key
@@ -172,7 +172,7 @@ public struct AppConfig: Codable {
         paste_delay_ms = try container.decodeIfPresent(Int.self, forKey: .paste_delay_ms) ?? 20
         min_record_duration = try container.decodeIfPresent(Double.self, forKey: .min_record_duration) ?? 0.20
         mute_system_audio = try container.decodeIfPresent(Bool.self, forKey: .mute_system_audio) ?? true
-        show_dock_icon = try container.decodeIfPresent(Bool.self, forKey: .show_dock_icon) ?? true
+        show_dock_icon = try container.decodeIfPresent(Bool.self, forKey: .show_dock_icon) ?? false
     }
 }
 

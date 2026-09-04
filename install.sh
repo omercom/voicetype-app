@@ -35,9 +35,14 @@ if [ "$APP_NAME" != "VoiceTyping" ]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleName $APP_NAME" "$TARGET_APP/Contents/Info.plist" 2>/dev/null || true
 fi
 
-# 4. Ad-hoc codesigning yap (macOS TCC izinlerinin ve mikrofon onayının kalıcı olması için)
-echo "🔏 4/5. Ad-hoc güvenlik imzası uygulanıyor (codesign)..."
-codesign --force --deep --sign - "$TARGET_APP"
+# 4. Güvenlik imzası uygula (macOS TCC izinlerinin yeniden derlemede kaybolmaması için sabit kimlik kullanılır)
+echo "🔏 4/5. Güvenlik imzası uygulanıyor (codesign)..."
+SIGN_IDENTITY="VoiceTyping Local Certificate"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+    codesign --force --deep -s "$SIGN_IDENTITY" "$TARGET_APP" 2>/dev/null || codesign --force --deep --sign - "$TARGET_APP"
+else
+    codesign --force --deep --sign - "$TARGET_APP"
+fi
 
 # 4.5. Kullanıcı yapılandırmasını ve API anahtarlarını otomatik aktar / koru
 echo "🔑 4.5/5. API anahtarları ve kullanıcı yapılandırması kontrol ediliyor..."
