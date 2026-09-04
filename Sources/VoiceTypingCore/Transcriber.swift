@@ -950,6 +950,14 @@ public class Transcriber {
             body.append("\(lang)\r\n".data(using: .utf8)!)
         }
 
+        // Custom Vocabulary Prompt (Whisper vocabulary hint)
+        let vocab = config.custom_vocabulary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !vocab.isEmpty {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(vocab)\r\n".data(using: .utf8)!)
+        }
+
         // Response format
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n".data(using: .utf8)!)

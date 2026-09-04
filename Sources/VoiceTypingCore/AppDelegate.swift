@@ -16,6 +16,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchAtLoginMenuItem: NSMenuItem!
     private var triggerKeyMenuItems: [NSMenuItem] = []
 
+    // Dikte Modları & Geçmiş
+    private var directModeMenuItem: NSMenuItem!
+    private var formalModeMenuItem: NSMenuItem!
+    private var bulletModeMenuItem: NSMenuItem!
+    private var historyParentMenuItem: NSMenuItem!
+    private var historyMenu: NSMenu!
+    private var hapticMenuItem: NSMenuItem!
+    private var fillerWordsMenuItem: NSMenuItem!
+    private var saveHistoryMenuItem: NSMenuItem!
+
     private var isTranscribing: Bool = false
     private var isFinishingRecord: Bool = false
     private var postRollWorkItem: DispatchWorkItem?
@@ -58,6 +68,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         // Ayarlar güncellendiğinde menüyü yenile
         SettingsWindowController.shared.onConfigUpdated = { [weak self] in
             self?.refreshMenuStates()
+        }
+
+        // Dikte geçmişi güncellendiğinde menüyü yenile
+        DictationHistoryManager.shared.onHistoryUpdated = { [weak self] in
+            self?.refreshHistoryMenu()
         }
 
         // İzinleri başlat ve hazır olduğunda ses ve tuş dinleyicisini aktive et
@@ -183,6 +198,31 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         providerParent.submenu = providerMenu
         menu.addItem(providerParent)
 
+        // 5b. Dikte Modu Submenu (Yazım Stili)
+        let dictationMenu = NSMenu()
+        directModeMenuItem = NSMenuItem(title: "Birebir (Doğal Konuşma)", action: #selector(selectDirectMode), keyEquivalent: "")
+        directModeMenuItem.target = self
+        dictationMenu.addItem(directModeMenuItem)
+
+        formalModeMenuItem = NSMenuItem(title: "Profesyonel / E-posta", action: #selector(selectFormalMode), keyEquivalent: "")
+        formalModeMenuItem.target = self
+        dictationMenu.addItem(formalModeMenuItem)
+
+        bulletModeMenuItem = NSMenuItem(title: "Madde İmleri (Notlar)", action: #selector(selectBulletMode), keyEquivalent: "")
+        bulletModeMenuItem.target = self
+        dictationMenu.addItem(bulletModeMenuItem)
+
+        let dictationParent = NSMenuItem(title: "Dikte Modu", action: nil, keyEquivalent: "")
+        dictationParent.submenu = dictationMenu
+        menu.addItem(dictationParent)
+
+        // 5c. Son Dikteler (History) Submenu
+        historyMenu = NSMenu()
+        historyParentMenuItem = NSMenuItem(title: "Son Dikteler", action: nil, keyEquivalent: "")
+        historyParentMenuItem.submenu = historyMenu
+        menu.addItem(historyParentMenuItem)
+        refreshHistoryMenu()
+
         menu.addItem(NSMenuItem.separator())
 
         // 6. Tercihler (Checkmark Seçenekleri)
@@ -190,9 +230,21 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         soundEffectsMenuItem.target = self
         menu.addItem(soundEffectsMenuItem)
 
+        hapticMenuItem = NSMenuItem(title: "Dokunsal Titreşim (Trackpad)", action: #selector(toggleHapticFeedback), keyEquivalent: "")
+        hapticMenuItem.target = self
+        menu.addItem(hapticMenuItem)
+
+        fillerWordsMenuItem = NSMenuItem(title: "Dolgu Kelimelerini Temizle", action: #selector(toggleFillerWords), keyEquivalent: "")
+        fillerWordsMenuItem.target = self
+        menu.addItem(fillerWordsMenuItem)
+
         muteAudioMenuItem = NSMenuItem(title: "Konuşurken Medyayı Sustur", action: #selector(toggleMuteSystemAudio), keyEquivalent: "")
         muteAudioMenuItem.target = self
         menu.addItem(muteAudioMenuItem)
+
+        saveHistoryMenuItem = NSMenuItem(title: "Dikte Geçmişini Kaydet", action: #selector(toggleSaveHistory), keyEquivalent: "")
+        saveHistoryMenuItem.target = self
+        menu.addItem(saveHistoryMenuItem)
 
         restoreClipboardMenuItem = NSMenuItem(title: "Panoyu Geri Yükle", action: #selector(toggleRestoreClipboard), keyEquivalent: "")
         restoreClipboardMenuItem.target = self
@@ -226,9 +278,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             item.state = (item.tag == cfg.trigger_key) ? .on : .off
         }
 
+        directModeMenuItem?.state = (cfg.dictation_mode.lowercased() == "direct") ? .on : .off
+        formalModeMenuItem?.state = (cfg.dictation_mode.lowercased() == "formal") ? .on : .off
+        bulletModeMenuItem?.state = (cfg.dictation_mode.lowercased() == "bullet_points") ? .on : .off
+
         soundEffectsMenuItem.state = cfg.play_sounds ? .on : .off
-        restoreClipboardMenuItem.state = cfg.restore_clipboard ? .on : .off
+        hapticMenuItem?.state = cfg.haptic_feedback ? .on : .off
+        fillerWordsMenuItem?.state = cfg.remove_filler_words ? .on : .off
         muteAudioMenuItem.state = cfg.mute_system_audio ? .on : .off
+        saveHistoryMenuItem?.state = cfg.save_history ? .on : .off
+        restoreClipboardMenuItem.state = cfg.restore_clipboard ? .on : .off
         launchAtLoginMenuItem.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
 
         SoundManager.shared.isEnabled = cfg.play_sounds
@@ -359,6 +418,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         if started {
             SoundManager.shared.playStart()
+            HapticManager.shared.playStart()
             if config.mute_system_audio {
                 SystemAudioManager.shared.muteForDictation(delay: 0.15)
             }
@@ -370,6 +430,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             lastRecordedAudioData = nil
             SystemAudioManager.shared.restoreAfterDictation()
             SoundManager.shared.playCancel()
+            HapticManager.shared.playCancel()
             setStatus(title: "⚠️ Hata", menuText: "Durum: Mikrofon Başlatılamadı!", revertAfter: 2.0)
             RecordingHUD.shared.showError(message: "Mikrofon Başlatılamadı")
         }
@@ -452,12 +513,26 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 print("[Deşifre Başarılı] [\(result.provider.uppercased()) - \(result.model)] (\(String(format: "%.2f", result.latency))s): \"\(result.text)\"")
 
                 if !result.text.isEmpty {
+                    let polishedText = TextPolisher.shared.polish(text: result.text, config: config)
+                    guard !polishedText.isEmpty else {
+                        RecordingHUD.shared.dismiss(animated: true)
+                        self.setStatus(title: "🎙️", menuText: self.readyMenuText)
+                        return
+                    }
+
+                    DictationHistoryManager.shared.addEntry(
+                        text: polishedText,
+                        provider: result.provider,
+                        model: result.model
+                    )
+
                     TextInjector.shared.paste(
-                        text: result.text,
+                        text: polishedText,
                         restoreClipboard: config.restore_clipboard,
                         pasteDelayMs: config.paste_delay_ms
                     )
                     SoundManager.shared.playSuccess()
+                    HapticManager.shared.playSuccess()
                     RecordingHUD.shared.showSuccess(text: "Yapıştırıldı")
                     self.setStatus(
                         title: "✅",
@@ -487,6 +562,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self.currentLiveSession = nil
                 self.lastRecordedAudioData = nil
                 SoundManager.shared.playCancel()
+                HapticManager.shared.playCancel()
                 RecordingHUD.shared.showError(message: "Deşifre Hatası")
                 let errMsg = result.error ?? "Bilinmeyen hata"
                 self.setStatus(title: "⚠️ Hata", menuText: "Hata: \(errMsg)", revertAfter: 3.0)
@@ -506,6 +582,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         Transcriber.shared.cancel()
         isTranscribing = false
         SoundManager.shared.playCancel()
+        HapticManager.shared.playCancel()
         RecordingHUD.shared.dismiss(animated: true)
         setStatus(title: "❌", menuText: "Durum: İptal Edildi", revertAfter: 1.5)
     }
@@ -563,6 +640,85 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let currentlyEnabled = LaunchAtLoginManager.shared.isEnabled
         LaunchAtLoginManager.shared.setEnabled(!currentlyEnabled)
         refreshMenuStates()
+    }
+
+    @objc private func selectDirectMode() {
+        ConfigManager.shared.update { $0.dictation_mode = "direct" }
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+    }
+
+    @objc private func selectFormalMode() {
+        ConfigManager.shared.update { $0.dictation_mode = "formal" }
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+    }
+
+    @objc private func selectBulletMode() {
+        ConfigManager.shared.update { $0.dictation_mode = "bullet_points" }
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+    }
+
+    @objc private func toggleHapticFeedback() {
+        let current = ConfigManager.shared.config.haptic_feedback
+        ConfigManager.shared.update { $0.haptic_feedback = !current }
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+        if !current {
+            HapticManager.shared.playSuccess()
+        }
+    }
+
+    @objc private func toggleFillerWords() {
+        let current = ConfigManager.shared.config.remove_filler_words
+        ConfigManager.shared.update { $0.remove_filler_words = !current }
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+    }
+
+    @objc private func toggleSaveHistory() {
+        let current = ConfigManager.shared.config.save_history
+        ConfigManager.shared.update { $0.save_history = !current }
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+    }
+
+    private func refreshHistoryMenu() {
+        guard let menu = historyMenu else { return }
+        menu.removeAllItems()
+
+        let entries = DictationHistoryManager.shared.getEntries()
+        if entries.isEmpty {
+            let emptyItem = NSMenuItem(title: "(Henüz dikte geçmişi yok)", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            menu.addItem(emptyItem)
+        } else {
+            for (idx, entry) in entries.enumerated() {
+                let item = NSMenuItem(title: entry.menuTitle, action: #selector(historyItemClicked(_:)), keyEquivalent: "")
+                item.tag = idx
+                item.target = self
+                item.toolTip = "\(entry.text)\n\n(Tıklayarak panoya kopyalayın)"
+                menu.addItem(item)
+            }
+            menu.addItem(NSMenuItem.separator())
+            let clearItem = NSMenuItem(title: "Geçmişi Temizle", action: #selector(clearHistoryAction), keyEquivalent: "")
+            clearItem.target = self
+            menu.addItem(clearItem)
+        }
+    }
+
+    @objc private func historyItemClicked(_ sender: NSMenuItem) {
+        let entries = DictationHistoryManager.shared.getEntries()
+        guard sender.tag >= 0 && sender.tag < entries.count else { return }
+        let entry = entries[sender.tag]
+        DictationHistoryManager.shared.copyToClipboard(entry: entry)
+        setStatus(title: "📋", menuText: "Panoya kopyalandı", revertAfter: 1.5)
+    }
+
+    @objc private func clearHistoryAction() {
+        DictationHistoryManager.shared.clear()
+        setStatus(title: "🗑️", menuText: "Dikte geçmişi temizlendi", revertAfter: 1.5)
     }
 
     @objc private func selectTriggerKeyAction(_ sender: NSMenuItem) {

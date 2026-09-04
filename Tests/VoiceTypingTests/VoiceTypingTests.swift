@@ -824,4 +824,136 @@ final class VoiceTypingTests: XCTestCase {
 
         wait(for: [expectation], timeout: 20.0)
     }
+
+    // =========================================================================
+    // YENİ KULLANICI DENEYİMİ (UX) BİRİM TESTLERİ
+    // =========================================================================
+
+    func testTextPolisherFillerWordsRemoval() {
+        let polisher = TextPolisher.shared
+        var config = AppConfig.defaultConfig
+        config.remove_filler_words = true
+
+        // 1. Türkçe duraksama ve cümle başı dolgu temizliği
+        let input1 = "Şey, bugün hava çok güzel ııı gerçekten."
+        let result1 = polisher.polish(text: input1, config: config)
+        XCTAssertEqual(result1, "Bugün hava çok güzel gerçekten.")
+
+        // 2. Cümle ortası ve ses uzatmaları
+        let input2 = "Yarın eee toplantı var hımm saat onda."
+        let result2 = polisher.polish(text: input2, config: config)
+        XCTAssertEqual(result2, "Yarın toplantı var saat onda.")
+
+        // 3. İngilizce duraksama sesleri
+        let input3 = "Um, this is uh a test ah really."
+        let result3 = polisher.polish(text: input3, config: config)
+        XCTAssertEqual(result3, "This is a test really.")
+
+        // 4. Dolgu temizleme kapalıyken metin korunmalı
+        config.remove_filler_words = false
+        let result4 = polisher.polish(text: input1, config: config)
+        XCTAssertTrue(result4.contains("Şey") || result4.contains("şey"))
+    }
+
+    func testTextPolisherCustomVocabulary() {
+        let polisher = TextPolisher.shared
+        var config = AppConfig.defaultConfig
+        config.remove_filler_words = false
+        config.custom_vocabulary = "Kubernetes, PostgreSQL, Next.js, SPM"
+
+        let raw = "Projeyi kubernetes ve postgresql ile deploy edip next.js frontendi spm ile bağladık."
+        let polished = polisher.polish(text: raw, config: config)
+
+        XCTAssertTrue(polished.contains("Kubernetes"), "Özel sözlük terimi 'Kubernetes' doğru büyük harfle yazılmalı.")
+        XCTAssertTrue(polished.contains("PostgreSQL"), "Özel sözlük terimi 'PostgreSQL' doğru yazılmalı.")
+        XCTAssertTrue(polished.contains("Next.js"), "Özel sözlük terimi 'Next.js' doğru yazılmalı.")
+        XCTAssertTrue(polished.contains("SPM"), "Özel sözlük terimi 'SPM' büyük harfle yazılmalı.")
+    }
+
+    func testTextPolisherDictationModes() {
+        let polisher = TextPolisher.shared
+        var config = AppConfig.defaultConfig
+
+        // 1. Birebir (Direct) Mod
+        config.dictation_mode = "direct"
+        let directInput = "merhaba nasılsın"
+        let directResult = polisher.polish(text: directInput, config: config)
+        XCTAssertEqual(directResult, "Merhaba nasılsın")
+
+        // 2. Profesyonel / E-posta Modu
+        config.dictation_mode = "formal"
+        let formalInput = "toplantı saat üçe ertelendi lütfen belgeleri hazırlayın"
+        let formalResult = polisher.polish(text: formalInput, config: config)
+        XCTAssertTrue(formalResult.hasSuffix("."), "Formal modda cümle sonuna nokta eklenmeli.")
+        XCTAssertTrue(formalResult.hasPrefix("Toplantı"), "Cümle başı büyük harfle başlamalı.")
+
+        // 3. Madde İmleri (Bullet Points) Modu
+        config.dictation_mode = "bullet_points"
+        let bulletInput = "İlk olarak veritabanını hazırla. İkinci olarak API'yi bağla. Son olarak testleri çalıştır."
+        let bulletResult = polisher.polish(text: bulletInput, config: config)
+        XCTAssertTrue(bulletResult.contains("- Veritabanını hazırla"), "İlk madde biçimlendirilmeli.")
+        XCTAssertTrue(bulletResult.contains("- API'yi bağla"), "İkinci madde biçimlendirilmeli.")
+        XCTAssertTrue(bulletResult.contains("- Testleri çalıştır"), "Üçüncü madde biçimlendirilmeli.")
+    }
+
+    func testDictationHistoryManager() {
+        let manager = DictationHistoryManager.shared
+        manager.clear()
+        XCTAssertEqual(manager.getEntries().count, 0)
+
+        // 1. Giriş ekleme
+        manager.addEntry(text: "Test dikte metni 1", provider: "gemini", model: "gemini-3.5-transcribe-live")
+        manager.addEntry(text: "Test dikte metni 2", provider: "groq", model: "whisper-large-v3")
+
+        let entries = manager.getEntries()
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries.first?.text, "Test dikte metni 2")
+        XCTAssertTrue(entries.first?.menuTitle.contains("Test dikte metni 2") ?? false)
+
+        // 2. Maksimum 15 sınırlandırması testi
+        for i in 3...20 {
+            manager.addEntry(text: "Dikte no \(i)", provider: "gemini", model: "live")
+        }
+        let cappedEntries = manager.getEntries()
+        XCTAssertEqual(cappedEntries.count, 15, "Geçmiş en fazla 15 girdi ile sınırlandırılmalıdır.")
+
+        // 3. Panoya kopyalama testi
+        if let first = cappedEntries.first {
+            manager.copyToClipboard(entry: first)
+            let pbString = NSPasteboard.general.string(forType: .string)
+            XCTAssertEqual(pbString, first.text)
+        }
+
+        // 4. Temizleme
+        manager.clear()
+        XCTAssertEqual(manager.getEntries().count, 0)
+    }
+
+    func testNewConfigDefaultsAndPersistence() {
+        var config = AppConfig.defaultConfig
+        XCTAssertTrue(config.haptic_feedback)
+        XCTAssertTrue(config.remove_filler_words)
+        XCTAssertEqual(config.dictation_mode, "direct")
+        XCTAssertTrue(config.save_history)
+        XCTAssertEqual(config.custom_vocabulary, "")
+
+        // Ayar güncelleme
+        config.custom_vocabulary = "Swift, macOS, SwiftUI"
+        config.dictation_mode = "formal"
+        config.haptic_feedback = false
+        config.remove_filler_words = false
+        config.save_history = false
+
+        let data = try? JSONEncoder().encode(config)
+        XCTAssertNotNil(data)
+        if let data = data {
+            let decoded = try? JSONDecoder().decode(AppConfig.self, from: data)
+            XCTAssertNotNil(decoded)
+            XCTAssertEqual(decoded?.custom_vocabulary, "Swift, macOS, SwiftUI")
+            XCTAssertEqual(decoded?.dictation_mode, "formal")
+            XCTAssertFalse(decoded?.haptic_feedback ?? true)
+            XCTAssertFalse(decoded?.remove_filler_words ?? true)
+            XCTAssertFalse(decoded?.save_history ?? true)
+        }
+    }
 }

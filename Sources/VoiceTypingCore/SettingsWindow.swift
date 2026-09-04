@@ -20,8 +20,13 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var modeSegmentedControl: NSSegmentedControl!
     private var modePopUp: NSPopUpButton!
     private var modeInfoLabel: NSTextField!
+    private var dictationModeSegmentedControl: NSSegmentedControl!
+    private var customVocabField: NSTextField!
     private var languageField: NSTextField!
     private var playSoundsCheckbox: NSButton!
+    private var hapticFeedbackCheckbox: NSButton!
+    private var removeFillerWordsCheckbox: NSButton!
+    private var saveHistoryCheckbox: NSButton!
     private var restoreClipboardCheckbox: NSButton!
     private var muteSystemAudioCheckbox: NSButton!
     private var launchAtLoginCheckbox: NSButton!
@@ -70,7 +75,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 650, height: 495),
+            contentRect: NSRect(x: 0, y: 0, width: 650, height: 595),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -184,7 +189,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         // =====================================================================
         // ORTA BÖLÜM: TAB VIEW (NO TABS NO BORDER)
         // =====================================================================
-        tabView = NSTabView(frame: NSRect(x: 0, y: 0, width: 650, height: 435))
+        tabView = NSTabView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
         tabView.tabViewType = .noTabsNoBorder
 
         let tab1Item = NSTabViewItem(identifier: "tab1")
@@ -208,24 +213,24 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         // =====================================================================
         // ALT BÖLÜM: FOOTER & ACTIONS
         // =====================================================================
-        let bottomSeparator = NSBox(frame: NSRect(x: 24, y: 440, width: 602, height: 1))
+        let bottomSeparator = NSBox(frame: NSRect(x: 24, y: 540, width: 602, height: 1))
         bottomSeparator.boxType = .separator
         mainContainer.addSubview(bottomSeparator)
 
         statusMessageLabel = NSTextField(labelWithString: "")
-        statusMessageLabel.frame = NSRect(x: 24, y: 454, width: 380, height: 22)
+        statusMessageLabel.frame = NSRect(x: 24, y: 554, width: 380, height: 22)
         statusMessageLabel.font = NSFont.systemFont(ofSize: 11)
         statusMessageLabel.textColor = .secondaryLabelColor
         mainContainer.addSubview(statusMessageLabel)
 
-        let cancelBtn = NSButton(frame: NSRect(x: 420, y: 450, width: 95, height: 32))
+        let cancelBtn = NSButton(frame: NSRect(x: 420, y: 550, width: 95, height: 32))
         cancelBtn.title = "Kapat"
         cancelBtn.bezelStyle = .rounded
         cancelBtn.target = self
         cancelBtn.action = #selector(closeClicked)
         mainContainer.addSubview(cancelBtn)
 
-        let saveBtn = NSButton(frame: NSRect(x: 525, y: 450, width: 100, height: 32))
+        let saveBtn = NSButton(frame: NSRect(x: 525, y: 550, width: 100, height: 32))
         saveBtn.title = "Kaydet"
         saveBtn.bezelStyle = .rounded
         saveBtn.keyEquivalent = "\r"
@@ -259,13 +264,13 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // TAB 1: Genel & Kısayol (Two-Column Layout)
     // =========================================================================
     private func buildTab1GeneralView() -> NSView {
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 435))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
 
         // 1. Kısayol Tuşu
-        let keyLabel = createSectionLabel(text: "Tetikleyici Tuş", y: 22)
+        let keyLabel = createSectionLabel(text: "Tetikleyici Tuş", y: 18)
         container.addSubview(keyLabel)
 
-        triggerKeyPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 20, width: 260, height: 26), pullsDown: false)
+        triggerKeyPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 16, width: 260, height: 26), pullsDown: false)
         for opt in TriggerKeyOption.standardKeys {
             let item = NSMenuItem(title: opt.name, action: nil, keyEquivalent: "")
             item.tag = opt.keyCode
@@ -278,7 +283,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         triggerKeyPopUp.action = #selector(triggerKeyPopUpChanged(_:))
         container.addSubview(triggerKeyPopUp)
 
-        recordKeyButton = NSButton(frame: NSRect(x: 445, y: 19, width: 170, height: 28))
+        recordKeyButton = NSButton(frame: NSRect(x: 445, y: 15, width: 170, height: 28))
         recordKeyButton.title = "Özel Tuş Yakala"
         recordKeyButton.bezelStyle = .rounded
         recordKeyButton.target = self
@@ -286,19 +291,19 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(recordKeyButton)
 
         triggerKeyHintLabel = NSTextField(labelWithString: "Aktif Kısayol: Sağ Command (Right ⌘)")
-        triggerKeyHintLabel.frame = NSRect(x: 175, y: 50, width: 440, height: 18)
+        triggerKeyHintLabel.frame = NSRect(x: 175, y: 46, width: 440, height: 18)
         triggerKeyHintLabel.font = NSFont.systemFont(ofSize: 11)
         triggerKeyHintLabel.textColor = .secondaryLabelColor
         container.addSubview(triggerKeyHintLabel)
 
-        let keyNote = createNoteLabel(text: "Bas-konuş için klavyede başparmağınızla kolayca basabileceğiniz Sağ Command önerilir.", y: 70)
+        let keyNote = createNoteLabel(text: "Bas-konuş için klavyede başparmağınızla kolayca basabileceğiniz Sağ Command önerilir.", y: 64)
         container.addSubview(keyNote)
 
         // Ayırıcı
-        container.addSubview(createSeparator(y: 104))
+        container.addSubview(createSeparator(y: 92))
 
         // 2. Tetikleme Modu
-        let modeLabel = createSectionLabel(text: "Tetikleme Modu", y: 118)
+        let modeLabel = createSectionLabel(text: "Tetikleme Modu", y: 104)
         container.addSubview(modeLabel)
 
         modeSegmentedControl = NSSegmentedControl(
@@ -307,32 +312,70 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             target: self,
             action: #selector(modeSegmentedChanged(_:))
         )
-        modeSegmentedControl.frame = NSRect(x: 175, y: 116, width: 440, height: 26)
+        modeSegmentedControl.frame = NSRect(x: 175, y: 102, width: 440, height: 26)
         modeSegmentedControl.segmentStyle = .rounded
         modeSegmentedControl.segmentDistribution = .fillEqually
         modeSegmentedControl.selectedSegment = 0
         container.addSubview(modeSegmentedControl)
 
-        // Gizli yedek popup (test ve geriye dönük uyumluluk için)
-        modePopUp = NSPopUpButton(frame: NSRect(x: 175, y: 116, width: 440, height: 26), pullsDown: false)
+        // Gizli yedek popup
+        modePopUp = NSPopUpButton(frame: NSRect(x: 175, y: 102, width: 440, height: 26), pullsDown: false)
         modePopUp.addItem(withTitle: "Basılı Tut (Push-to-Talk) - Tuşa basılı tut konuş, bırak yaz")
         modePopUp.addItem(withTitle: "Akıllı Hibrit (Smart) - Kısa tıkla aç-kapa, uzun bas tut-konuş")
         modePopUp.addItem(withTitle: "Aç / Kapa (Toggle) - Tuşa tıkla başlasın, tıkla dursun")
         modePopUp.isHidden = true
         container.addSubview(modePopUp)
 
-        modeInfoLabel = createNoteLabel(text: "Basılı Tut: Tuşa basılı tutun ve konuşun, bıraktığınız anda metin otomatik yapıştırılır.", y: 148)
+        modeInfoLabel = createNoteLabel(text: "Basılı Tut: Tuşa basılı tutun ve konuşun, bıraktığınız anda metin otomatik yapıştırılır.", y: 130)
         container.addSubview(modeInfoLabel)
 
         // Ayırıcı
-        container.addSubview(createSeparator(y: 182))
+        container.addSubview(createSeparator(y: 158))
 
-        // 3. Konuşma Dili
-        let langLabel = createSectionLabel(text: "Konuşma Dili", y: 194)
+        // 3. Dikte Modu (Yazım Stili)
+        let dictLabel = createSectionLabel(text: "Dikte Modu", y: 170)
+        container.addSubview(dictLabel)
+
+        dictationModeSegmentedControl = NSSegmentedControl(
+            labels: ["Birebir (Doğal)", "Profesyonel / E-posta", "Madde İmleri (Notlar)"],
+            trackingMode: .selectOne,
+            target: nil,
+            action: nil
+        )
+        dictationModeSegmentedControl.frame = NSRect(x: 175, y: 168, width: 440, height: 26)
+        dictationModeSegmentedControl.segmentStyle = .rounded
+        dictationModeSegmentedControl.segmentDistribution = .fillEqually
+        dictationModeSegmentedControl.selectedSegment = 0
+        container.addSubview(dictationModeSegmentedControl)
+
+        let dictNote = createNoteLabel(text: "Birebir: Doğal konuşma akışı. Profesyonel: Resmi dilbilgisi & imla. Madde İmleri: Liste (- ...) biçimi.", y: 196)
+        container.addSubview(dictNote)
+
+        // Ayırıcı
+        container.addSubview(createSeparator(y: 224))
+
+        // 4. Özel Sözlük (Terim Havuzu)
+        let vocabLabel = createSectionLabel(text: "Özel Sözlük", y: 236)
+        container.addSubview(vocabLabel)
+
+        customVocabField = createSingleLineInputField(
+            frame: NSRect(x: 175, y: 234, width: 440, height: 24),
+            placeholder: "Kubernetes, PostgreSQL, Next.js, SPM..."
+        )
+        container.addSubview(customVocabField)
+
+        let vocabNote = createNoteLabel(text: "Teknik terimleri virgülle ayırarak girin. Whisper ve Gemini modelleri bu kelimeleri öncelikli tanır.", y: 260)
+        container.addSubview(vocabNote)
+
+        // Ayırıcı
+        container.addSubview(createSeparator(y: 288))
+
+        // 5. Konuşma Dili
+        let langLabel = createSectionLabel(text: "Konuşma Dili", y: 300)
         container.addSubview(langLabel)
 
         languageField = createSingleLineInputField(
-            frame: NSRect(x: 175, y: 192, width: 60, height: 24),
+            frame: NSRect(x: 175, y: 298, width: 60, height: 24),
             placeholder: "tr",
             isMonospaced: false
         )
@@ -340,42 +383,49 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(languageField)
 
         let langHint = NSTextField(labelWithString: "('tr': Türkçe, 'en': İngilizce, 'auto': Otomatik Algıla)")
-        langHint.frame = NSRect(x: 245, y: 195, width: 370, height: 20)
+        langHint.frame = NSRect(x: 245, y: 301, width: 370, height: 20)
         langHint.font = NSFont.systemFont(ofSize: 11)
         langHint.textColor = .secondaryLabelColor
         container.addSubview(langHint)
 
         // Ayırıcı
-        container.addSubview(createSeparator(y: 228))
+        container.addSubview(createSeparator(y: 326))
 
-        // 4. Tercihler (TG Pro tarzı sol başlık + sağ onay kutuları)
-        let optsLabel = createSectionLabel(text: "Seçenekler", y: 238)
+        // 6. Seçenekler (Tercihler)
+        let optsLabel = createSectionLabel(text: "Seçenekler", y: 338)
         container.addSubview(optsLabel)
 
-        muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "Konuşurken arka plan medyasını/müziği sustur", target: nil, action: nil)
-        muteSystemAudioCheckbox.frame = NSRect(x: 175, y: 236, width: 440, height: 18)
+        hapticFeedbackCheckbox = NSButton(checkboxWithTitle: "Dokunsal titreşim (Trackpad Force Touch tıkı)", target: nil, action: nil)
+        hapticFeedbackCheckbox.frame = NSRect(x: 175, y: 336, width: 440, height: 18)
+        container.addSubview(hapticFeedbackCheckbox)
+
+        removeFillerWordsCheckbox = NSButton(checkboxWithTitle: "Dolgu kelimelerini otomatik temizle ('ııı', 'şey', 'yani', 'hımm')", target: nil, action: nil)
+        removeFillerWordsCheckbox.frame = NSRect(x: 175, y: 360, width: 440, height: 18)
+        container.addSubview(removeFillerWordsCheckbox)
+
+        saveHistoryCheckbox = NSButton(checkboxWithTitle: "Dikte geçmişini menü çubuğunda sakla (Son 15 dikte)", target: nil, action: nil)
+        saveHistoryCheckbox.frame = NSRect(x: 175, y: 384, width: 440, height: 18)
+        container.addSubview(saveHistoryCheckbox)
+
+        muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "Konuşurken arka plan medyasını/müziği duraklat", target: nil, action: nil)
+        muteSystemAudioCheckbox.frame = NSRect(x: 175, y: 408, width: 440, height: 18)
         container.addSubview(muteSystemAudioCheckbox)
-        container.addSubview(createSubCheckboxNote(text: "YouTube, müzik veya video seslerinin mikrofona karışmasını önler.", y: 254))
 
         playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal", target: nil, action: nil)
-        playSoundsCheckbox.frame = NSRect(x: 175, y: 272, width: 440, height: 18)
+        playSoundsCheckbox.frame = NSRect(x: 175, y: 432, width: 440, height: 18)
         container.addSubview(playSoundsCheckbox)
-        container.addSubview(createSubCheckboxNote(text: "Kayıt başlangıç, bitiş ve deşifre bildirim tonları.", y: 290))
 
         restoreClipboardCheckbox = NSButton(checkboxWithTitle: "Metin yapıştırıldıktan sonra panoyu geri yükle", target: nil, action: nil)
-        restoreClipboardCheckbox.frame = NSRect(x: 175, y: 308, width: 440, height: 18)
+        restoreClipboardCheckbox.frame = NSRect(x: 175, y: 456, width: 440, height: 18)
         container.addSubview(restoreClipboardCheckbox)
-        container.addSubview(createSubCheckboxNote(text: "Önceden kopyalanmış pano içeriğini kaybetmeden korur.", y: 326))
 
         launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat", target: nil, action: nil)
-        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 344, width: 440, height: 18)
+        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 480, width: 440, height: 18)
         container.addSubview(launchAtLoginCheckbox)
-        container.addSubview(createSubCheckboxNote(text: "Menü çubuğunda arka planda sessizce hazır bekler.", y: 362))
 
         showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini kalıcı olarak göster", target: nil, action: nil)
-        showDockIconCheckbox.frame = NSRect(x: 175, y: 380, width: 440, height: 18)
+        showDockIconCheckbox.frame = NSRect(x: 175, y: 504, width: 440, height: 18)
         container.addSubview(showDockIconCheckbox)
-        container.addSubview(createSubCheckboxNote(text: "Kapalıyken Dinamik Mod etkindir: Yalnızca Ayarlar açıkken Dock'ta görünür, kapanınca gizlenir.", y: 398))
 
         return container
     }
@@ -400,7 +450,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // TAB 2: Yapay Zeka & Modeller (Two-Column Layout)
     // =========================================================================
     private func buildTab2AIProvidersView() -> NSView {
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 435))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
 
         // 1. Aktif Sağlayıcı
         let provLabel = createSectionLabel(text: "Aktif Sağlayıcı", y: 16)
@@ -526,7 +576,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // TAB 3: Sistem & İzinler (Native macOS Two-Column Layout & Hardware Test)
     // =========================================================================
     private func buildTab3PermissionsView() -> NSView {
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 435))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
 
         // 1. MİKROFON İZNİ
         let micSectionLabel = createSectionLabel(text: "Mikrofon İzni", y: 22)
@@ -643,7 +693,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // TAB 4: Hakkında (Centered Apple Showcase)
     // =========================================================================
     private func buildTab4AboutView() -> NSView {
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 435))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
 
         // 1. Ortalanmış Uygulama İkonu (64x64)
         let iconView = NSImageView(frame: NSRect(x: (650 - 64) / 2, y: 16, width: 64, height: 64))
@@ -950,7 +1000,25 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         modeSegmentedControl.selectedSegment = modeIdx
         updateModeInfoText(for: modeIdx)
 
-        // Checkboxes
+        // Dikte Modu
+        let dictModeIdx: Int
+        switch cfg.dictation_mode.lowercased() {
+        case "formal":
+            dictModeIdx = 1
+        case "bullet_points":
+            dictModeIdx = 2
+        default:
+            dictModeIdx = 0
+        }
+        dictationModeSegmentedControl.selectedSegment = dictModeIdx
+
+        // Özel Sözlük
+        customVocabField.stringValue = cfg.custom_vocabulary
+
+        // Onay Kutuları
+        hapticFeedbackCheckbox.state = cfg.haptic_feedback ? .on : .off
+        removeFillerWordsCheckbox.state = cfg.remove_filler_words ? .on : .off
+        saveHistoryCheckbox.state = cfg.save_history ? .on : .off
         playSoundsCheckbox.state = cfg.play_sounds ? .on : .off
         restoreClipboardCheckbox.state = cfg.restore_clipboard ? .on : .off
         muteSystemAudioCheckbox.state = cfg.mute_system_audio ? .on : .off
@@ -1264,6 +1332,18 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         default: modeStr = "hold"
         }
 
+        let dictMode: String
+        switch dictationModeSegmentedControl.selectedSegment {
+        case 1: dictMode = "formal"
+        case 2: dictMode = "bullet_points"
+        default: dictMode = "direct"
+        }
+
+        let customVocab = customVocabField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hapticOn = hapticFeedbackCheckbox.state == .on
+        let removeFillerOn = removeFillerWordsCheckbox.state == .on
+        let saveHistOn = saveHistoryCheckbox.state == .on
+
         let playSounds = playSoundsCheckbox.state == .on
         let restoreClip = restoreClipboardCheckbox.state == .on
         let muteAudio = muteSystemAudioCheckbox.state == .on
@@ -1282,6 +1362,11 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.language = language.isEmpty ? "tr" : language
             cfg.trigger_key = triggerKey
             cfg.trigger_mode = modeStr
+            cfg.dictation_mode = dictMode
+            cfg.custom_vocabulary = customVocab
+            cfg.haptic_feedback = hapticOn
+            cfg.remove_filler_words = removeFillerOn
+            cfg.save_history = saveHistOn
             cfg.play_sounds = playSounds
             cfg.restore_clipboard = restoreClip
             cfg.mute_system_audio = muteAudio
