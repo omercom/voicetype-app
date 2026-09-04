@@ -48,6 +48,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var keyCaptureMonitor: Any?
 
     public var onConfigUpdated: (() -> Void)?
+    private var permissionPollTimer: Timer?
 
     private init() {
         let window = NSWindow(
@@ -56,9 +57,13 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "⚙️ Voice Typing - Ayarlar ve Tercihler"
+        window.title = "Voice Typing - Ayarlar"
         window.center()
         window.isReleasedWhenClosed = false
+        // Pencerenin Sistem Ayarları açıldığında arkaya kaybolmaması için floating ve hidesOnDeactivate=false
+        window.level = .floating
+        window.hidesOnDeactivate = false
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         super.init(window: window)
         window.delegate = self
 
@@ -71,6 +76,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     public func windowWillClose(_ notification: Notification) {
+        stopPermissionPollTimer()
         if isCapturingKey {
             stopCapturingKey(cancelled: true)
         }
@@ -89,8 +95,23 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         refreshPermissionStatuses()
         loadValues()
         super.showWindow(sender)
+        window?.level = .floating
         window?.makeKeyAndOrderFront(sender)
+        window?.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
+        startPermissionPollTimer()
+    }
+
+    private func startPermissionPollTimer() {
+        stopPermissionPollTimer()
+        permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.refreshPermissionStatuses()
+        }
+    }
+
+    private func stopPermissionPollTimer() {
+        permissionPollTimer?.invalidate()
+        permissionPollTimer = nil
     }
 
     private func setupUI() {
@@ -104,7 +125,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // ÜST BÖLÜM: MODERN SEGMENTED TAB SWITCHER (APPLE HIG ROUNDED STYLE)
         // =====================================================================
         segmentedControl = NSSegmentedControl(
-            labels: ["🛡️ İzinler & Kurulum", "🤖 Yapay Zeka & Modeller", "⌨️ Kısayol & Davranış"],
+            labels: ["İzinler & Kurulum", "Yapay Zeka & Modeller", "Kısayol & Davranış"],
             trackingMode: .selectOne,
             target: self,
             action: #selector(tabSegmentChanged(_:))
