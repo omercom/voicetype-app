@@ -11,6 +11,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var toggleModeMenuItem: NSMenuItem!
     private var soundEffectsMenuItem: NSMenuItem!
     private var restoreClipboardMenuItem: NSMenuItem!
+    private var triggerKeyMenuItems: [NSMenuItem] = []
 
     private var isTranscribing: Bool = false
     private var revertStatusTimer: Timer?
@@ -107,26 +108,52 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         modeParent.submenu = modeMenu
         menu.addItem(modeParent)
 
-        // 5. Ses Efektleri Toggle
+        // 5. Tetikleyici Tuş Submenu (Hızlı Erişim)
+        let keyMenu = NSMenu()
+        let quickKeys: [(Int, String)] = [
+            (54, "Sağ Command (Right ⌘)"),
+            (58, "Sol Option (Left ⌥)"),
+            (61, "Sağ Option (Right ⌥)"),
+            (62, "Sağ Control (Right ⌃)"),
+            (63, "Fn / Globe (🌐 fn)")
+        ]
+        triggerKeyMenuItems.removeAll()
+        for (code, label) in quickKeys {
+            let item = NSMenuItem(title: label, action: #selector(selectTriggerKeyAction(_:)), keyEquivalent: "")
+            item.tag = code
+            item.target = self
+            keyMenu.addItem(item)
+            triggerKeyMenuItems.append(item)
+        }
+        keyMenu.addItem(NSMenuItem.separator())
+        let customizeItem = NSMenuItem(title: "⚙️ Özel Tuş Ata (Ayarlar)...", action: #selector(openSettingsShortcutTab), keyEquivalent: "")
+        customizeItem.target = self
+        keyMenu.addItem(customizeItem)
+
+        let keyParent = NSMenuItem(title: "⌨️ Tetikleyici Tuş", action: nil, keyEquivalent: "")
+        keyParent.submenu = keyMenu
+        menu.addItem(keyParent)
+
+        // 6. Ses Efektleri Toggle
         soundEffectsMenuItem = NSMenuItem(title: "🔊 Ses Efektleri", action: #selector(toggleSoundEffects), keyEquivalent: "")
         soundEffectsMenuItem.target = self
         menu.addItem(soundEffectsMenuItem)
 
-        // 6. Panoyu Geri Yükle Toggle
+        // 7. Panoyu Geri Yükle Toggle
         restoreClipboardMenuItem = NSMenuItem(title: "📋 Panoyu Geri Yükle", action: #selector(toggleRestoreClipboard), keyEquivalent: "")
         restoreClipboardMenuItem.target = self
         menu.addItem(restoreClipboardMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // 7. Test Kaydı
+        // 8. Test Kaydı
         let testItem = NSMenuItem(title: "🧪 2 Sn Test Kaydı Yap...", action: #selector(testRecordAction), keyEquivalent: "t")
         testItem.target = self
         menu.addItem(testItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // 8. Çıkış
+        // 9. Çıkış
         let quitItem = NSMenuItem(title: "🚪 Çıkış (Quit)", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -143,6 +170,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         holdModeMenuItem.state = (cfg.trigger_mode.lowercased() == "hold") ? .on : .off
         smartModeMenuItem.state = (cfg.trigger_mode.lowercased() == "smart") ? .on : .off
         toggleModeMenuItem.state = (cfg.trigger_mode.lowercased() == "toggle") ? .on : .off
+
+        for item in triggerKeyMenuItems {
+            item.state = (item.tag == cfg.trigger_key) ? .on : .off
+        }
 
         soundEffectsMenuItem.state = cfg.play_sounds ? .on : .off
         restoreClipboardMenuItem.state = cfg.restore_clipboard ? .on : .off
@@ -314,6 +345,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let current = ConfigManager.shared.config.restore_clipboard
         ConfigManager.shared.update { $0.restore_clipboard = !current }
         refreshMenuStates()
+    }
+
+    @objc private func selectTriggerKeyAction(_ sender: NSMenuItem) {
+        let code = sender.tag
+        ConfigManager.shared.update { $0.trigger_key = code }
+        KeyListener.shared.resetState()
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+    }
+
+    @objc private func openSettingsShortcutTab() {
+        SettingsWindowController.shared.showWindow(nil)
+        SettingsWindowController.shared.selectTab(index: 2)
     }
 
     @objc private func testRecordAction() {

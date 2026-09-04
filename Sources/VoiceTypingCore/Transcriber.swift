@@ -421,8 +421,8 @@ public class Transcriber {
             return
         }
 
-        let urlString = "https://generativelanguage.googleapis.com/v1beta/models?key=\(key)"
-        guard let url = URL(string: urlString) else {
+        guard let encodedKey = key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(encodedKey)") else {
             completion(false, "Geçersiz Gemini URL'i.")
             return
         }
