@@ -1,0 +1,52 @@
+[
+  {
+    "id": "01_gunluk_konusma",
+    "filename": "01_gunluk_konusma.mp3",
+    "filepath": "/Users/omer/Documents/antigravity/intelligent-hawking/samples/01_gunluk_konusma.mp3",
+    "category": "Günlük Konuşma & Soru Ekleri",
+    "voice": "tr-TR-AhmetNeural",
+    "rate": "+0%",
+    "ground_truth": "Merhaba, yarın sabah erkenden Kadıköy'deki kafede buluşup haftalık sprint planlamasını yapalım mı? Gelirken dizüstü bilgisayarını getirmeyi unutma.",
+    "description": "Günlük iş konuşması, soru eki ayrımı (-mı) ve kesme işaretli özel isimler."
+  },
+  {
+    "id": "02_hizli_tekerleme",
+    "filename": "02_hizli_tekerleme.mp3",
+    "filepath": "/Users/omer/Documents/antigravity/intelligent-hawking/samples/02_hizli_tekerleme.mp3",
+    "category": "Hızlı Konuşma & Fonetik Zorluk",
+    "voice": "tr-TR-EmelNeural",
+    "rate": "+30%",
+    "ground_truth": "Şu köşe yaz köşesi, şu köşe kış köşesi, ortadaki su şişesi. Çatalca'da topal çoban çatal yapıp çatal satar, nesi için Çatalca'da topal çoban çatal yapıp çatal satar?",
+    "description": "+30% yüksek konuşma hızında Türkçe sert sessizler (ş, ç, s) ve tekerleme tekrar döngüleri."
+  },
+  {
+    "id": "03_teknik_hibrit_terimler",
+    "filename": "03_teknik_hibrit_terimler.mp3",
+    "filepath": "/Users/omer/Documents/antigravity/intelligent-hawking/samples/03_teknik_hibrit_terimler.mp3",
+    "category": "Teknik & İngilizce Melez Terimler",
+    "voice": "tr-TR-AhmetNeural",
+    "rate": "+0%",
+    "ground_truth": "Backend mimarimizde PostgreSQL veritabanını Docker konteynerleri üzerinde ayağa kaldırıp FastAPI ile asenkron endpoint'ler oluşturduk. Cache yönetimi için de Redis kullanıyoruz.",
+    "description": "Türkçe cümle yapısı içine gömülü İngilizce yazılışlı teknik terimler ve kodlama kavramları."
+  },
+  {
+    "id": "04_sayilar_ve_tarihler",
+    "filename": "04_sayilar_ve_tarihler.mp3",
+    "filepath": "/Users/omer/Documents/antigravity/intelligent-hawking/samples/04_sayilar_ve_tarihler.mp3",
+    "category": "Sayılar, Tarihler, Saat & Para",
+    "voice": "tr-TR-EmelNeural",
+    "rate": "+0%",
+    "ground_truth": "Şirketin 2026 yılı ilk çeyrek net kârı yüzde 18 artışla 350 bin 500 liraya ulaştı. Bir sonraki genel kurul toplantısı 15 Ekim saat 14.30'da Ankara'da yapılacak.",
+    "description": "Rakamlar, oranlar, takvim tarihleri, saatler ve para miktarları."
+  },
+  {
+    "id": "05_morfoloji_ve_ekler",
+    "filename": "05_morfoloji_ve_ekler.mp3",
+    "filepath": "/Users/omer/Documents/antigravity/intelligent-hawking/samples/05_morfoloji_ve_ekler.mp3",
+    "category": "Aglütinatif Morfoloji & Bağlaçlar",
+    "voice": "tr-TR-AhmetNeural",
+    "rate": "+0%",
+    "ground_truth": "Onların da bu konuda çekinceleri varmış fakat bizim netleştiremediklerimizden dolayı henüz kesin bir karar veremediler. Sen de bizimle gelecek misin?",
+    "description": "Uzun Türkçe çekim ve yapım ekleri (netleştiremediklerimizden), 'de/da' bağlaç ayrımı ve soru kalıpları."
+  }
+]
