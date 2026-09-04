@@ -1441,7 +1441,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.remove_filler_words = removeFillerOn
             cfg.save_history = saveHistOn
             cfg.play_sounds = playSounds
-            cfg.restore_clipboard = true
+            cfg.restore_clipboard = false
             cfg.mute_system_audio = muteAudio
             cfg.show_dock_icon = showDock
         }
