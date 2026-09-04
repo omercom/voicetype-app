@@ -1,53 +1,59 @@
-# macOS Sesle Yazma (Voice Typing) - Menü Çubuğu Uygulaması
+# macOS Yerel Swift Sesle Yazma (Voice Typing) - Menü Çubuğu Uygulaması
 
-macOS üzerinde herhangi bir metin alanındayken (tarayıcı, kod editörü, mesajlaşma uygulamaları vb.) **Sağ Command** tuşuna basılı tutarak konuşmanızı sağlayan ve bıraktığınız anda sesinizi ultra hızlı (Groq Whisper ile ~0.3 saniye) veya bağlamsal zekayla (Google Gemini 3.6 Flash) yazıya döküp aktif imlece yapıştıran hafif (lightweight) menü çubuğu uygulaması.
-
----
-
-## Özellikler
-
-1. **Sağ Command (Right Command - Keycode 54) Tetikleyici:**
-   - **Basılı Tut Modu (Hold / Push-to-Talk - Varsayılan):** Tuşa basılı tutulduğu sürece mikrofon kaydeder, bırakıldığı anda konuşma deşifre edilip aktif metin kutusuna yazılır.
-   - **Akıllı Mod (Smart Mode):** Tuşa basılı tutup konuştuğunuzda bas-konuş; hızlı bas-bırak yapıldığında aç-kapa eller serbest moduna geçer.
-   - **Aç/Kapa Modu (Toggle):** Bir kez basıldığında kayda başlar, tekrar basıldığında yapıştırır.
-   - **Esc ile Tam İptal:** İster ses kaydı sırasında, ister deşifre aşamasında olsun `Esc` tuşuna basıldığında işlem anında durdurulur ve metin kutusuna hiçbir şey yazılmaz.
-
-2. **Ultra Hızlı ve Sıfır Disk Gecikmesi (Zero-Latency In-Memory):**
-   - Ses kaydı diske yazılmaz; tamamen RAM içinde 16kHz mono WAV tamponunda tutulur.
-   - Groq Cloud API ile Whisper Large v3 Turbo modeliyle ~0.3 saniyede deşifre tamamlanır.
-
-3. **Çoklu Sağlayıcı ve Model Desteği (Best Prices):**
-   - **Groq Whisper Large v3 Turbo:** ~0.3s işlem süresi, 0.00018 USD / dakika (Günlük 8 saat ücretsiz kota).
-   - **Groq Whisper Large v3:** En yüksek Türkçe doğruluk, 0.00018 USD / dakika.
-   - **Google Gemini 3.6 Flash:** Doğal dil, otomatik noktalama ve bağlam tamamlama (Ücretsiz / çok düşük maliyet).
-   - **Google Gemini 3.5 Flash:** Hızlı ve dengeli multimodal model.
-
-4. **Kusursuz Metin Enjeksiyonu ve Pano Koruması:**
-   - macOS `NSPasteboard` ve native `Quartz` olay simülasyonu ile aktif textbox'a `Cmd+V` gönderir.
-   - İsteğe bağlı olarak yapıştırma sonrası kullanıcının eski panosunu otomatik geri yükler (`restore_clipboard`).
-
-5. **İşitsel ve Görsel Geri Bildirim:**
-   - Apple sistem sesleri (`Tink`, `Pop`, `Glass`, `Basso`) ile ekrana bakmadan durum takibi.
-   - Menü çubuğu simgesi: `🎙️` (Hazır), `🔴` (Kaydediyor), `⚡` (Deşifre Ediliyor).
-
-6. **Kolay Ayar Yönetimi (Menü Çubuğu):**
-   - Sağlayıcı ve model seçimi tek tıkla yapılır.
-   - Groq ve Gemini API anahtarları menüdeki yerel Cocoa iletişim kutularından girilebilir veya güncellenebilir.
+macOS üzerinde herhangi bir metin alanındayken (tarayıcı, kod editörü, mesajlaşma uygulamaları vb.) **Sağ Command (Right Command)** tuşuna basılı tutarak konuşmanızı sağlayan ve bıraktığınız anda sesinizi ultra hızlı (Groq Whisper ile ~0.3 saniye) veya bağlamsal zekayla (Google Gemini) yazıya döküp aktif imlece yapıştıran, **tamamen yerel Swift (Zero Python)** menü çubuğu uygulaması.
 
 ---
 
-## Kurulum ve Başlatma
+## 🌟 Öne Çıkan Özellikler
 
-### 1. API Anahtarlarını Tanımlama
-`.env` dosyanıza veya menü çubuğundan ilgili ayar penceresine anahtarlarınızı girin:
-```env
-GROQ_API_KEY=gsk_...
-GEMINI_API_KEY=AIza...
+1. **Sıfır Python Bağımlılığı (Zero Python Dependencies):**
+   - Çalışma anında Python, pip, conda veya harici kütüphane gerektirmez.
+   - Tek bir `swift build -c release` veya `./build.sh` komutu ile derlenen 360 KB boyutunda ultra hafif, bağımsız yerel macOS ikili dosyası (`VoiceTyping`).
+
+2. **Yerel Menü Çubuğu Durum Simgesi (`NSStatusItem`):**
+   - Menü çubuğunda canlı durum takibi: `🎙️` (Hazır), `🔴 Dinliyor...` (Kayıt), `⏳ Yazıyor...` (Deşifre).
+   - Tek tıkla sağlayıcı (Groq Whisper / Google Gemini) ve tetikleme modu değişimi.
+
+3. **Yerel Ayarlar ve İzin Yönetimi Penceresi (Native Settings Dialog):**
+   - **En Üstte macOS Sistem İzinleri:** Mikrofon ve Erişilebilirlik (Accessibility) izin durumları renkli durum rozetleri (`🟢` / `🔴` / `🟡`) ile gösterilir; "Sistem Ayarlarını Aç" butonlarıyla doğrudan ilgili macOS Gizlilik paneline tek tıkla erişilir.
+   - **Model ve Sağlayıcı Seçimi:** Groq Whisper (`whisper-large-v3-turbo`, `whisper-large-v3`) ve Gemini (`gemini-3.5-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite`) modelleri.
+   - **API Anahtarları:** Güvenli metin kutuları üzerinden Groq ve Gemini anahtarlarını yapılandırma.
+   - **2 Saniyelik Canlı Test:** Ayarlar penceresinden anında ses kaydı alıp deşifreyi test etme imkanı (girdiğiniz güncel form değerleriyle anında test).
+
+4. **Sağ Command Push-to-Talk Dinleyicisi (`CGEventTap`):**
+   - **Basılı Tut (Push-to-Talk - Varsayılan):** Sağ Command tuşuna (Keycode 54) basılı tutarak konuşun, bıraktığınız anda deşifre edilip yapıştırılsın.
+   - **Akıllı Hibrit (Smart Mode):** Hızlı bas-çek yapıldığında aç/kapa, basılı tutulduğunda bas-konuş.
+   - **Aç/Kapa (Toggle):** Bir kez tıkla konuşmaya başla, tekrar tıkla bitir.
+   - **Esc ile İptal:** Kayıt veya deşifre esnasında `Esc` tuşuna basıldığında işlem iptal edilir ve metin kutusuna yazılmaz.
+
+5. **Yerel Ses Kaydı (`AVFoundation`):**
+   - Donanım hızlandırmalı 16kHz 16-bit mono PCM ses kaydı.
+   - Akıllı sessizlik tespiti ve kazara çok kısa basmaları filtreleme (`min_record_duration`).
+
+6. **Doğrudan `URLSession` Asenkron HTTP Deşifre:**
+   - Groq Cloud API Whisper endpoint'ine multipart/form-data ile doğrudan bağlantı (~0.25 - 0.3s).
+   - Google Gemini REST API'ye optimize JSON yüküyle doğrudan bağlantı.
+
+7. **Yerel Metin Enjeksiyonu ve Pano Yönetimi:**
+   - `NSPasteboard` ve `CGEvent` Cmd+V simülasyonu ile sıfır gecikmeli yapıştırma.
+   - İsteğe bağlı olarak yapıştırma sonrası eski panoyu otomatik geri yükleme (`restore_clipboard`).
+
+8. **İşitsel Geri Bildirim (`NSSound`):**
+   - Apple sistem sesleri (`Tink`, `Pop`, `Glass`, `Basso`) ile ekrana bakmadan geri bildirim.
+
+---
+
+## 🚀 Derleme ve Başlatma
+
+### Tek Komutla Derleme
+```bash
+./build.sh
+# veya
+swift build -c release && cp .build/release/VoiceTyping ./VoiceTyping
 ```
 
-### 2. Uygulamayı Başlatma
-
-Arka planda (Daemon / Menü Çubuğu) çalıştırmak için:
+### Uygulamayı Başlatma
+Arka planda (Menü Çubuğunda) başlatmak için:
 ```bash
 ./start.sh
 ```
@@ -56,23 +62,38 @@ Arka planda (Daemon / Menü Çubuğu) çalıştırmak için:
 ```bash
 ./start.sh -f
 # veya
-python3 app.py
+./VoiceTyping
 ```
 
-### 3. Uygulamayı Durdurma
+### Uygulamayı Durdurma
 ```bash
 ./stop.sh
 ```
 
 ---
 
-## Dosya Yapısı
+## 🧪 Doğrulama ve Testler
 
-- `app.py`: Menü çubuğu arayüzü ve ana olay döngüsü (`rumps`).
-- `key_listener.py`: Global Sağ Command (keycode 54) tuş yakalayıcısı (`pynput`).
-- `voice_engine.py`: Bellek içi 16kHz ses kaydedici ve Groq/Gemini deşifre motoru.
-- `text_injector.py`: Metni panoya kopyalayıp odaklanılmış metin kutusuna Cmd+V ile yapıştıran motor.
-- `sound_effects.py`: macOS yerel ses efektleri yöneticisi (`AppKit.NSSound`).
-- `config.py`: Yapılandırma, model tanımları ve .env yöneticisi.
-- `start.sh` / `stop.sh`: Başlatma ve durdurma kabuk betikleri.
-- `test_suite.py`: Otomatik doğrulama testleri.
+Tüm birim ve entegrasyon testlerini çalıştırmak için:
+```bash
+swift test
+```
+Testler; yapılandırma yönetimi, LaTeX yasağı kontrolleri, izin denetleyicisi, ses kaydı, iptal mekanizması, pano enjeksiyonu ve `live_recording.wav` ile canlı Groq deşifresini uçtan uca doğrular.
+
+---
+
+## 📁 Swift Proje Mimarisi
+
+- `Package.swift`: Swift Package Manager yapılandırması.
+- `Sources/VoiceTyping/main.swift`: Uygulama giriş noktası (`NSApplication.shared`).
+- `Sources/VoiceTypingCore/`:
+  - `AppDelegate.swift`: Menü çubuğu (`NSStatusItem`), menü öğeleri ve yaşam döngüsü.
+  - `Config.swift`: `config.json` okuma, yazma ve model fiyat/özellik tanımları.
+  - `PermissionManager.swift`: `AVCaptureDevice` mikrofon ve `AXIsProcessTrusted` erişilebilirlik denetimi ve sistem tercihleri bağlantıları.
+  - `AudioRecorder.swift`: `AVFoundation` ile 16kHz mono WAV ses kaydı ve sessizlik kontrolü.
+  - `Transcriber.swift`: Saf Swift `URLSession` ile Groq ve Gemini REST API istemcisi.
+  - `TextInjector.swift`: `NSPasteboard` ve `CGEvent` Cmd+V yapıştırma motoru.
+  - `KeyListener.swift`: Düşük seviyeli `CGEventTap` ile Sağ Command (54) ve Esc (53) dinleyicisi.
+  - `SoundManager.swift`: Apple `NSSound` sistem efektleri (`Tink`, `Pop`, `Glass`, `Basso`).
+  - `SettingsWindow.swift`: Yerel macOS AppKit Ayarlar ve İzin Yönetimi grafik arayüzü.
+- `Tests/VoiceTypingTests/VoiceTypingTests.swift`: Kapsamlı XCTest test paketi.

@@ -275,5 +275,80 @@ class TestVoiceEngineLive(unittest.TestCase):
         self.assertIn("Kadıköy", res["text"])
 
 
+class TestSettingsGui(unittest.TestCase):
+    """Ayarlar ve İzin Yönetimi (settings_gui.py) testleri."""
+
+    def test_permission_manager_microphone_status(self):
+        from settings_gui import PermissionManager
+        code, text, icon = PermissionManager.get_microphone_status()
+        self.assertIn(code, ["authorized", "denied", "restricted", "not_determined", "unknown"])
+        self.assertTrue(len(text) > 0)
+        self.assertTrue(len(icon) > 0)
+
+    def test_permission_manager_accessibility_status(self):
+        from settings_gui import PermissionManager
+        code, text, icon = PermissionManager.get_accessibility_status()
+        self.assertIn(code, ["authorized", "denied", "unknown"])
+        self.assertTrue(len(text) > 0)
+        self.assertTrue(len(icon) > 0)
+
+    def test_permission_manager_default_microphone_info(self):
+        from settings_gui import PermissionManager
+        info = PermissionManager.get_default_microphone_info()
+        self.assertIsInstance(info, str)
+        self.assertTrue(len(info) > 0)
+
+    def test_api_validator_empty_keys(self):
+        from settings_gui import ApiValidator
+        g_ok, g_msg, _ = ApiValidator.test_groq_key("")
+        self.assertFalse(g_ok)
+        self.assertIn("boş", g_msg)
+
+        m_ok, m_msg, _ = ApiValidator.test_gemini_key("")
+        self.assertFalse(m_ok)
+        self.assertIn("boş", m_msg)
+
+    def test_api_validator_invalid_groq_key(self):
+        from settings_gui import ApiValidator
+        ok, msg, latency = ApiValidator.test_groq_key("gsk_fake_invalid_test_key_12345")
+        self.assertFalse(ok)
+        self.assertGreater(latency, 0.0)
+
+    def test_settings_dialog_lifecycle_and_save(self):
+        from settings_gui import SettingsDialog
+        dlg = SettingsDialog()
+        dlg.update_idletasks()
+        dlg.update()
+
+        # Doğrula: Değişkenler varsayılan değerleri aldı mı?
+        self.assertIn(dlg.var_provider.get(), ["groq", "gemini"])
+        self.assertIn(dlg.var_trigger_mode.get(), ["hold", "smart", "toggle"])
+
+        # Ayar değiştir ve kaydet
+        original_sound = dlg.var_play_sounds.get()
+        dlg.var_play_sounds.set(not original_sound)
+        dlg.save_settings(close_after=False)
+
+        # config.json dosyasından kontrol et
+        updated_cfg = load_config()
+        self.assertEqual(updated_cfg["play_sounds"], not original_sound)
+
+        # Eskiye döndür
+        dlg.var_play_sounds.set(original_sound)
+        dlg.save_settings(close_after=False)
+        reverted_cfg = load_config()
+        self.assertEqual(reverted_cfg["play_sounds"], original_sound)
+
+        # Temiz kapat
+        dlg.destroy()
+
+    def test_no_latex_in_settings_gui_source(self):
+        # Kaynak dosyada asla LaTeX $ işareti kullanılmamalı
+        settings_file = Path(__file__).parent / "settings_gui.py"
+        with open(settings_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertNotIn("$", content, "settings_gui.py cannot contain dollar signs or LaTeX formatting")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -11,6 +11,8 @@ import sys
 import time
 import json
 import threading
+import subprocess
+from pathlib import Path
 from typing import Optional
 
 import rumps
@@ -66,6 +68,11 @@ class VoiceTypingApp(rumps.App):
         )
         self.listener.start()
 
+        # 4. Ayar Dosyası Otomatik Senkronizasyonu (1.5 sn periyotla izleme)
+        self._last_config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else 0.0
+        self._config_timer = rumps.Timer(self._check_config_mtime, 1.5)
+        self._config_timer.start()
+
     # -------------------------------------------------------------------------
     # Menü Çubuğu Yapılandırması
     # -------------------------------------------------------------------------
@@ -77,6 +84,9 @@ class VoiceTypingApp(rumps.App):
         self.status_item = rumps.MenuItem("Durum: Hazır (Sağ Cmd Tuşuna Basın)")
         self.status_item.set_callback(None)
         self.menu.add(self.status_item)
+
+        # Ayarlar & İzin Yönetimi Penceresi
+        self.menu.add(rumps.MenuItem("⚙️ Ayarlar & İzin Yönetimi...", callback=self._open_settings_window))
         self.menu.add(rumps.separator)
 
         # 1. Sağlayıcı Seçimi
@@ -260,6 +270,65 @@ class VoiceTypingApp(rumps.App):
             self.transcriber.update_config(self.config)
             self._notify("Gemini API", "Ayarlar Güncellendi", "Gemini API anahtarınız başarıyla kaydedildi.")
 
+    def _open_settings_window(self, _=None):
+        """Kapsamlı Ayarlar ve İzin Yönetimi grafik arayüzünü (GUI) açar."""
+        script_path = Path(__file__).parent / "settings_gui.py"
+        try:
+            subprocess.Popen([sys.executable, str(script_path)])
+        except Exception as e:
+            try:
+                rumps.alert("Ayarlar Açılamadı", str(e))
+            except Exception:
+                print(f"[Hata] Ayarlar penceresi açılamadı: {e}")
+
+    def reload_config(self):
+        """Ayarları config.json dosyasından yeniden yükler ve çalışan motorları senkronize eder."""
+        self.config = load_config()
+        self.transcriber.update_config(self.config)
+        self.sound.enabled = self.config.get("play_sounds", True)
+        self.listener.set_mode(self.config.get("trigger_mode", "hold"))
+        self.listener.min_record_duration = self.config.get("min_record_duration", 0.20)
+        self.injector.restore_clipboard = self.config.get("restore_clipboard", False)
+        self.injector.paste_delay_ms = self.config.get("paste_delay_ms", 20)
+
+        # UI durumlarını senkronize et
+        current_provider = self.config.get("provider", "groq").lower()
+        if hasattr(self, "item_groq"):
+            self.item_groq.state = (current_provider == "groq")
+        if hasattr(self, "item_gemini"):
+            self.item_gemini.state = (current_provider == "gemini")
+
+        current_groq_m = self.config.get("groq_model", "whisper-large-v3-turbo")
+        for mid, item in getattr(self, "groq_model_items", {}).items():
+            item.state = (mid == current_groq_m)
+
+        current_gemini_m = self.config.get("gemini_model", "gemini-3.6-flash")
+        for mid, item in getattr(self, "gemini_model_items", {}).items():
+            item.state = (mid == current_gemini_m)
+
+        current_mode = self.config.get("trigger_mode", "hold").lower()
+        for mkey, item in getattr(self, "mode_items", {}).items():
+            item.state = (mkey == current_mode)
+
+        if hasattr(self, "item_sounds"):
+            self.item_sounds.state = self.config.get("play_sounds", True)
+        if hasattr(self, "item_restore_clip"):
+            self.item_restore_clip.state = self.config.get("restore_clipboard", False)
+
+        self._update_status_line()
+        print(f"[Ayarlar] Yapılandırma senkronize edildi: {current_provider.upper()} - {get_active_model(self.config)}")
+
+    def _check_config_mtime(self, _=None):
+        """config.json dosyası haricen veya ayar penceresinden güncellendiğinde otomatik algılar."""
+        try:
+            if CONFIG_FILE.exists():
+                mtime = CONFIG_FILE.stat().st_mtime
+                if mtime > self._last_config_mtime:
+                    self._last_config_mtime = mtime
+                    self.reload_config()
+        except Exception:
+            pass
+
     def _toggle_sounds(self, _):
         curr = self.config.get("play_sounds", True)
         new_val = not curr
@@ -423,6 +492,11 @@ class VoiceTypingApp(rumps.App):
             AppHelper.callAfter(self._ui_reset_ready)
 
     def _quit_app(self, _):
+        if hasattr(self, "_config_timer") and self._config_timer:
+            try:
+                self._config_timer.stop()
+            except Exception:
+                pass
         if self.listener:
             self.listener.stop()
         if self.recorder:
@@ -431,6 +505,11 @@ class VoiceTypingApp(rumps.App):
 
 
 def main():
+    if "--settings" in sys.argv or "-s" in sys.argv:
+        from settings_gui import open_settings_dialog
+        open_settings_dialog()
+        return
+
     print("=" * 60)
     print("macOS Voice Typing Menü Çubuğu Uygulaması Başlatılıyor...")
     print("Sağ Command (Right Command) tuşuna basılı tutarak konuşabilirsiniz.")
