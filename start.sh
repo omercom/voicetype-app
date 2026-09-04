@@ -8,24 +8,34 @@ PID_FILE="$SCRIPT_DIR/.app.pid"
 LOG_FILE="$SCRIPT_DIR/app.log"
 BINARY="$SCRIPT_DIR/VoiceTyping"
 
-# Halihazırda çalışan örnek var mı kontrol et
+# Halihazırda çalışan örnek varsa otomatik durdur ve yeniden başlat (Restart)
+RESTARTED=0
 if [ -f "$PID_FILE" ]; then
     OLD_PID=$(cat "$PID_FILE")
     if ps -p "$OLD_PID" > /dev/null 2>&1; then
-        echo "⚠️  Uygulama zaten çalışıyor (PID: $OLD_PID)!"
-        echo "Durdurmak için: ./stop.sh"
-        exit 0
-    else
-        rm -f "$PID_FILE"
+        echo "🔄 Çalışan Voice Typing süreci tespit edildi (PID: $OLD_PID), kapatılıyor..."
+        kill "$OLD_PID" 2>/dev/null
+        sleep 0.5
+        if ps -p "$OLD_PID" > /dev/null 2>&1; then
+            kill -9 "$OLD_PID" 2>/dev/null
+        fi
+        RESTARTED=1
     fi
+    rm -f "$PID_FILE"
 fi
 
-# Ekstra kontrol: Başka bir VoiceTyping süreci var mı
 EXISTING_PIDS=$(pgrep -x "VoiceTyping" | tr '\n' ' ')
 if [ -n "$EXISTING_PIDS" ]; then
-    echo "⚠️  Voice Typing süreci zaten çalışıyor (PID: $EXISTING_PIDS)!"
-    echo "Durdurmak için: ./stop.sh"
-    exit 0
+    echo "🔄 Çalışan diğer Voice Typing süreçleri kapatılıyor: $EXISTING_PIDS"
+    kill $EXISTING_PIDS 2>/dev/null
+    sleep 0.5
+    kill -9 $EXISTING_PIDS 2>/dev/null
+    RESTARTED=1
+fi
+
+if [ $RESTARTED -eq 1 ]; then
+    echo "✅ Önceki süreç başarıyla kapatıldı. Yeniden başlatılıyor..."
+    sleep 0.5
 fi
 
 # Binary yoksa derle
@@ -50,7 +60,7 @@ else
 
     if ps -p "$APP_PID" > /dev/null 2>&1; then
         echo "✅ Başarıyla başlatıldı! (PID: $APP_PID)"
-        echo "📌 Menü çubuğundaki 🎙️ simgesinden ayarları yönetebilirsiniz."
+        echo "📌 Menü çubuğundaki ses dalgası (waveform) simgesinden ayarları yönetebilirsiniz."
         echo "🎤 Kullanım: Herhangi bir metin kutusundayken Sağ Command tuşuna basılı tutun ve konuşun, bırakınca metin anında yapıştırılır."
         echo "⏹️ Durdurmak için: ./stop.sh"
         echo "📄 Logları izlemek için: tail -f app.log"
