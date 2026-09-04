@@ -30,6 +30,48 @@ public class KeyListener {
 
     private init() {}
 
+    public func resetState() {
+        lock.lock()
+        isKeyDown = false
+        isRecording = false
+        inToggleMode = false
+        lock.unlock()
+    }
+
+    public static func isModifier(keyCode: Int64) -> Bool {
+        switch keyCode {
+        case 54, 55, 56, 57, 58, 59, 60, 61, 62, 63:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func isModifierPressed(keyCode: Int64, flags: CGEventFlags, currentKeyDown: Bool) -> Bool {
+        switch keyCode {
+        case 54: // Right Command
+            return (flags.rawValue & 0x00000010) != 0 || (flags.contains(.maskCommand) && !currentKeyDown)
+        case 55: // Left Command
+            return (flags.rawValue & 0x00000008) != 0 || (flags.contains(.maskCommand) && !currentKeyDown)
+        case 58: // Left Option
+            return (flags.rawValue & 0x00000020) != 0 || (flags.contains(.maskAlternate) && !currentKeyDown)
+        case 61: // Right Option
+            return (flags.rawValue & 0x00000040) != 0 || (flags.contains(.maskAlternate) && !currentKeyDown)
+        case 59: // Left Control
+            return (flags.rawValue & 0x00000001) != 0 || (flags.contains(.maskControl) && !currentKeyDown)
+        case 62: // Right Control
+            return (flags.rawValue & 0x00002000) != 0 || (flags.contains(.maskControl) && !currentKeyDown)
+        case 63: // Fn / Globe
+            return flags.contains(.maskSecondaryFn) || (flags.rawValue & 0x00800000) != 0
+        case 56: // Left Shift
+            return (flags.rawValue & 0x00000002) != 0 || (flags.contains(.maskShift) && !currentKeyDown)
+        case 60: // Right Shift
+            return (flags.rawValue & 0x00000004) != 0 || (flags.contains(.maskShift) && !currentKeyDown)
+        default:
+            return !flags.isEmpty
+        }
+    }
+
     public func start() {
         lock.lock()
         defer { lock.unlock() }
@@ -60,7 +102,7 @@ public class KeyListener {
     }
 
     private func runEventTapLoop() {
-        let eventMask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue)
+        let eventMask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
 
         let observer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
 
@@ -127,21 +169,35 @@ public class KeyListener {
             return Unmanaged.passRetained(event)
         }
 
-        // 2. Tetikleyici Tuş Kontrolü (Sağ Command tuşu = 54)
-        if keyCode == targetKeyCode && (type == .flagsChanged || type == .keyDown) {
-            let flags = event.flags
-            let hasDeviceRCommand = (flags.rawValue & 0x00000010) != 0
-            let hasCmdFlag = flags.contains(.maskCommand)
-            let isPressedNow = hasDeviceRCommand || (hasCmdFlag && !isKeyDown)
-
-            if isPressedNow && !isKeyDown {
-                // TUŞA BASILDI
-                isKeyDown = true
-                handleKeyDown()
-            } else if !isPressedNow && isKeyDown {
-                // TUŞ BIRAKILDI
-                isKeyDown = false
-                handleKeyUp()
+        // 2. Tetikleyici Tuş Kontrolü
+        if keyCode == targetKeyCode {
+            if KeyListener.isModifier(keyCode: targetKeyCode) {
+                if type == .flagsChanged {
+                    let isPressedNow = isModifierPressed(keyCode: targetKeyCode, flags: event.flags, currentKeyDown: isKeyDown)
+                    if isPressedNow && !isKeyDown {
+                        // TUŞA BASILDI
+                        isKeyDown = true
+                        handleKeyDown()
+                    } else if !isPressedNow && isKeyDown {
+                        // TUŞ BIRAKILDI
+                        isKeyDown = false
+                        handleKeyUp()
+                    }
+                }
+            } else {
+                // Normal tuş (F-tuşları, Space vb.)
+                if type == .keyDown {
+                    let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                    if !isAutorepeat && !isKeyDown {
+                        isKeyDown = true
+                        handleKeyDown()
+                    }
+                } else if type == .keyUp {
+                    if isKeyDown {
+                        isKeyDown = false
+                        handleKeyUp()
+                    }
+                }
             }
         }
 

@@ -19,12 +19,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
     }
 
+    private var readyMenuText: String {
+        let keyName = TriggerKeyOption.shortName(for: ConfigManager.shared.config.trigger_key)
+        return "Durum: Hazır (\(keyName) Tuşuna Basın)"
+    }
+
+    private var readyToolTip: String {
+        let keyName = TriggerKeyOption.shortName(for: ConfigManager.shared.config.trigger_key)
+        return "Voice Typing (\(keyName) ile Sesle Yazma)"
+    }
+
     public func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu Bar Status Item Oluştur
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.title = "🎙️"
-            button.toolTip = "Voice Typing (Sağ Command ile Sesle Yazma)"
+            button.toolTip = readyToolTip
         }
 
         buildMenu()
@@ -52,7 +62,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
 
         // 1. Durum Satırı
-        statusMenuItem = NSMenuItem(title: "Durum: Hazır (Sağ Cmd Tuşuna Basın)", action: nil, keyEquivalent: "")
+        statusMenuItem = NSMenuItem(title: readyMenuText, action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
 
@@ -138,6 +148,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         restoreClipboardMenuItem.state = cfg.restore_clipboard ? .on : .off
 
         SoundManager.shared.isEnabled = cfg.play_sounds
+
+        if let button = statusItem.button {
+            button.toolTip = readyToolTip
+        }
+        statusMenuItem.title = readyMenuText
     }
 
     private func setupKeyListener() {
@@ -174,10 +189,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
             if let delay = revertAfter {
                 self?.revertStatusTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-                    if let button = self?.statusItem.button {
+                    guard let self = self else { return }
+                    if let button = self.statusItem.button {
                         button.title = "🎙️"
                     }
-                    self?.statusMenuItem.title = "Durum: Hazır (Sağ Cmd Tuşuna Basın)"
+                    self.statusMenuItem.title = self.readyMenuText
                 }
             }
         }
@@ -205,13 +221,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard actualDuration >= config.min_record_duration else {
             // Çok kısa basma - kazara dokunma
-            setStatus(title: "🎙️", menuText: "Durum: Hazır (Sağ Cmd Tuşuna Basın)")
+            setStatus(title: "🎙️", menuText: readyMenuText)
             return
         }
 
         guard let audioData = data, !audioData.isEmpty else {
             // Sessizlik veya ses alınamadı
-            setStatus(title: "🎙️", menuText: "Durum: Hazır (Sağ Cmd Tuşuna Basın)")
+            setStatus(title: "🎙️", menuText: readyMenuText)
             return
         }
 
@@ -221,7 +237,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         Transcriber.shared.transcribe(audioData: audioData, config: config) { [weak self] result in
             DispatchQueue.main.async {
-                self?.isTranscribing = false
+                guard let self = self else { return }
+                self.isTranscribing = false
 
                 if result.success {
                     if !result.text.isEmpty {
@@ -231,18 +248,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                             pasteDelayMs: config.paste_delay_ms
                         )
                         SoundManager.shared.playSuccess()
-                        self?.setStatus(
+                        self.setStatus(
                             title: "✅",
                             menuText: "Durum: Yapıştırıldı (\(String(format: "%.2f", result.latency))s)",
                             revertAfter: 1.5
                         )
                     } else {
-                        self?.setStatus(title: "🎙️", menuText: "Durum: Hazır (Sağ Cmd Tuşuna Basın)")
+                        self.setStatus(title: "🎙️", menuText: self.readyMenuText)
                     }
                 } else {
                     SoundManager.shared.playCancel()
                     let err = result.error ?? "Bilinmeyen hata"
-                    self?.setStatus(title: "⚠️ Hata", menuText: "Hata: \(err)", revertAfter: 3.0)
+                    self.setStatus(title: "⚠️ Hata", menuText: "Hata: \(err)", revertAfter: 3.0)
                 }
             }
         }
