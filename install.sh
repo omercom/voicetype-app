@@ -67,11 +67,14 @@ cat <<PLIST_EOF > "$LAUNCH_AGENT_PLIST"
 </plist>
 PLIST_EOF
 
-# Servisi yükle
+# Servisi yükle (Mac açıldığında otomatik çalışması için)
 launchctl load "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
 
-# Uygulamayı başlat
-open "$TARGET_APP"
+# Servis başlatılmadıysa uygulamayı doğrudan aç
+sleep 0.5
+if ! pgrep -x "VoiceTyping" > /dev/null 2>&1; then
+    open "$TARGET_APP"
+fi
 
 echo ""
 echo "============================================================"
