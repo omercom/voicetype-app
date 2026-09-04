@@ -333,7 +333,7 @@ final class VoiceTypingTests: XCTestCase {
     func testSettingsWindowInitialization() {
         let controller = SettingsWindowController.shared
         XCTAssertNotNil(controller.window)
-        XCTAssertEqual(controller.window?.title, "⚙️ Voice Typing - Ayarlar ve Tercihler")
+        XCTAssertEqual(controller.window?.title, "Voice Typing - Ayarlar")
         controller.refreshPermissionStatuses()
         controller.loadValues()
 

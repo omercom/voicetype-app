@@ -79,33 +79,46 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
 
-        // 1b. Doğrudan Kayıt Başlat / Bitir Menü Öğesi (Fareyle tek tıkla test)
-        toggleRecordMenuItem = NSMenuItem(title: "🎙️ Sesle Yazmayı Başlat (Kayıt)", action: #selector(toggleRecordAction), keyEquivalent: "r")
+        // 1b. Doğrudan Kayıt Başlat / Bitir Menü Öğesi
+        toggleRecordMenuItem = NSMenuItem(title: "Sesle Yazmayı Başlat", action: #selector(toggleRecordAction), keyEquivalent: "r")
         toggleRecordMenuItem.target = self
         menu.addItem(toggleRecordMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // 2. Ayarlar Penceresi
-        let settingsItem = NSMenuItem(title: "⚙️ Ayarlar & İzin Yönetimi...", action: #selector(openSettings), keyEquivalent: ",")
+        // 2. Ayarlar Penceresi (Temiz Apple HIG standardı, çift ikon önlendi)
+        let settingsItem = NSMenuItem(title: "Ayarlar...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
+        settingsItem.image = nil
         menu.addItem(settingsItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // 3. Sağlayıcı Submenu
-        let providerMenu = NSMenu()
-        groqMenuItem = NSMenuItem(title: "Groq Whisper (whisper-large-v3)", action: #selector(selectGroqProvider), keyEquivalent: "")
-        groqMenuItem.target = self
-        providerMenu.addItem(groqMenuItem)
+        // 3. Tetikleyici Tuş Submenu
+        let keyMenu = NSMenu()
+        let quickKeys: [(Int, String)] = [
+            (54, "Sağ Command (Right ⌘)"),
+            (58, "Sol Option (Left ⌥)"),
+            (61, "Sağ Option (Right ⌥)"),
+            (62, "Sağ Control (Right ⌃)"),
+            (63, "Fn / Globe (fn)")
+        ]
+        triggerKeyMenuItems.removeAll()
+        for (code, label) in quickKeys {
+            let item = NSMenuItem(title: label, action: #selector(selectTriggerKeyAction(_:)), keyEquivalent: "")
+            item.tag = code
+            item.target = self
+            keyMenu.addItem(item)
+            triggerKeyMenuItems.append(item)
+        }
+        keyMenu.addItem(NSMenuItem.separator())
+        let customizeItem = NSMenuItem(title: "Özel Tuş Ata...", action: #selector(openSettingsShortcutTab), keyEquivalent: "")
+        customizeItem.target = self
+        keyMenu.addItem(customizeItem)
 
-        geminiMenuItem = NSMenuItem(title: "Google Gemini (Canlı Akış & Doğal Dil)", action: #selector(selectGeminiProvider), keyEquivalent: "")
-        geminiMenuItem.target = self
-        providerMenu.addItem(geminiMenuItem)
-
-        let providerParent = NSMenuItem(title: "Sağlayıcı (Provider)", action: nil, keyEquivalent: "")
-        providerParent.submenu = providerMenu
-        menu.addItem(providerParent)
+        let keyParent = NSMenuItem(title: "Tetikleyici Tuş", action: nil, keyEquivalent: "")
+        keyParent.submenu = keyMenu
+        menu.addItem(keyParent)
 
         // 4. Tetikleme Modu Submenu
         let modeMenu = NSMenu()
@@ -125,63 +138,43 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         modeParent.submenu = modeMenu
         menu.addItem(modeParent)
 
-        // 5. Tetikleyici Tuş Submenu (Hızlı Erişim)
-        let keyMenu = NSMenu()
-        let quickKeys: [(Int, String)] = [
-            (54, "Sağ Command (Right ⌘)"),
-            (58, "Sol Option (Left ⌥)"),
-            (61, "Sağ Option (Right ⌥)"),
-            (62, "Sağ Control (Right ⌃)"),
-            (63, "Fn / Globe (🌐 fn)")
-        ]
-        triggerKeyMenuItems.removeAll()
-        for (code, label) in quickKeys {
-            let item = NSMenuItem(title: label, action: #selector(selectTriggerKeyAction(_:)), keyEquivalent: "")
-            item.tag = code
-            item.target = self
-            keyMenu.addItem(item)
-            triggerKeyMenuItems.append(item)
-        }
-        keyMenu.addItem(NSMenuItem.separator())
-        let customizeItem = NSMenuItem(title: "⚙️ Özel Tuş Ata (Ayarlar)...", action: #selector(openSettingsShortcutTab), keyEquivalent: "")
-        customizeItem.target = self
-        keyMenu.addItem(customizeItem)
+        // 5. Sağlayıcı Submenu
+        let providerMenu = NSMenu()
+        geminiMenuItem = NSMenuItem(title: "Google Gemini Live (Canlı Akış)", action: #selector(selectGeminiProvider), keyEquivalent: "")
+        geminiMenuItem.target = self
+        providerMenu.addItem(geminiMenuItem)
 
-        let keyParent = NSMenuItem(title: "⌨️ Tetikleyici Tuş", action: nil, keyEquivalent: "")
-        keyParent.submenu = keyMenu
-        menu.addItem(keyParent)
+        groqMenuItem = NSMenuItem(title: "Groq Whisper (whisper-large-v3)", action: #selector(selectGroqProvider), keyEquivalent: "")
+        groqMenuItem.target = self
+        providerMenu.addItem(groqMenuItem)
 
-        // 6. Ses Efektleri Toggle
-        soundEffectsMenuItem = NSMenuItem(title: "🔊 Ses Efektleri", action: #selector(toggleSoundEffects), keyEquivalent: "")
+        let providerParent = NSMenuItem(title: "Sağlayıcı", action: nil, keyEquivalent: "")
+        providerParent.submenu = providerMenu
+        menu.addItem(providerParent)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // 6. Tercihler (Checkmark Seçenekleri)
+        soundEffectsMenuItem = NSMenuItem(title: "Ses Efektleri", action: #selector(toggleSoundEffects), keyEquivalent: "")
         soundEffectsMenuItem.target = self
         menu.addItem(soundEffectsMenuItem)
 
-        // 7. Panoyu Geri Yükle Toggle
-        restoreClipboardMenuItem = NSMenuItem(title: "📋 Panoyu Geri Yükle", action: #selector(toggleRestoreClipboard), keyEquivalent: "")
-        restoreClipboardMenuItem.target = self
-        menu.addItem(restoreClipboardMenuItem)
-
-        // 7b. Konuşurken Müziği/Sesi Sustur Toggle
-        muteAudioMenuItem = NSMenuItem(title: "🔇 Konuşurken Sesi Sustur", action: #selector(toggleMuteSystemAudio), keyEquivalent: "")
+        muteAudioMenuItem = NSMenuItem(title: "Konuşurken Medyayı Sustur", action: #selector(toggleMuteSystemAudio), keyEquivalent: "")
         muteAudioMenuItem.target = self
         menu.addItem(muteAudioMenuItem)
 
-        // 7c. Başlangıçta Otomatik Çalıştır (Launch at Login)
-        launchAtLoginMenuItem = NSMenuItem(title: "🚀 Başlangıçta Otomatik Çalıştır", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        restoreClipboardMenuItem = NSMenuItem(title: "Panoyu Geri Yükle", action: #selector(toggleRestoreClipboard), keyEquivalent: "")
+        restoreClipboardMenuItem.target = self
+        menu.addItem(restoreClipboardMenuItem)
+
+        launchAtLoginMenuItem = NSMenuItem(title: "Başlangıçta Otomatik Çalıştır", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLoginMenuItem.target = self
         menu.addItem(launchAtLoginMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // 8. Test Kaydı
-        let testItem = NSMenuItem(title: "🧪 2 Sn Test Kaydı Yap...", action: #selector(testRecordAction), keyEquivalent: "t")
-        testItem.target = self
-        menu.addItem(testItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // 9. Çıkış
-        let quitItem = NSMenuItem(title: "🚪 Çıkış (Quit)", action: #selector(quitApp), keyEquivalent: "q")
+        // 7. Çıkış
+        let quitItem = NSMenuItem(title: "Çıkış", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -215,7 +208,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             button.title = ""
         }
         statusMenuItem.title = readyMenuText
-        toggleRecordMenuItem.title = AudioRecorder.shared.isRecording ? "⏹️ Kaydı Bitir ve Deşifre Et" : "🎙️ Sesle Yazmayı Başlat (Kayıt)"
+        toggleRecordMenuItem.title = AudioRecorder.shared.isRecording ? "Kaydı Bitir ve Deşifre Et" : "Sesle Yazmayı Başlat"
     }
 
     @objc private func toggleRecordAction() {
