@@ -118,40 +118,61 @@ class TranscriptionRunner:
             latency = time.perf_counter() - start_time
             return {"error": str(e), "latency": round(latency, 3), "text": ""}
 
-    def transcribe_gemini(self, audio_path: str, model: str = "gemini-2.5-flash") -> Dict[str, Any]:
-        if not self.gemini_client:
+    def transcribe_gemini(self, audio_path: str, model: str = "gemini-3.6-flash") -> Dict[str, Any]:
+        if not self.gemini_key:
             return {"error": "GEMINI_API_KEY bulunamadı.", "latency": 0, "text": ""}
         
-        from google.genai import types
+        import base64
+        import requests
         
         prompt = (
-            "Sen uzman bir Türkçe ses deşifre (transcription) sistemisin. "
-            "Bu ses kaydını dinle ve konuşulanları kelimesi kelimesine, eksiksiz, "
-            "doğru Türkçe imla ve noktalama kurallarına uygun şekilde yazıya aktar. "
-            "Asla özetleme yapma, yorum veya selamlama ekleme; SADECE konuşulan ham metni yaz."
+            "Sen Türkçe bir ses deşifre (transcription) sistemisin. "
+            "Bu ses kaydını dinle ve konuşulanları harfi harfine, eksiksiz, "
+            "doğru Türkçe imla ve noktalama kurallarına uygun şekilde yazıya dök. "
+            "Asla yorum, özet veya selamlama ekleme; SADECE konuşulan metni yaz."
         )
         
         start_time = time.perf_counter()
         try:
             with open(audio_path, "rb") as f:
-                audio_bytes = f.read()
+                audio_b64 = base64.b64encode(f.read()).decode("utf-8")
                 
             mime_type = "audio/mp3" if audio_path.endswith(".mp3") else "audio/wav"
             
-            response = self.gemini_client.models.generate_content(
-                model=model,
-                contents=[
-                    types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
-                    prompt
-                ]
-            )
-            latency = time.perf_counter() - start_time
-            raw_text = response.text.strip() if response.text else ""
-            return {
-                "text": raw_text,
-                "latency": round(latency, 3),
-                "duration": None
+            payload = {
+                "contents": [{
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inline_data": {
+                                "mime_type": mime_type,
+                                "data": audio_b64
+                            }
+                        }
+                    ]
+                }]
             }
+            
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.gemini_key}"
+            headers = {
+                "x-goog-api-key": self.gemini_key,
+                "Content-Type": "application/json"
+            }
+            
+            resp = requests.post(url, json=payload, headers=headers, timeout=30)
+            latency = time.perf_counter() - start_time
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                return {
+                    "text": text,
+                    "latency": round(latency, 3),
+                    "duration": None
+                }
+            else:
+                err_msg = resp.json().get("error", {}).get("message", resp.text)
+                return {"error": f"HTTP {resp.status_code}: {err_msg}", "latency": round(latency, 3), "text": ""}
         except Exception as e:
             latency = time.perf_counter() - start_time
             return {"error": str(e), "latency": round(latency, 3), "text": ""}
@@ -191,7 +212,7 @@ def main():
     parser = argparse.ArgumentParser(description="Groq Whisper vs Gemini Türkçe STT Benchmark")
     parser.add_argument("--groq-key", help="Groq API Key")
     parser.add_argument("--gemini-key", help="Gemini API Key")
-    parser.add_argument("--gemini-model", default="gemini-2.5-flash", help="Gemini Model Adı (varsayılan: gemini-2.5-flash)")
+    parser.add_argument("--gemini-model", default="gemini-3.6-flash", help="Gemini Model Adı (varsayılan: gemini-3.6-flash)")
     parser.add_argument("--skip-turbo", action="store_true", help="whisper-large-v3-turbo modelini atla")
     parser.add_argument("--audio", help="Belirli bir ses dosyasını doğrudan test et (örn: kayit.mp3)")
     parser.add_argument("--ground-truth", default="", help="--audio için beklenen doğru metin (WER/CER hesaplaması için opsiyonel)")

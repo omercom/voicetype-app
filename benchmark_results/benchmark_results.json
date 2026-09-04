@@ -1,0 +1,257 @@
+[
+  {
+    "model": "Groq Whisper Large v3",
+    "model_id": "groq_whisper_v3",
+    "avg_wer": 10.69,
+    "avg_cer": 2.49,
+    "avg_tr_recall": 98.46,
+    "avg_latency": 0.42,
+    "details": [
+      {
+        "sample_id": "01_gunluk_konusma",
+        "category": "Günlük Konuşma & Soru Ekleri",
+        "ground_truth": "Merhaba, yarın sabah erkenden Kadıköy'deki kafede buluşup haftalık sprint planlamasını yapalım mı? Gelirken dizüstü bilgisayarını getirmeyi unutma.",
+        "predicted": "Merhaba, yarın sabah erkenden Kadıköy'deki kafede buluşup haftalık sprint planlamasını yapalım mı? Gelirken dizüstü bilgisayarını getirmeyi unutma.",
+        "latency": 0.473,
+        "error": null,
+        "metrics": {
+          "wer_norm": 0.0,
+          "cer_norm": 0.0,
+          "wer_raw": 0.0,
+          "cer_raw": 0.0,
+          "tr_char_recall": 100.0
+        }
+      },
+      {
+        "sample_id": "02_hizli_tekerleme",
+        "category": "Hızlı Konuşma & Fonetik Zorluk",
+        "ground_truth": "Şu köşe yaz köşesi, şu köşe kış köşesi, ortadaki su şişesi. Çatalca'da topal çoban çatal yapıp çatal satar, nesi için Çatalca'da topal çoban çatal yapıp çatal satar?",
+        "predicted": "Şu köşe yaz köşesi, şu köşe kış köşesi, ortadaki su şişesi. Çatalca'da topal çoban çatal yapıp çatal satar. Nesi için Çatalca'da topal çoban çatal yapıp çatal satar?",
+        "latency": 0.493,
+        "error": null,
+        "metrics": {
+          "wer_norm": 0.0,
+          "cer_norm": 0.0,
+          "wer_raw": 7.41,
+          "cer_raw": 1.21,
+          "tr_char_recall": 100.0
+        }
+      },
+      {
+        "sample_id": "03_teknik_hibrit_terimler",
+        "category": "Teknik & İngilizce Melez Terimler",
+        "ground_truth": "Backend mimarimizde PostgreSQL veritabanını Docker konteynerleri üzerinde ayağa kaldırıp FastAPI ile asenkron endpoint'ler oluşturduk. Cache yönetimi için de Redis kullanıyoruz.",
+        "predicted": "Backend mimarimizde Postgres veri tabanını doker konteynerleri üzerinde ayağa kaldırıp FastAPI ile asenkron endpointler oluşturduk. Cache yönetimi içinde Redis kullanıyoruz.",
+        "latency": 0.389,
+        "error": null,
+        "metrics": {
+          "wer_norm": 38.1,
+          "cer_norm": 3.43,
+          "wer_raw": 35.0,
+          "cer_raw": 4.52,
+          "tr_char_recall": 100.0
+        }
+      },
+      {
+        "sample_id": "04_sayilar_ve_tarihler",
+        "category": "Sayılar, Tarihler, Saat & Para",
+        "ground_truth": "Şirketin 2026 yılı ilk çeyrek net kârı yüzde 18 artışla 350 bin 500 liraya ulaştı. Bir sonraki genel kurul toplantısı 15 Ekim saat 14.30'da Ankara'da yapılacak.",
+        "predicted": "Şirketin 2026 yılı ilk çeyrek net karı %18 artışla 350.500 liraya ulaştı. Bir sonraki genel kurul toplantısı 15 Ekim saat 14.30'da Ankara'da yapılacak.",
+        "latency": 0.375,
+        "error": null,
+        "metrics": {
+          "wer_norm": 10.34,
+          "cer_norm": 6.96,
+          "wer_raw": 23.08,
+          "cer_raw": 7.5,
+          "tr_char_recall": 92.31
+        }
+      },
+      {
+        "sample_id": "05_morfoloji_ve_ekler",
+        "category": "Aglütinatif Morfoloji & Bağlaçlar",
+        "ground_truth": "Onların da bu konuda çekinceleri varmış fakat bizim netleştiremediklerimizden dolayı henüz kesin bir karar veremediler. Sen de bizimle gelecek misin?",
+        "predicted": "Onların da bu konuda çekinceleri varmış fakat bizim netleştiremediklerimiz dolayı henüz kesin bir karar veremediler. Sen de bizimle gelecek misin?",
+        "latency": 0.366,
+        "error": null,
+        "metrics": {
+          "wer_norm": 5.0,
+          "cer_norm": 2.04,
+          "wer_raw": 5.0,
+          "cer_raw": 2.01,
+          "tr_char_recall": 100.0
+        }
+      }
+    ]
+  },
+  {
+    "model": "Groq Whisper Large v3 Turbo",
+    "model_id": "groq_whisper_turbo",
+    "avg_wer": 9.73,
+    "avg_cer": 2.49,
+    "avg_tr_recall": 98.46,
+    "avg_latency": 0.22,
+    "details": [
+      {
+        "sample_id": "01_gunluk_konusma",
+        "category": "Günlük Konuşma & Soru Ekleri",
+        "ground_truth": "Merhaba, yarın sabah erkenden Kadıköy'deki kafede buluşup haftalık sprint planlamasını yapalım mı? Gelirken dizüstü bilgisayarını getirmeyi unutma.",
+        "predicted": "Merhaba, yarın sabah erkenden Kadıköy'deki kafede buluşup haftalık sprint planlamasını yapalım mı? Gelirken dizüstü bilgisayarını getirmeyi unutma.",
+        "latency": 0.271,
+        "error": null,
+        "metrics": {
+          "wer_norm": 0.0,
+          "cer_norm": 0.0,
+          "wer_raw": 0.0,
+          "cer_raw": 0.0,
+          "tr_char_recall": 100.0
+        }
+      },
+      {
+        "sample_id": "02_hizli_tekerleme",
+        "category": "Hızlı Konuşma & Fonetik Zorluk",
+        "ground_truth": "Şu köşe yaz köşesi, şu köşe kış köşesi, ortadaki su şişesi. Çatalca'da topal çoban çatal yapıp çatal satar, nesi için Çatalca'da topal çoban çatal yapıp çatal satar?",
+        "predicted": "Şu köşe yaz köşesi, şu köşe kış köşesi, ortadaki su şişesi. Çatalca da topal çoban çatal yapıp çatal satar, nesi için çatalca da topal çoban çatal yapıp çatal satar?",
+        "latency": 0.174,
+        "error": null,
+        "metrics": {
+          "wer_norm": 0.0,
+          "cer_norm": 0.0,
+          "wer_raw": 14.81,
+          "cer_raw": 1.82,
+          "tr_char_recall": 100.0
+        }
+      },
+      {
+        "sample_id": "03_teknik_hibrit_terimler",
+        "category": "Teknik & İngilizce Melez Terimler",
+        "ground_truth": "Backend mimarimizde PostgreSQL veritabanını Docker konteynerleri üzerinde ayağa kaldırıp FastAPI ile asenkron endpoint'ler oluşturduk. Cache yönetimi için de Redis kullanıyoruz.",
+        "predicted": "Backend mimarimizde Postgres veritabanını Docker konteynerleri üzerinde, ayağa kaldırıp Fastup'ı ile asenkron endpointler oluşturduk. Cache yönetimi içinde Redis kullanıyoruz.",
+        "latency": 0.171,
+        "error": null,
+        "metrics": {
+          "wer_norm": 33.33,
+          "cer_norm": 3.43,
+          "wer_raw": 30.0,
+          "cer_raw": 5.65,
+          "tr_char_recall": 100.0
+        }
+      },
+      {
+        "sample_id": "04_sayilar_ve_tarihler",
+        "category": "Sayılar, Tarihler, Saat & Para",
+        "ground_truth": "Şirketin 2026 yılı ilk çeyrek net kârı yüzde 18 artışla 350 bin 500 liraya ulaştı. Bir sonraki genel kurul toplantısı 15 Ekim saat 14.30'da Ankara'da yapılacak.",
+        "predicted": "Şirketin 2026 yılı ilk çeyrek net karı %18 artışla 350.500 liraya ulaştı. Bir sonraki genel kurul toplantısı 15 Ekim saat 14.30'da Ankara'da yapılacak.",
+        "latency": 0.249,
+        "error": null,
+        "metrics": {
+          "wer_norm": 10.34,
+          "cer_norm": 6.96,
+          "wer_raw": 23.08,
+          "cer_raw": 7.5,
+          "tr_char_recall": 92.31
+        }
+      },
+      {
+        "sample_id": "05_morfoloji_ve_ekler",
+        "category": "Aglütinatif Morfoloji & Bağlaçlar",
+        "ground_truth": "Onların da bu konuda çekinceleri varmış fakat bizim netleştiremediklerimizden dolayı henüz kesin bir karar veremediler. Sen de bizimle gelecek misin?",
+        "predicted": "Onların da bu konuda çekinceleri varmış fakat bizim netleştiremediklerimiz dolayı henüz kesin bir karar veremediler. Sen de bizimle gelecek misin?",
+        "latency": 0.232,
+        "error": null,
+        "metrics": {
+          "wer_norm": 5.0,
+          "cer_norm": 2.04,
+          "wer_raw": 5.0,
+          "cer_raw": 2.01,
+          "tr_char_recall": 100.0
+        }
+      }
+    ]
+  },
+  {
+    "model": "Gemini (gemini-3.6-flash)",
+    "model_id": "gemini_flash",
+    "avg_wer": 5.28,
+    "avg_cer": 2.06,
+    "avg_tr_recall": 95.6,
+    "avg_latency": 9.21,
+    "details": [
+      {
+        "sample_id": "01_gunluk_konusma",
+        "category": "Günlük Konuşma & Soru Ekleri",
+        "ground_truth": "Merhaba, yarın sabah erkenden Kadıköy'deki kafede buluşup haftalık sprint planlamasını yapalım mı? Gelirken dizüstü bilgisayarını getirmeyi unutma.",
+        "predicted": "Merhaba, yarın sabah erkenden Kadıköy'deki kafede buluşup haftalık sprint planlamasını yapalım mı? Gelirken dizüstü bilgisayarını getirmeyi unutma.",
+        "latency": 12.486,
+        "error": null,
+        "metrics": {
+          "wer_norm": 0.0,
+          "cer_norm": 0.0,
+          "wer_raw": 0.0,
+          "cer_raw": 0.0,
+          "tr_char_recall": 100.0
+        }
+      },
+      {
+        "sample_id": "02_hizli_tekerleme",
+        "category": "Hızlı Konuşma & Fonetik Zorluk",
+        "ground_truth": "Şu köşe yaz köşesi, şu köşe kış köşesi, ortadaki su şişesi. Çatalca'da topal çoban çatal yapıp çatal satar, nesi için Çatalca'da topal çoban çatal yapıp çatal satar?",
+        "predicted": "Şu köşe yaz köşesi, şu köşe kış köşesi, ortadaki su şişesi. Çatalca'da topal çoban çatal yapıp çatal satar, nesi için Çatalca'da topal çoban çatal yapıp çatal satar?",
+        "latency": 22.001,
+        "error": null,
+        "metrics": {
+          "wer_norm": 0.0,
+          "cer_norm": 0.0,
+          "wer_raw": 0.0,
+          "cer_raw": 0.0,
+          "tr_char_recall": 100.0
+        }
+      },
+      {
+        "sample_id": "03_teknik_hibrit_terimler",
+        "category": "Teknik & İngilizce Melez Terimler",
+        "ground_truth": "Backend mimarimizde PostgreSQL veritabanını Docker konteynerleri üzerinde ayağa kaldırıp FastAPI ile asenkron endpoint'ler oluşturduk. Cache yönetimi için de Redis kullanıyoruz.",
+        "predicted": "Backend mimarimizde PostgreSQL veri tabanını Docker konteynerleri üzerinde ayağa kaldırıp FastAPI ile asenkron endpoint'ler oluşturduk. Cache yönetimi için de Redis kullanıyoruz.",
+        "latency": 3.951,
+        "error": null,
+        "metrics": {
+          "wer_norm": 9.52,
+          "cer_norm": 0.57,
+          "wer_raw": 10.0,
+          "cer_raw": 0.56,
+          "tr_char_recall": 100.0
+        }
+      },
+      {
+        "sample_id": "04_sayilar_ve_tarihler",
+        "category": "Sayılar, Tarihler, Saat & Para",
+        "ground_truth": "Şirketin 2026 yılı ilk çeyrek net kârı yüzde 18 artışla 350 bin 500 liraya ulaştı. Bir sonraki genel kurul toplantısı 15 Ekim saat 14.30'da Ankara'da yapılacak.",
+        "predicted": "Şirketin 2026 yılı ilk çeyrek net kârı %18 artışla 350.500 liraya ulaştı. Bir sonraki genel kurul toplantısı 15 Ekim saat 14.30'da Ankara'da yapılacak.",
+        "latency": 3.955,
+        "error": null,
+        "metrics": {
+          "wer_norm": 6.9,
+          "cer_norm": 6.33,
+          "wer_raw": 19.23,
+          "cer_raw": 6.88,
+          "tr_char_recall": 92.31
+        }
+      },
+      {
+        "sample_id": "05_morfoloji_ve_ekler",
+        "category": "Aglütinatif Morfoloji & Bağlaçlar",
+        "ground_truth": "Onların da bu konuda çekinceleri varmış fakat bizim netleştiremediklerimizden dolayı henüz kesin bir karar veremediler. Sen de bizimle gelecek misin?",
+        "predicted": "Onlerin da bu konuda çekinceleri varmış fakat bizim netleştiremediklerimiz dolayı henüz kesin bir karar veremediler. Sen de bizimle gelecek misin?",
+        "latency": 3.66,
+        "error": null,
+        "metrics": {
+          "wer_norm": 10.0,
+          "cer_norm": 3.4,
+          "wer_raw": 10.0,
+          "cer_raw": 3.36,
+          "tr_char_recall": 85.71
+        }
+      }
+    ]
+  }
+]
