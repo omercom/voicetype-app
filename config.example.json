@@ -1,0 +1,22 @@
+{
+  "provider": "gemini",
+  "groq_api_key": "",
+  "gemini_api_key": "",
+  "groq_model": "whisper-large-v3",
+  "gemini_model": "gemini-3.5-transcribe-live",
+  "language": "tr",
+  "trigger_key": 54,
+  "trigger_mode": "hold",
+  "play_sounds": true,
+  "restore_clipboard": false,
+  "paste_delay_ms": 20,
+  "min_record_duration": 0.2,
+  "mute_system_audio": true,
+  "show_dock_icon": false,
+  "haptic_feedback": true,
+  "remove_filler_words": true,
+  "custom_vocabulary": "",
+  "dictation_mode": "direct",
+  "save_history": true,
+  "gemini_system_prompt": "Sen profesyonel bir ses deşifre asistanısın. Kullanıcının konuşmasını dinle ve doğrudan yazıya dök. Asla selamlama, özet, onaylama ('Tabii ki', 'Anladım' gibi) veya fazladan yorum ekleme; sadece konuşulan metni temiz, doğru imla ve akıcı bir dille yaz."
+}
