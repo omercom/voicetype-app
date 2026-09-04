@@ -32,10 +32,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
-        // Menu Bar Status Item Oluştur
+        // Menu Bar Status Item Oluştur (Sabit premium ses dalgası ikonu)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.title = "🎙️"
+            button.image = getWaveformIcon()
+            button.imagePosition = .imageOnly
+            button.title = ""
             button.toolTip = readyToolTip
         }
 
@@ -189,6 +191,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let button = statusItem.button {
             button.toolTip = readyToolTip
+            button.image = getWaveformIcon()
+            button.title = ""
         }
         statusMenuItem.title = readyMenuText
     }
@@ -217,24 +221,52 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setStatus(title: String, menuText: String, revertAfter: TimeInterval? = nil) {
         DispatchQueue.main.async { [weak self] in
-            self?.revertStatusTimer?.invalidate()
-            self?.revertStatusTimer = nil
+            guard let self = self else { return }
+            self.revertStatusTimer?.invalidate()
+            self.revertStatusTimer = nil
 
-            if let button = self?.statusItem.button {
-                button.title = title
-            }
-            self?.statusMenuItem.title = menuText
+            // Menü çubuğundaki sabit premium waveform ikonu bozulmaz;
+            // yalnızca açılan menü içerisindeki durum metni güncellenir.
+            self.statusMenuItem.title = menuText
 
             if let delay = revertAfter {
-                self?.revertStatusTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+                self.revertStatusTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
                     guard let self = self else { return }
-                    if let button = self.statusItem.button {
-                        button.title = "🎙️"
-                    }
                     self.statusMenuItem.title = self.readyMenuText
                 }
             }
         }
+    }
+
+    /// Menü çubuğu için Apple SF Symbols uyumlu, karanlık/aydınlık temaya otomatik uyum sağlayan (isTemplate)
+    /// sabit ve zarif ses dalgası (waveform) ikonu döner.
+    private func getWaveformIcon() -> NSImage {
+        if let image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Voice Typing") {
+            image.isTemplate = true
+            return image
+        }
+
+        // Vektörel yedek: 5 çubuklu zarif ses dalgası ikonu
+        let size = NSSize(width: 18, height: 16)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let barWidth: CGFloat = 2.0
+            let heights: [CGFloat] = [6.0, 12.0, 15.0, 9.0, 4.5]
+            let spacing: CGFloat = 1.5
+            let totalW = CGFloat(heights.count) * barWidth + CGFloat(heights.count - 1) * spacing
+            let startX = (rect.width - totalW) / 2.0
+
+            NSColor.black.setFill()
+            for (i, h) in heights.enumerated() {
+                let x = startX + CGFloat(i) * (barWidth + spacing)
+                let y = (rect.height - h) / 2.0
+                let barRect = NSRect(x: x, y: y, width: barWidth, height: h)
+                let path = NSBezierPath(roundedRect: barRect, xRadius: 1.0, yRadius: 1.0)
+                path.fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 
     // MARK: - Kayıt ve Deşifre Döngüsü
