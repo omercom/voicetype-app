@@ -17,6 +17,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var triggerKeyMenuItems: [NSMenuItem] = []
 
     private var isTranscribing: Bool = false
+    private var isFinishingRecord: Bool = false
+    private var postRollWorkItem: DispatchWorkItem?
     private var currentLiveSession: LiveGeminiStreamSession?
     private var lastRecordedAudioData: Data?
     private var revertStatusTimer: Timer?
@@ -225,13 +227,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             button.title = ""
         }
         statusMenuItem.title = readyMenuText
-        toggleRecordMenuItem.title = AudioRecorder.shared.isRecording ? "Kaydı Bitir ve Deşifre Et" : "Sesle Yazmayı Başlat"
+        toggleRecordMenuItem.title = (AudioRecorder.shared.isRecording || isFinishingRecord) ? "Kaydı Bitir ve Deşifre Et" : "Sesle Yazmayı Başlat"
     }
 
     @objc private func toggleRecordAction() {
-        if AudioRecorder.shared.isRecording {
-            let (_, dur) = AudioRecorder.shared.stop()
-            handleRecordStop(duration: dur)
+        if AudioRecorder.shared.isRecording || isFinishingRecord {
+            handleRecordStop(duration: 1.0)
         } else {
             handleRecordStart()
         }
@@ -241,7 +242,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let listener = KeyListener.shared
 
         listener.isBusy = { [weak self] in
-            return self?.isTranscribing ?? false
+            guard let self = self else { return false }
+            return self.isTranscribing || self.isFinishingRecord
         }
 
         listener.onStart = { [weak self] in
@@ -268,7 +270,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             // Menü çubuğundaki sabit premium waveform ikonu bozulmaz;
             // yalnızca açılan menü içerisindeki durum metni güncellenir.
             self.statusMenuItem.title = menuText
-            self.toggleRecordMenuItem.title = AudioRecorder.shared.isRecording ? "⏹️ Kaydı Bitir ve Deşifre Et" : "🎙️ Sesle Yazmayı Başlat (Kayıt)"
+            self.toggleRecordMenuItem.title = (AudioRecorder.shared.isRecording || self.isFinishingRecord) ? "⏹️ Kaydı Bitir ve Deşifre Et" : "🎙️ Sesle Yazmayı Başlat (Kayıt)"
 
             if let delay = revertAfter {
                 self.revertStatusTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
@@ -314,7 +316,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Kayıt ve Deşifre Döngüsü
 
     private func handleRecordStart() {
-        guard !isTranscribing else { return }
+        guard !isTranscribing, !isFinishingRecord else { return }
 
         let config = ConfigManager.shared.config
 
@@ -364,50 +366,66 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleRecordStop(duration: Double) {
         let config = ConfigManager.shared.config
 
-        // Konuşma bittiğinde arka plan çıkış sesini anında geri aç
-        SystemAudioManager.shared.restoreAfterDictation()
+        guard AudioRecorder.shared.isRecording, !isFinishingRecord, !isTranscribing else { return }
 
-        let (data, actualDuration) = AudioRecorder.shared.stop()
-
-        guard actualDuration >= config.min_record_duration else {
-            // Çok kısa basma - kazara dokunma
+        // Çok kısa basma - kazara dokunma
+        guard duration >= config.min_record_duration else {
             currentLiveSession?.cancel()
             currentLiveSession = nil
             lastRecordedAudioData = nil
+            SystemAudioManager.shared.restoreAfterDictation()
+            _ = AudioRecorder.shared.stop()
             RecordingHUD.shared.dismiss(animated: true)
             setStatus(title: "🎙️", menuText: readyMenuText)
             return
         }
 
-        guard let audioData = data, !audioData.isEmpty else {
-            // Sessizlik veya ses alınamadı (mikrofon kapalı veya kullanıcı konuşmadı)
-            currentLiveSession?.cancel()
-            currentLiveSession = nil
-            lastRecordedAudioData = nil
-            RecordingHUD.shared.dismiss(animated: true)
-            setStatus(title: "🎙️", menuText: readyMenuText)
-            return
-        }
-
-        self.lastRecordedAudioData = audioData
-
-        if let liveSession = currentLiveSession {
-            SoundManager.shared.playStop()
-            isTranscribing = true
-            setStatus(title: "⏳ Yazıyor...", menuText: "Durum: Deşifre Ediliyor...")
-            RecordingHUD.shared.showTranscribing()
-            liveSession.finishAudio()
-            return
-        }
-
-        SoundManager.shared.playStop()
-        isTranscribing = true
+        // Kullanıcı arayüzünde anında ve akıcı geri bildirim: HUD ve menü durumunu deşifre moduna al
+        isFinishingRecord = true
         setStatus(title: "⏳ Yazıyor...", menuText: "Durum: Deşifre Ediliyor...")
         RecordingHUD.shared.showTranscribing()
 
-        Transcriber.shared.transcribe(audioData: audioData, config: config) { [weak self] result in
-            self?.handleTranscriptionResult(result: result, config: config)
+        // Akustik ve Nöromüsküler Uzatma Penceresi (Post-Roll Grace Period: 280ms):
+        // Kullanıcı konuşmayı bitirdiği anda tuşu bıraksa dahi, son hecelerin / son 1-2 kelimenin
+        // ve CoreAudio donanım tamponundaki seslerin eksiksiz alınması için mikrofonu 280ms daha dinle.
+        postRollWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self = self, self.isFinishingRecord else { return }
+            self.isFinishingRecord = false
+
+            // Mikrofon kaydını durdur ve kalan tüm PCM verisini akıt
+            let (data, actualDuration) = AudioRecorder.shared.stop()
+
+            // Mikrofon sustuktan sonra arka plan medyasını (müzik vb.) geri aç ve bitiş sesini çal
+            SystemAudioManager.shared.restoreAfterDictation()
+            SoundManager.shared.playStop()
+
+            guard actualDuration >= config.min_record_duration, let audioData = data, !audioData.isEmpty else {
+                // Sessizlik veya ses alınamadı
+                self.currentLiveSession?.cancel()
+                self.currentLiveSession = nil
+                self.lastRecordedAudioData = nil
+                RecordingHUD.shared.dismiss(animated: true)
+                self.setStatus(title: "🎙️", menuText: self.readyMenuText)
+                return
+            }
+
+            self.lastRecordedAudioData = audioData
+
+            if let liveSession = self.currentLiveSession {
+                self.isTranscribing = true
+                liveSession.finishAudio()
+                return
+            }
+
+            self.isTranscribing = true
+            Transcriber.shared.transcribe(audioData: audioData, config: config) { [weak self] result in
+                self?.handleTranscriptionResult(result: result, config: config)
+            }
         }
+
+        self.postRollWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28, execute: workItem)
     }
 
     private func handleTranscriptionResult(result: TranscriptionResult, config: AppConfig) {
@@ -465,6 +483,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCancel() {
+        postRollWorkItem?.cancel()
+        postRollWorkItem = nil
+        isFinishingRecord = false
         currentLiveSession?.cancel()
         currentLiveSession = nil
         lastRecordedAudioData = nil

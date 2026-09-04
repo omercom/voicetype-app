@@ -625,4 +625,48 @@ final class VoiceTypingTests: XCTestCase {
 
         wait(for: [expectation], timeout: 25.0)
     }
+
+    func testGeminiLiveReconcileTranscriptionText() {
+        // Durum 1: Interim, birikmiş metnin tamamını ve son 1-2 kelimeyi içeriyor
+        let t1 = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: "Bugün toplantı saat",
+            interim: "Bugün toplantı saat üçte olacak"
+        )
+        XCTAssertEqual(t1, "Bugün toplantı saat üçte olacak", "Interim'deki son kelimeler korunmalı.")
+
+        // Durum 2: Interim yalnızca son eklenen delta kelimeleri içeriyor
+        let t2 = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: "Bugün toplantı saat",
+            interim: "üçte olacak"
+        )
+        XCTAssertEqual(t2, "Bugün toplantı saat üçte olacak", "Delta kelimeler sonuna eklenmeli.")
+
+        // Durum 3: Birikmiş metin zaten interim'i içeriyor (tekrar etmeme kontrolü)
+        let t3 = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: "Bugün toplantı saat üçte olacak",
+            interim: "üçte olacak"
+        )
+        XCTAssertEqual(t3, "Bugün toplantı saat üçte olacak", "Mevcut son kelimeler yinelenmemeli.")
+
+        // Durum 4: Birikmiş boş, interim dolu
+        let t4 = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: "",
+            interim: "Merhaba dünya"
+        )
+        XCTAssertEqual(t4, "Merhaba dünya")
+
+        // Durum 5: Birikmiş dolu, interim boş
+        let t5 = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: "Merhaba dünya",
+            interim: ""
+        )
+        XCTAssertEqual(t5, "Merhaba dünya")
+
+        // Durum 6: Boş / sessizlik etiketleri filtrelenmeli
+        let t6 = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: "[blank_audio]",
+            interim: ""
+        )
+        XCTAssertEqual(t6, "")
+    }
 }
