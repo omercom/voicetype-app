@@ -16,8 +16,8 @@ public final class FloatingHUDPanel: NSPanel {
     override public var canBecomeMain: Bool { return false }
 }
 
-/// Wispr / Superwhisper / MacWhisper tarzı modern, buzlu cam (frosted glass)
-/// kapsül şeklinde ses kaydı ve deşifre göstergesi (Floating HUD Pill).
+/// Apple Dynamic Island / Siri Pill tarzı ultra minimal,
+/// zarif oran-orantılı, buzlu cam (frosted glass) kapsül sesli yazma göstergesi.
 public class RecordingHUD: NSObject {
     public static let shared = RecordingHUD()
 
@@ -31,7 +31,7 @@ public class RecordingHUD: NSObject {
     private var darkTintView: NSBox!
     private var statusLabel: NSTextField!
 
-    // Göstergeler
+    // Göstergeler (Ultra Minimal & Orantılı)
     private var pulsingDot: NSView!
     private var waveformContainer: NSView!
     private var waveformBars: [NSView] = []
@@ -43,8 +43,9 @@ public class RecordingHUD: NSObject {
     private var meterTimer: Timer?
     private var dismissTimer: Timer?
 
-    private let hudWidth: CGFloat = 216.0
-    private let hudHeight: CGFloat = 46.0
+    // Orantılı Minimal Kapsül Ölçüleri
+    private let hudWidth: CGFloat = 152.0
+    private let hudHeight: CGFloat = 34.0
 
     private override init() {
         super.init()
@@ -74,6 +75,8 @@ public class RecordingHUD: NSObject {
         contentView.wantsLayer = true
         panel.contentView = contentView
 
+        let cornerRadius = hudHeight / 2.0
+
         // 1. Buzlu Cam (Frosted Glass Blur) Kapsül Arka Plan
         visualEffectView = NSVisualEffectView(frame: contentView.bounds)
         visualEffectView.autoresizingMask = [.width, .height]
@@ -81,49 +84,49 @@ public class RecordingHUD: NSObject {
         visualEffectView.blendingMode = .behindWindow
         visualEffectView.state = .active
         visualEffectView.wantsLayer = true
-        visualEffectView.layer?.cornerRadius = hudHeight / 2.0
+        visualEffectView.layer?.cornerRadius = cornerRadius
         visualEffectView.layer?.masksToBounds = true
-        visualEffectView.layer?.borderWidth = 1.0
-        visualEffectView.layer?.borderColor = NSColor.white.withAlphaComponent(0.20).cgColor
+        visualEffectView.layer?.borderWidth = 0.5
+        visualEffectView.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
         contentView.addSubview(visualEffectView)
 
-        // 2. Yarı saydam koyu katman (Hem aydınlık hem karanlık temada yüksek kontrast sağlar)
+        // 2. Yarı saydam koyu katman (Yüksek kontrast & Dynamic Island hissi)
         darkTintView = NSBox(frame: contentView.bounds)
         darkTintView.autoresizingMask = [.width, .height]
         darkTintView.boxType = .custom
         darkTintView.borderWidth = 0
-        darkTintView.cornerRadius = hudHeight / 2.0
-        darkTintView.fillColor = NSColor.black.withAlphaComponent(0.32)
+        darkTintView.cornerRadius = cornerRadius
+        darkTintView.fillColor = NSColor.black.withAlphaComponent(0.38)
         contentView.addSubview(darkTintView)
 
         // 3. Sol Gösterge Alanı: Kırmızı Nokta + Dalga Çubukları
-        let indicatorArea = NSView(frame: NSRect(x: 16, y: 13, width: 34, height: 20))
+        let indicatorArea = NSView(frame: NSRect(x: 13, y: (hudHeight - 14) / 2.0, width: 22, height: 14))
         indicatorArea.wantsLayer = true
         contentView.addSubview(indicatorArea)
 
-        // 3a. Yanıp Sönen Kırmızı Kayıt Noktası (Pulsing Red Dot)
-        pulsingDot = NSView(frame: NSRect(x: 0, y: 6, width: 8, height: 8))
+        // 3a. Yanıp Sönen Kırmızı Kayıt Noktası (Pulsing Red Dot - 6px)
+        pulsingDot = NSView(frame: NSRect(x: 0, y: 4, width: 6, height: 6))
         pulsingDot.wantsLayer = true
-        pulsingDot.layer?.cornerRadius = 4.0
-        pulsingDot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        pulsingDot.layer?.cornerRadius = 3.0
+        pulsingDot.layer?.backgroundColor = NSColor(red: 1.0, green: 0.23, blue: 0.20, alpha: 1.0).cgColor
         indicatorArea.addSubview(pulsingDot)
 
-        // 3b. Dinamik Ses Dalga Çubukları (Waveform Bars)
-        waveformContainer = NSView(frame: NSRect(x: 12, y: 1, width: 22, height: 18))
+        // 3b. Dinamik 3'lü Ses Dalga Çubukları (Micro Waveform Bars)
+        waveformContainer = NSView(frame: NSRect(x: 10, y: 0, width: 12, height: 14))
         waveformContainer.wantsLayer = true
         indicatorArea.addSubview(waveformContainer)
 
-        let barWidth: CGFloat = 2.5
-        let spacing: CGFloat = 2.5
-        for i in 0..<4 {
+        let barWidth: CGFloat = 2.0
+        let spacing: CGFloat = 2.0
+        for i in 0..<3 {
             let bar = NSView()
             bar.wantsLayer = true
             bar.layer?.cornerRadius = barWidth / 2.0
-            bar.layer?.backgroundColor = NSColor(red: 1.0, green: 0.30, blue: 0.25, alpha: 0.95).cgColor
-            let initialH: CGFloat = CGFloat(5 + (i % 2) * 6)
+            bar.layer?.backgroundColor = NSColor(red: 1.0, green: 0.28, blue: 0.25, alpha: 0.95).cgColor
+            let initialH: CGFloat = CGFloat(4 + (i % 2) * 5)
             bar.frame = NSRect(
                 x: CGFloat(i) * (barWidth + spacing),
-                y: (18.0 - initialH) / 2.0,
+                y: (14.0 - initialH) / 2.0,
                 width: barWidth,
                 height: initialH
             )
@@ -131,8 +134,8 @@ public class RecordingHUD: NSObject {
             waveformBars.append(bar)
         }
 
-        // 4. Spinner (Deşifre Ediliyor Durumu)
-        spinner = NSProgressIndicator(frame: NSRect(x: 16, y: 14, width: 18, height: 18))
+        // 4. Spinner (Deşifre Ediliyor Durumu - 14x14)
+        spinner = NSProgressIndicator(frame: NSRect(x: 14, y: (hudHeight - 14) / 2.0, width: 14, height: 14))
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
@@ -140,24 +143,26 @@ public class RecordingHUD: NSObject {
 
         // 5a. Başarı Onay İşareti (✓)
         checkmarkLabel = NSTextField(labelWithString: "✓")
-        checkmarkLabel.frame = NSRect(x: 17, y: 13, width: 20, height: 20)
-        checkmarkLabel.font = NSFont.systemFont(ofSize: 15, weight: .bold)
+        checkmarkLabel.frame = NSRect(x: 14, y: (hudHeight - 16) / 2.0 - 1.0, width: 16, height: 16)
+        checkmarkLabel.font = NSFont.systemFont(ofSize: 13, weight: .bold)
         checkmarkLabel.textColor = .systemGreen
+        checkmarkLabel.alignment = .center
         checkmarkLabel.isHidden = true
         contentView.addSubview(checkmarkLabel)
 
         // 5b. Hata İşareti (✕)
         errorIconLabel = NSTextField(labelWithString: "✕")
-        errorIconLabel.frame = NSRect(x: 17, y: 13, width: 20, height: 20)
-        errorIconLabel.font = NSFont.systemFont(ofSize: 15, weight: .bold)
-        errorIconLabel.textColor = .systemRed
+        errorIconLabel.frame = NSRect(x: 14, y: (hudHeight - 16) / 2.0 - 1.0, width: 16, height: 16)
+        errorIconLabel.font = NSFont.systemFont(ofSize: 13, weight: .bold)
+        errorIconLabel.textColor = .systemOrange
+        errorIconLabel.alignment = .center
         errorIconLabel.isHidden = true
         contentView.addSubview(errorIconLabel)
 
-        // 6. Durum Metni (Status Label)
+        // 6. Durum Metni (Status Label - SF Pro 12pt Medium, Kusursuz Dikey Ortalı)
         statusLabel = NSTextField(labelWithString: "Dinliyor...")
-        statusLabel.frame = NSRect(x: 54, y: 12, width: 148, height: 22)
-        statusLabel.font = NSFont.systemFont(ofSize: 13.5, weight: .semibold)
+        statusLabel.frame = NSRect(x: 41, y: (hudHeight - 16) / 2.0 - 0.5, width: 100, height: 16)
+        statusLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         statusLabel.textColor = .white
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.alignment = .left
@@ -178,7 +183,7 @@ public class RecordingHUD: NSObject {
         guard let screen = targetScreen() else { return }
         let screenFrame = screen.visibleFrame
         let x = round(screenFrame.midX - (hudWidth / 2.0))
-        let y = round(screenFrame.minY + 68.0)
+        let y = round(screenFrame.minY + 64.0)
         panel.setFrame(NSRect(x: x, y: y, width: hudWidth, height: hudHeight), display: true)
     }
 
@@ -217,7 +222,7 @@ public class RecordingHUD: NSObject {
             // Yumuşak fade-in ile göster
             self.panel.orderFrontRegardless()
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.16
+                context.duration = 0.14
                 self.panel.animator().alphaValue = 1.0
             }
         }
@@ -241,14 +246,14 @@ public class RecordingHUD: NSObject {
             self.spinner.isHidden = false
             self.spinner.startAnimation(nil)
 
-            self.statusLabel.stringValue = "Deşifre ediliyor..."
+            self.statusLabel.stringValue = "Yazılıyor..."
             self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
 
             if !self.panel.isVisible || self.panel.alphaValue < 0.1 {
                 self.updatePosition()
                 self.panel.orderFrontRegardless()
                 NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.16
+                    context.duration = 0.14
                     self.panel.animator().alphaValue = 1.0
                 }
             }
@@ -257,7 +262,7 @@ public class RecordingHUD: NSObject {
 
     // MARK: - Durum 3: Başarı / Yapıştırıldı (Success)
 
-    public func showSuccess(text: String = "Yapıştırıldı", autoDismissDelay: TimeInterval = 0.45, completion: (() -> Void)? = nil) {
+    public func showSuccess(text: String = "Yapıştırıldı", autoDismissDelay: TimeInterval = 0.35, completion: (() -> Void)? = nil) {
         executeOnMainThread { [weak self] in
             guard let self = self else { return }
             self.cancelDismissTimer()
@@ -285,7 +290,7 @@ public class RecordingHUD: NSObject {
 
     // MARK: - Hata Durumu (Error)
 
-    public func showError(message: String = "Hata!", autoDismissDelay: TimeInterval = 1.2) {
+    public func showError(message: String = "Hata!", autoDismissDelay: TimeInterval = 1.0) {
         executeOnMainThread { [weak self] in
             guard let self = self else { return }
             self.cancelDismissTimer()
@@ -324,12 +329,10 @@ public class RecordingHUD: NSObject {
 
             if animated && self.panel.isVisible {
                 NSAnimationContext.runAnimationGroup({ context in
-                    context.duration = 0.20
+                    context.duration = 0.18
                     self.panel.animator().alphaValue = 0.0
                 }, completionHandler: { [weak self] in
                     guard let self = self else { return }
-                    // Yalnızca hala idle durumundaysa pencereyi kapat.
-                    // Eğer kullanıcı bu esnada yeniden kayda bastıysa pencereyi gizleme!
                     if self.currentState == .idle {
                         self.panel.orderOut(nil)
                         completion?()
@@ -383,16 +386,15 @@ public class RecordingHUD: NSObject {
         guard currentState == .recording else { return }
 
         let power = AudioRecorder.shared.averagePower()
-        // dB genellikle -60 (sessiz) ile 0 (yüksek ses) arasındadır
         let normalized = max(0.0, min(1.0, CGFloat((power + 50.0) / 45.0)))
 
-        let barWidth: CGFloat = 2.5
-        let spacing: CGFloat = 2.5
-        let maxHeight: CGFloat = 17.0
-        let minHeight: CGFloat = 4.0
+        let barWidth: CGFloat = 2.0
+        let spacing: CGFloat = 2.0
+        let maxHeight: CGFloat = 13.0
+        let minHeight: CGFloat = 3.5
 
-        let multipliers: [CGFloat] = [0.85, 1.35, 1.15, 0.95]
-        let baseFluctuations: [CGFloat] = [2.0, 4.0, 3.0, 1.5]
+        let multipliers: [CGFloat] = [0.85, 1.35, 1.05]
+        let baseFluctuations: [CGFloat] = [1.5, 3.0, 1.5]
 
         for (i, bar) in waveformBars.enumerated() {
             let mult = multipliers[i % multipliers.count]
@@ -400,7 +402,7 @@ public class RecordingHUD: NSObject {
             var h = minHeight + (maxHeight - minHeight) * normalized * mult + (normalized < 0.1 ? fluc : 0.0)
             h = max(minHeight, min(maxHeight, h))
 
-            let y = (18.0 - h) / 2.0
+            let y = (14.0 - h) / 2.0
             bar.frame = NSRect(
                 x: CGFloat(i) * (barWidth + spacing),
                 y: y,

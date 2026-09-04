@@ -36,6 +36,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var languageField: NSTextField!
     private var playSoundsCheckbox: NSButton!
     private var restoreClipboardCheckbox: NSButton!
+    private var muteSystemAudioCheckbox: NSButton!
 
     // Footer
     private var statusMessageLabel: NSTextField!
@@ -487,19 +488,23 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         container.addSubview(modeBox)
 
         // Kart 3: Sistem & Pano
-        let sysBox = createCardBox(frame: NSRect(x: 10, y: 327, width: 570, height: 165), title: "🔊 Ses ve Pano Tercihleri")
+        let sysBox = createCardBox(frame: NSRect(x: 10, y: 327, width: 570, height: 185), title: "🔊 Ses ve Pano Tercihleri")
         let sysContent = sysBox.contentView as! FlippedContentView
 
         playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal (Başlangıç, bitiş ve başarı bildirim tonları)", target: nil, action: nil)
-        playSoundsCheckbox.frame = NSRect(x: 16, y: 36, width: 538, height: 22)
+        playSoundsCheckbox.frame = NSRect(x: 16, y: 34, width: 538, height: 22)
         sysContent.addSubview(playSoundsCheckbox)
 
+        muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "Konuşurken arka plan sesini/müziği sustur (YouTube, Müzik, Video vb.)", target: nil, action: nil)
+        muteSystemAudioCheckbox.frame = NSRect(x: 16, y: 64, width: 538, height: 22)
+        sysContent.addSubview(muteSystemAudioCheckbox)
+
         restoreClipboardCheckbox = NSButton(checkboxWithTitle: "Metin yapıştırıldıktan sonra eski pano içeriğini geri yükle", target: nil, action: nil)
-        restoreClipboardCheckbox.frame = NSRect(x: 16, y: 70, width: 538, height: 22)
+        restoreClipboardCheckbox.frame = NSRect(x: 16, y: 94, width: 538, height: 22)
         sysContent.addSubview(restoreClipboardCheckbox)
 
-        let clipInfo = NSTextField(labelWithString: "Sesle yazma panoya kopyalama ve Cmd+V simülasyonu ile çalışır. Pano geri yükleme aktifse, konuşmanız yapıştırıldıktan hemen sonra eski kopyalanmış veriniz panoda korunur.")
-        clipInfo.frame = NSRect(x: 16, y: 102, width: 538, height: 48)
+        let clipInfo = NSTextField(labelWithString: "YouTube, müzik veya video seslerinin mikrofona karışmasını önlemek için konuşurken sistem sesi 0ms ile susturulur, bitince otomatik geri açılır.")
+        clipInfo.frame = NSRect(x: 16, y: 124, width: 538, height: 38)
         clipInfo.font = NSFont.systemFont(ofSize: 11)
         clipInfo.textColor = .secondaryLabelColor
         sysContent.addSubview(clipInfo)
@@ -604,6 +609,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // Checkboxes
         playSoundsCheckbox.state = cfg.play_sounds ? .on : .off
         restoreClipboardCheckbox.state = cfg.restore_clipboard ? .on : .off
+        muteSystemAudioCheckbox.state = cfg.mute_system_audio ? .on : .off
 
         statusMessageLabel.stringValue = "Ayarlar başarıyla yüklendi."
         statusMessageLabel.textColor = .secondaryLabelColor
@@ -899,6 +905,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         let playSounds = playSoundsCheckbox.state == .on
         let restoreClip = restoreClipboardCheckbox.state == .on
+        let muteAudio = muteSystemAudioCheckbox.state == .on
         let triggerKey = selectedTriggerKeyCode
 
         let success = ConfigManager.shared.update { cfg in
@@ -912,6 +919,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
             cfg.trigger_mode = modeStr
             cfg.play_sounds = playSounds
             cfg.restore_clipboard = restoreClip
+            cfg.mute_system_audio = muteAudio
         }
 
         SoundManager.shared.isEnabled = playSounds
