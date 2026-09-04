@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# start.sh - macOS Voice Typing Uygulamasını Başlatıcı
+# start.sh - macOS Voice Typing Yerel Swift Uygulamasını Başlatıcı
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 PID_FILE="$SCRIPT_DIR/.app.pid"
 LOG_FILE="$SCRIPT_DIR/app.log"
+BINARY="$SCRIPT_DIR/VoiceTyping"
 
 # Halihazırda çalışan örnek var mı kontrol et
 if [ -f "$PID_FILE" ]; then
@@ -19,29 +20,30 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
-# Ekstra kontrol: Başka bir app.py süreci var mı
-EXISTING_PIDS=$(pgrep -f "python.*app\.py" | tr '\n' ' ')
+# Ekstra kontrol: Başka bir VoiceTyping süreci var mı
+EXISTING_PIDS=$(pgrep -x "VoiceTyping" | tr '\n' ' ')
 if [ -n "$EXISTING_PIDS" ]; then
     echo "⚠️  Voice Typing süreci zaten çalışıyor (PID: $EXISTING_PIDS)!"
     echo "Durdurmak için: ./stop.sh"
     exit 0
 fi
 
-# Python 3 kontrolü
-PYTHON_BIN="$(which python3)"
-if [ -z "$PYTHON_BIN" ]; then
-    echo "❌ Python 3 bulunamadı!"
-    exit 1
+# Binary yoksa derle
+if [ ! -f "$BINARY" ]; then
+    echo "⚙️ Native Swift binary derleniyor..."
+    swift build -c release && cp .build/release/VoiceTyping ./VoiceTyping
+    if [ ! -f "$BINARY" ]; then
+        echo "❌ Derleme başarısız oldu!"
+        exit 1
+    fi
 fi
 
-export PYTHONUNBUFFERED=1
-
 if [ "$1" == "--foreground" ] || [ "$1" == "-f" ]; then
-    echo "🎙️ macOS Voice Typing ön planda başlatılıyor (Çıkmak için Ctrl+C)..."
-    exec "$PYTHON_BIN" -u "$SCRIPT_DIR/app.py"
+    echo "🎙️ macOS Voice Typing (Native Swift) ön planda başlatılıyor (Çıkmak için Ctrl+C)..."
+    exec "$BINARY"
 else
-    echo "🎙️ macOS Voice Typing arka planda başlatılıyor..."
-    nohup "$PYTHON_BIN" -u "$SCRIPT_DIR/app.py" >> "$LOG_FILE" 2>&1 &
+    echo "🎙️ macOS Voice Typing (Native Swift) arka planda başlatılıyor..."
+    nohup "$BINARY" >> "$LOG_FILE" 2>&1 &
     APP_PID=$!
     echo "$APP_PID" > "$PID_FILE"
     sleep 1

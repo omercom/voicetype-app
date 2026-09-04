@@ -20,11 +20,13 @@ if [ -f "$PID_FILE" ]; then
     rm -f "$PID_FILE"
 fi
 
-# Ekstra güvenlik: app.py ile çalışan başka örnekler varsa temizle
-REMAINING=$(pgrep -f "python.*app\.py" | tr '\n' ' ')
+# Ekstra güvenlik: VoiceTyping süreçleri varsa temizle
+REMAINING=$(pgrep -x "VoiceTyping" | tr '\n' ' ')
 if [ -n "$REMAINING" ]; then
-    echo "🛑 Kalan app.py süreçleri kapatılıyor: $REMAINING"
+    echo "🛑 Kalan Voice Typing süreçleri kapatılıyor: $REMAINING"
     kill $REMAINING 2>/dev/null
+    sleep 0.5
+    kill -9 $REMAINING 2>/dev/null
     STOPPED=1
 fi
 

@@ -24,4 +24,6 @@ test_*.wav
 .app.pid
 app.log
 config.json
-
+# Swift build artifacts
+.build/
+VoiceTyping
