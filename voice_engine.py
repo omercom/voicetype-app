@@ -146,8 +146,10 @@ class Transcriber:
             return {"success": False, "error": f"Bilinmeyen sağlayıcı: {provider}", "text": "", "latency": 0.0}
 
     def transcribe_groq(self, audio_buffer: io.BytesIO, model: Optional[str] = None) -> Dict[str, Any]:
-        """Groq Whisper ile ultra hızlı (~0.3s) deşifre."""
-        model = model or self.config.get("groq_model", "whisper-large-v3-turbo")
+        """Groq Whisper ile yüksek kaliteli deşifre."""
+        model = (model or self.config.get("groq_model", "whisper-large-v3"))
+        if model == "whisper-large-v3-turbo":
+            model = "whisper-large-v3"
         lang = self.config.get("language", "tr")
 
         if not self._groq_client:

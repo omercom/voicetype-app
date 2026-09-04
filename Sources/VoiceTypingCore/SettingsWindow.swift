@@ -297,7 +297,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         provContent.addSubview(provLabel)
 
         providerPopUp = NSPopUpButton(frame: NSRect(x: 150, y: 32, width: 405, height: 26), pullsDown: false)
-        providerPopUp.addItem(withTitle: "Groq Whisper (~0.3s Ultra Hızlı - Önerilen)")
+        providerPopUp.addItem(withTitle: "Groq Whisper (whisper-large-v3 - Yüksek Kalite)")
         providerPopUp.addItem(withTitle: "Google Gemini (Doğal Dil & Bağlamsal)")
         provContent.addSubview(providerPopUp)
         container.addSubview(provBox)
@@ -574,6 +574,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         groqKeyField.stringValue = cfg.groq_api_key
         if let idx = ConfigManager.availableGroqModels.firstIndex(where: { $0.id == cfg.groq_model }) {
             groqModelPopUp.selectItem(at: idx)
+        } else {
+            groqModelPopUp.selectItem(at: 0)
         }
 
         // Gemini
@@ -819,6 +821,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
             let groqIdx = max(0, self.groqModelPopUp.indexOfSelectedItem)
             if groqIdx < ConfigManager.availableGroqModels.count {
                 testConfig.groq_model = ConfigManager.availableGroqModels[groqIdx].id
+            } else {
+                testConfig.groq_model = "whisper-large-v3"
             }
 
             let geminiIdx = max(0, self.geminiModelPopUp.indexOfSelectedItem)
@@ -877,7 +881,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let geminiKey = geminiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let groqIdx = max(0, groqModelPopUp.indexOfSelectedItem)
-        let groqModel = ConfigManager.availableGroqModels[groqIdx].id
+        let groqModel = (groqIdx < ConfigManager.availableGroqModels.count)
+            ? ConfigManager.availableGroqModels[groqIdx].id
+            : "whisper-large-v3"
 
         let geminiIdx = max(0, geminiModelPopUp.indexOfSelectedItem)
         let geminiModel = ConfigManager.availableGeminiModels[geminiIdx].id

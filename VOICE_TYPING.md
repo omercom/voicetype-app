@@ -16,7 +16,7 @@ macOS üzerinde herhangi bir metin alanındayken (tarayıcı, kod editörü, mes
 
 3. **Yerel Ayarlar ve İzin Yönetimi Penceresi (Native Settings Dialog):**
    - **En Üstte macOS Sistem İzinleri:** Mikrofon ve Erişilebilirlik (Accessibility) izin durumları renkli durum rozetleri (`🟢` / `🔴` / `🟡`) ile gösterilir; "Sistem Ayarlarını Aç" butonlarıyla doğrudan ilgili macOS Gizlilik paneline tek tıkla erişilir.
-   - **Model ve Sağlayıcı Seçimi:** Groq Whisper (`whisper-large-v3-turbo`, `whisper-large-v3`) ve Gemini (`gemini-3.5-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite`) modelleri.
+   - **Model ve Sağlayıcı Seçimi:** Groq Whisper (`whisper-large-v3`) ve Gemini (`gemini-3.5-flash`, `gemini-3.6-flash`, `gemini-3.5-flash-lite`) modelleri.
    - **API Anahtarları:** Güvenli metin kutuları üzerinden Groq ve Gemini anahtarlarını yapılandırma.
    - **2 Saniyelik Canlı Test:** Ayarlar penceresinden anında ses kaydı alıp deşifreyi test etme imkanı (girdiğiniz güncel form değerleriyle anında test).
 

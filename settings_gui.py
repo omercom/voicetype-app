@@ -627,11 +627,10 @@ class SettingsDialog(tk.Tk):
         groq_m_frame = ttk.Frame(models_card)
         groq_m_frame.pack(fill=tk.X, pady=4)
         ttk.Label(groq_m_frame, text="Groq Modeli:", font=self.font_bold, width=16).pack(side=tk.LEFT)
-        self.var_groq_model = tk.StringVar(value=self.current_config.get("groq_model", "whisper-large-v3-turbo"))
+        self.var_groq_model = tk.StringVar(value=self.current_config.get("groq_model", "whisper-large-v3"))
         
         self.groq_options = [
-            ("whisper-large-v3-turbo", "Whisper Large v3 Turbo (~0.3s - En Hızlı, Önerilen)"),
-            ("whisper-large-v3", "Whisper Large v3 (~0.4s - En Yüksek Doğruluk)")
+            ("whisper-large-v3", "Whisper Large v3 (Yüksek Kalite & Doğruluk - Standart)")
         ]
         self.combo_groq_m = ttk.Combobox(
             groq_m_frame,
@@ -639,7 +638,9 @@ class SettingsDialog(tk.Tk):
             state="readonly",
             width=50
         )
-        current_g_id = self.current_config.get("groq_model", "whisper-large-v3-turbo")
+        current_g_id = self.current_config.get("groq_model", "whisper-large-v3")
+        if current_g_id == "whisper-large-v3-turbo":
+            current_g_id = "whisper-large-v3"
         for idx, (mid, label) in enumerate(self.groq_options):
             if mid == current_g_id:
                 self.combo_groq_m.current(idx)
@@ -982,7 +983,7 @@ class SettingsDialog(tk.Tk):
         """Tüm sekmelerdeki verileri toplar, config.json ve .env dosyalarına yazar."""
         # 1. Model id'lerini combobox seçimlerinden ayrıştır
         selected_groq_idx = self.combo_groq_m.current()
-        groq_model_id = self.groq_options[selected_groq_idx][0] if selected_groq_idx >= 0 else "whisper-large-v3-turbo"
+        groq_model_id = self.groq_options[selected_groq_idx][0] if (selected_groq_idx >= 0 and selected_groq_idx < len(self.groq_options)) else "whisper-large-v3"
 
         selected_gemini_idx = self.combo_gemini_m.current()
         gemini_model_id = self.gemini_options[selected_gemini_idx][0] if selected_gemini_idx >= 0 else "gemini-3.6-flash"

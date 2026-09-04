@@ -78,7 +78,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 3. Sağlayıcı Submenu
         let providerMenu = NSMenu()
-        groqMenuItem = NSMenuItem(title: "Groq Whisper (~0.3s Hızlı)", action: #selector(selectGroqProvider), keyEquivalent: "")
+        groqMenuItem = NSMenuItem(title: "Groq Whisper (whisper-large-v3)", action: #selector(selectGroqProvider), keyEquivalent: "")
         groqMenuItem.target = self
         providerMenu.addItem(groqMenuItem)
 
@@ -239,9 +239,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         if started {
             SoundManager.shared.playStart()
             setStatus(title: "🔴 Dinliyor...", menuText: "Durum: Dinleniyor (Konuşun)...")
+            RecordingHUD.shared.showRecording()
         } else {
             SoundManager.shared.playCancel()
             setStatus(title: "⚠️ Hata", menuText: "Durum: Mikrofon Başlatılamadı!", revertAfter: 2.0)
+            RecordingHUD.shared.showError(message: "Mikrofon Başlatılamadı")
         }
     }
 
@@ -252,12 +254,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard actualDuration >= config.min_record_duration else {
             // Çok kısa basma - kazara dokunma
+            RecordingHUD.shared.dismiss(animated: true)
             setStatus(title: "🎙️", menuText: readyMenuText)
             return
         }
 
         guard let audioData = data, !audioData.isEmpty else {
             // Sessizlik veya ses alınamadı
+            RecordingHUD.shared.dismiss(animated: true)
             setStatus(title: "🎙️", menuText: readyMenuText)
             return
         }
@@ -265,6 +269,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         SoundManager.shared.playStop()
         isTranscribing = true
         setStatus(title: "⏳ Yazıyor...", menuText: "Durum: Deşifre Ediliyor...")
+        RecordingHUD.shared.showTranscribing()
 
         Transcriber.shared.transcribe(audioData: audioData, config: config) { [weak self] result in
             DispatchQueue.main.async {
@@ -279,16 +284,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                             pasteDelayMs: config.paste_delay_ms
                         )
                         SoundManager.shared.playSuccess()
+                        RecordingHUD.shared.showSuccess(text: "Yapıştırıldı")
                         self.setStatus(
                             title: "✅",
                             menuText: "Durum: Yapıştırıldı (\(String(format: "%.2f", result.latency))s)",
                             revertAfter: 1.5
                         )
                     } else {
+                        RecordingHUD.shared.dismiss(animated: true)
                         self.setStatus(title: "🎙️", menuText: self.readyMenuText)
                     }
                 } else {
                     SoundManager.shared.playCancel()
+                    RecordingHUD.shared.showError(message: "Deşifre Hatası")
                     let err = result.error ?? "Bilinmeyen hata"
                     self.setStatus(title: "⚠️ Hata", menuText: "Hata: \(err)", revertAfter: 3.0)
                 }
@@ -301,6 +309,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         Transcriber.shared.cancel()
         isTranscribing = false
         SoundManager.shared.playCancel()
+        RecordingHUD.shared.dismiss(animated: true)
         setStatus(title: "❌", menuText: "Durum: İptal Edildi", revertAfter: 1.5)
     }
 
@@ -367,6 +376,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quitApp() {
         KeyListener.shared.stop()
         AudioRecorder.shared.cancel()
+        RecordingHUD.shared.dismiss(animated: false)
         NSApplication.shared.terminate(nil)
     }
 }

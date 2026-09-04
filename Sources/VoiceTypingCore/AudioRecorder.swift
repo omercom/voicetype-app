@@ -57,6 +57,15 @@ public class AudioRecorder: NSObject, AVAudioRecorderDelegate {
         }
     }
 
+    /// Anlık mikrofon ses seviyesini (dB cinsinden) döner.
+    public func averagePower() -> Float {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let rec = recorder, isRecording else { return -160.0 }
+        rec.updateMeters()
+        return rec.averagePower(forChannel: 0)
+    }
+
     public func stop() -> (data: Data?, duration: Double) {
         lock.lock()
         defer { lock.unlock() }

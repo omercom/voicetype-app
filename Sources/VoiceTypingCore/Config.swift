@@ -104,7 +104,7 @@ public struct AppConfig: Codable {
         provider: "groq",
         groq_api_key: "",
         gemini_api_key: "",
-        groq_model: "whisper-large-v3-turbo",
+        groq_model: "whisper-large-v3",
         gemini_model: "gemini-3.5-flash",
         language: "tr",
         trigger_key: 54,
@@ -124,16 +124,10 @@ public class ConfigManager {
 
     public static let availableGroqModels: [ModelOption] = [
         ModelOption(
-            id: "whisper-large-v3-turbo",
-            name: "Whisper Large v3 Turbo",
-            price: "0.04 USD / saat",
-            speed: "~0.3s (Ultra Hızlı)"
-        ),
-        ModelOption(
             id: "whisper-large-v3",
-            name: "Whisper Large v3",
+            name: "Whisper Large v3 (Yüksek Kalite)",
             price: "0.111 USD / saat",
-            speed: "~0.6s (Yüksek Doğruluk)"
+            speed: "~0.4s (Yüksek Doğruluk)"
         )
     ]
 
@@ -186,13 +180,21 @@ public class ConfigManager {
             resolvedURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".voice_typing_config.json")
         }
 
+        // Eski turbo modelini kaldır ve whisper-large-v3'e yükselt
+        if loadedConfig?.groq_model == "whisper-large-v3-turbo" {
+            loadedConfig?.groq_model = "whisper-large-v3"
+        }
+
         self.configURL = resolvedURL
         self.config = loadedConfig ?? AppConfig.defaultConfig
     }
 
     public func reload() {
         if let data = try? Data(contentsOf: configURL),
-           let decoded = try? JSONDecoder().decode(AppConfig.self, from: data) {
+           var decoded = try? JSONDecoder().decode(AppConfig.self, from: data) {
+            if decoded.groq_model == "whisper-large-v3-turbo" {
+                decoded.groq_model = "whisper-large-v3"
+            }
             self.config = decoded
         }
     }
