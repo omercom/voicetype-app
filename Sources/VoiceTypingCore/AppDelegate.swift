@@ -3,8 +3,8 @@ import AppKit
 
 public class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private var statusMenuItem: NSMenuItem!
-    private var toggleRecordMenuItem: NSMenuItem!
+    private var statusMenuItem: NSMenuItem?
+    private var toggleRecordMenuItem: NSMenuItem?
     private var groqMenuItem: NSMenuItem!
     private var geminiMenuItem: NSMenuItem!
     private var holdModeMenuItem: NSMenuItem!
@@ -117,19 +117,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildMenu() {
         let menu = NSMenu()
 
-        // 1. Durum Satırı
-        statusMenuItem = NSMenuItem(title: readyMenuText, action: nil, keyEquivalent: "")
-        statusMenuItem.isEnabled = false
-        menu.addItem(statusMenuItem)
-
-        // 1b. Doğrudan Kayıt Başlat / Bitir Menü Öğesi
-        toggleRecordMenuItem = NSMenuItem(title: "Sesle Yazmayı Başlat", action: #selector(toggleRecordAction), keyEquivalent: "r")
-        toggleRecordMenuItem.target = self
-        menu.addItem(toggleRecordMenuItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // 2. Ayarlar Penceresi (Temiz Apple HIG standardı, çift ikon önlendi)
+        // 1. Ayarlar Penceresi (Temiz Apple HIG standardı, çift ikon önlendi)
         let settingsItem = NSMenuItem(title: "Ayarlar...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         settingsItem.image = nil
@@ -272,8 +260,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             button.image = getWaveformIcon()
             button.title = ""
         }
-        statusMenuItem.title = readyMenuText
-        toggleRecordMenuItem.title = (AudioRecorder.shared.isRecording || isFinishingRecord) ? "Kaydı Bitir ve Deşifre Et" : "Sesle Yazmayı Başlat"
+        statusMenuItem?.title = readyMenuText
+        toggleRecordMenuItem?.title = (AudioRecorder.shared.isRecording || isFinishingRecord) ? "Kaydı Bitir ve Deşifre Et" : "Sesle Yazmayı Başlat"
     }
 
     @objc private func toggleRecordAction() {
@@ -313,16 +301,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             self.revertStatusTimer?.invalidate()
             self.revertStatusTimer = nil
 
-            // Menü çubuğundaki sabit premium waveform ikonu bozulmaz;
-            // yalnızca açılan menü içerisindeki durum metni güncellenir.
-            self.statusMenuItem.title = menuText
-            self.toggleRecordMenuItem.title = (AudioRecorder.shared.isRecording || self.isFinishingRecord) ? "⏹️ Kaydı Bitir ve Deşifre Et" : "🎙️ Sesle Yazmayı Başlat (Kayıt)"
+            // Menü çubuğundaki sabit premium waveform ikonu bozulmaz.
+            self.statusMenuItem?.title = menuText
+            self.toggleRecordMenuItem?.title = (AudioRecorder.shared.isRecording || self.isFinishingRecord) ? "⏹️ Kaydı Bitir ve Deşifre Et" : "🎙️ Sesle Yazmayı Başlat (Kayıt)"
 
             if let delay = revertAfter {
                 self.revertStatusTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
                     guard let self = self else { return }
-                    self.statusMenuItem.title = self.readyMenuText
-                    self.toggleRecordMenuItem.title = "🎙️ Sesle Yazmayı Başlat (Kayıt)"
+                    self.statusMenuItem?.title = self.readyMenuText
+                    self.toggleRecordMenuItem?.title = "🎙️ Sesle Yazmayı Başlat (Kayıt)"
                 }
             }
         }
@@ -743,10 +730,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Ayarlar...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
-
-        let toggleItem = NSMenuItem(title: "Sesle Yazmayı Başlat", action: #selector(toggleRecordAction), keyEquivalent: "r")
-        toggleItem.target = self
-        menu.addItem(toggleItem)
 
         menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(title: "Uygulamadan Tamamen Çık", action: #selector(quitApp), keyEquivalent: "q")
