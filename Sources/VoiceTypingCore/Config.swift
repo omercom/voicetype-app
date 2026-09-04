@@ -99,6 +99,7 @@ public struct AppConfig: Codable {
     public var restore_clipboard: Bool
     public var paste_delay_ms: Int
     public var min_record_duration: Double
+    public var mute_system_audio: Bool
 
     public static let defaultConfig = AppConfig(
         provider: "groq",
@@ -112,8 +113,62 @@ public struct AppConfig: Codable {
         play_sounds: true,
         restore_clipboard: false,
         paste_delay_ms: 20,
-        min_record_duration: 0.20
+        min_record_duration: 0.20,
+        mute_system_audio: true
     )
+
+    enum CodingKeys: String, CodingKey {
+        case provider, groq_api_key, gemini_api_key, groq_model, gemini_model
+        case language, trigger_key, trigger_mode, play_sounds, restore_clipboard
+        case paste_delay_ms, min_record_duration, mute_system_audio
+    }
+
+    public init(
+        provider: String,
+        groq_api_key: String,
+        gemini_api_key: String,
+        groq_model: String,
+        gemini_model: String,
+        language: String,
+        trigger_key: Int,
+        trigger_mode: String,
+        play_sounds: Bool,
+        restore_clipboard: Bool,
+        paste_delay_ms: Int,
+        min_record_duration: Double,
+        mute_system_audio: Bool = true
+    ) {
+        self.provider = provider
+        self.groq_api_key = groq_api_key
+        self.gemini_api_key = gemini_api_key
+        self.groq_model = groq_model
+        self.gemini_model = gemini_model
+        self.language = language
+        self.trigger_key = trigger_key
+        self.trigger_mode = trigger_mode
+        self.play_sounds = play_sounds
+        self.restore_clipboard = restore_clipboard
+        self.paste_delay_ms = paste_delay_ms
+        self.min_record_duration = min_record_duration
+        self.mute_system_audio = mute_system_audio
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "groq"
+        groq_api_key = try container.decodeIfPresent(String.self, forKey: .groq_api_key) ?? ""
+        gemini_api_key = try container.decodeIfPresent(String.self, forKey: .gemini_api_key) ?? ""
+        groq_model = try container.decodeIfPresent(String.self, forKey: .groq_model) ?? "whisper-large-v3"
+        gemini_model = try container.decodeIfPresent(String.self, forKey: .gemini_model) ?? "gemini-3.5-flash"
+        language = try container.decodeIfPresent(String.self, forKey: .language) ?? "tr"
+        trigger_key = try container.decodeIfPresent(Int.self, forKey: .trigger_key) ?? 54
+        trigger_mode = try container.decodeIfPresent(String.self, forKey: .trigger_mode) ?? "hold"
+        play_sounds = try container.decodeIfPresent(Bool.self, forKey: .play_sounds) ?? true
+        restore_clipboard = try container.decodeIfPresent(Bool.self, forKey: .restore_clipboard) ?? false
+        paste_delay_ms = try container.decodeIfPresent(Int.self, forKey: .paste_delay_ms) ?? 20
+        min_record_duration = try container.decodeIfPresent(Double.self, forKey: .min_record_duration) ?? 0.20
+        mute_system_audio = try container.decodeIfPresent(Bool.self, forKey: .mute_system_audio) ?? true
+    }
 }
 
 public class ConfigManager {

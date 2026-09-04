@@ -11,6 +11,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var toggleModeMenuItem: NSMenuItem!
     private var soundEffectsMenuItem: NSMenuItem!
     private var restoreClipboardMenuItem: NSMenuItem!
+    private var muteAudioMenuItem: NSMenuItem!
     private var triggerKeyMenuItems: [NSMenuItem] = []
 
     private var isTranscribing: Bool = false
@@ -144,6 +145,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         restoreClipboardMenuItem.target = self
         menu.addItem(restoreClipboardMenuItem)
 
+        // 7b. Konuşurken Müziği/Sesi Sustur Toggle
+        muteAudioMenuItem = NSMenuItem(title: "🔇 Konuşurken Sesi Sustur", action: #selector(toggleMuteSystemAudio), keyEquivalent: "")
+        muteAudioMenuItem.target = self
+        menu.addItem(muteAudioMenuItem)
+
         menu.addItem(NSMenuItem.separator())
 
         // 8. Test Kaydı
@@ -177,6 +183,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         soundEffectsMenuItem.state = cfg.play_sounds ? .on : .off
         restoreClipboardMenuItem.state = cfg.restore_clipboard ? .on : .off
+        muteAudioMenuItem.state = cfg.mute_system_audio ? .on : .off
 
         SoundManager.shared.isEnabled = cfg.play_sounds
 
@@ -235,12 +242,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleRecordStart() {
         guard !isTranscribing else { return }
 
+        let config = ConfigManager.shared.config
+        if config.mute_system_audio {
+            SystemAudioManager.shared.muteForDictation()
+        }
+
         let started = AudioRecorder.shared.start()
         if started {
             SoundManager.shared.playStart()
             setStatus(title: "🔴 Dinliyor...", menuText: "Durum: Dinleniyor (Konuşun)...")
             RecordingHUD.shared.showRecording()
         } else {
+            SystemAudioManager.shared.restoreAfterDictation()
             SoundManager.shared.playCancel()
             setStatus(title: "⚠️ Hata", menuText: "Durum: Mikrofon Başlatılamadı!", revertAfter: 2.0)
             RecordingHUD.shared.showError(message: "Mikrofon Başlatılamadı")
@@ -249,6 +262,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleRecordStop(duration: Double) {
         let config = ConfigManager.shared.config
+
+        // Konuşma bittiğinde arka plan çıkış sesini anında geri aç
+        SystemAudioManager.shared.restoreAfterDictation()
 
         let (data, actualDuration) = AudioRecorder.shared.stop()
 
@@ -305,6 +321,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCancel() {
+        SystemAudioManager.shared.restoreAfterDictation()
         AudioRecorder.shared.cancel()
         Transcriber.shared.cancel()
         isTranscribing = false
@@ -353,6 +370,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleRestoreClipboard() {
         let current = ConfigManager.shared.config.restore_clipboard
         ConfigManager.shared.update { $0.restore_clipboard = !current }
+        refreshMenuStates()
+    }
+
+    @objc private func toggleMuteSystemAudio() {
+        let current = ConfigManager.shared.config.mute_system_audio
+        ConfigManager.shared.update { $0.mute_system_audio = !current }
         refreshMenuStates()
     }
 
