@@ -510,170 +510,118 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     // =========================================================================
-    // TAB 3: Sistem & İzinler (Interactive Permission Cards & Hardware Test)
+    // TAB 3: Sistem & İzinler (Native macOS Two-Column Layout & Hardware Test)
     // =========================================================================
     private func buildTab3PermissionsView() -> NSView {
         let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 435))
 
-        // Başlık
-        let headerLabel = NSTextField(labelWithString: "Gerekli macOS İzinleri")
-        headerLabel.frame = NSRect(x: 32, y: 12, width: 300, height: 20)
-        headerLabel.font = NSFont.systemFont(ofSize: 13, weight: .bold)
-        container.addSubview(headerLabel)
+        // 1. MİKROFON İZNİ
+        let micSectionLabel = createSectionLabel(text: "Mikrofon İzni", y: 22)
+        container.addSubview(micSectionLabel)
 
-        let subLabel = NSTextField(labelWithString: "Voice Typing'in çalışması için gereken iki temel sistem izni aşağıdadır:")
-        subLabel.frame = NSRect(x: 32, y: 32, width: 586, height: 16)
-        subLabel.font = NSFont.systemFont(ofSize: 11)
-        subLabel.textColor = .secondaryLabelColor
-        container.addSubview(subLabel)
-
-        // 1. KART: MİKROFON İZNİ
-        let micBox = NSBox(frame: NSRect(x: 32, y: 52, width: 586, height: 60))
-        micBox.boxType = .custom
-        micBox.cornerRadius = 8
-        micBox.borderWidth = 1
-        micBox.borderColor = NSColor.separatorColor.withAlphaComponent(0.25)
-        micBox.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.4)
-        micBox.titlePosition = .noTitle
-        let micContent = FlippedContentView(frame: micBox.bounds)
-
-        let micIcon = NSImageView(frame: NSRect(x: 14, y: 16, width: 28, height: 28))
-        if #available(macOS 11.0, *), let img = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: nil) {
-            micIcon.image = img
-            micIcon.contentTintColor = .systemBlue
-        }
-        micContent.addSubview(micIcon)
-
-        let micTitle = NSTextField(labelWithString: "Mikrofon Erişimi")
-        micTitle.frame = NSRect(x: 52, y: 11, width: 220, height: 18)
-        micTitle.font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
-        micContent.addSubview(micTitle)
-
-        let micDesc = NSTextField(labelWithString: "Sesinizi kaydedip yapay zeka modeline aktarmak için zorunludur.")
-        micDesc.frame = NSRect(x: 52, y: 31, width: 310, height: 16)
-        micDesc.font = NSFont.systemFont(ofSize: 10.5)
-        micDesc.textColor = .secondaryLabelColor
-        micContent.addSubview(micDesc)
-
-        micStatusLabel = NSTextField(labelWithString: "🟢 Yetki Verildi")
-        micStatusLabel.frame = NSRect(x: 370, y: 19, width: 120, height: 20)
-        micStatusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        micStatusLabel = NSTextField(labelWithString: "🟢 Yetki Verildi (Aktif)")
+        micStatusLabel.frame = NSRect(x: 175, y: 22, width: 275, height: 22)
+        micStatusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         micStatusLabel.textColor = .systemGreen
-        micContent.addSubview(micStatusLabel)
+        container.addSubview(micStatusLabel)
 
-        micActionButton = NSButton(frame: NSRect(x: 495, y: 15, width: 80, height: 28))
-        micActionButton.title = "Ayarlar"
+        micActionButton = NSButton(frame: NSRect(x: 465, y: 19, width: 150, height: 28))
+        micActionButton.title = "Sistem Ayarlarını Aç"
         micActionButton.bezelStyle = .rounded
         micActionButton.target = self
         micActionButton.action = #selector(openMicSettingsClicked)
-        micContent.addSubview(micActionButton)
+        container.addSubview(micActionButton)
 
-        micBox.contentView = micContent
-        container.addSubview(micBox)
+        let micNote = createNoteLabel(text: "Konuşmanızı yakalamak ve AI modeline aktarmak için mikrofon erişimi zorunludur.", y: 49)
+        container.addSubview(micNote)
 
-        // 2. KART: ERİŞİLEBİLİRLİK İZNİ
-        let accBox = NSBox(frame: NSRect(x: 32, y: 118, width: 586, height: 60))
-        accBox.boxType = .custom
-        accBox.cornerRadius = 8
-        accBox.borderWidth = 1
-        accBox.borderColor = NSColor.separatorColor.withAlphaComponent(0.25)
-        accBox.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.4)
-        accBox.titlePosition = .noTitle
-        let accContent = FlippedContentView(frame: accBox.bounds)
+        // Ayırıcı
+        container.addSubview(createSeparator(y: 85))
 
-        let accIcon = NSImageView(frame: NSRect(x: 14, y: 16, width: 28, height: 28))
-        if #available(macOS 11.0, *), let img = NSImage(systemSymbolName: "hand.raised.fill", accessibilityDescription: nil) {
-            accIcon.image = img
-            accIcon.contentTintColor = .systemPurple
-        }
-        accContent.addSubview(accIcon)
+        // 2. ERİŞİLEBİLİRLİK İZNİ
+        let accSectionLabel = createSectionLabel(text: "Erişilebilirlik", y: 102)
+        container.addSubview(accSectionLabel)
 
-        let accTitle = NSTextField(labelWithString: "Erişilebilirlik İzni")
-        accTitle.frame = NSRect(x: 52, y: 11, width: 220, height: 18)
-        accTitle.font = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
-        accContent.addSubview(accTitle)
-
-        let accDesc = NSTextField(labelWithString: "Klavye kısayolunu dinlemek ve metni imlece yazmak için zorunludur.")
-        accDesc.frame = NSRect(x: 52, y: 31, width: 310, height: 16)
-        accDesc.font = NSFont.systemFont(ofSize: 10.5)
-        accDesc.textColor = .secondaryLabelColor
-        accContent.addSubview(accDesc)
-
-        accStatusLabel = NSTextField(labelWithString: "🟢 Yetki Verildi")
-        accStatusLabel.frame = NSRect(x: 370, y: 19, width: 120, height: 20)
-        accStatusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        accStatusLabel = NSTextField(labelWithString: "🟢 Yetki Verildi (Aktif)")
+        accStatusLabel.frame = NSRect(x: 175, y: 102, width: 275, height: 22)
+        accStatusLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
         accStatusLabel.textColor = .systemGreen
-        accContent.addSubview(accStatusLabel)
+        container.addSubview(accStatusLabel)
 
-        accActionButton = NSButton(frame: NSRect(x: 495, y: 15, width: 80, height: 28))
-        accActionButton.title = "Ayarlar"
+        accActionButton = NSButton(frame: NSRect(x: 465, y: 99, width: 150, height: 28))
+        accActionButton.title = "Sistem Ayarlarını Aç"
         accActionButton.bezelStyle = .rounded
         accActionButton.target = self
         accActionButton.action = #selector(openAccSettingsClicked)
-        accContent.addSubview(accActionButton)
+        container.addSubview(accActionButton)
 
-        accBox.contentView = accContent
-        container.addSubview(accBox)
+        let accNote = createNoteLabel(text: "Klavye kısayolunu dinlemek ve deşifre edilen metni imlecin olduğu yere yazmak için zorunludur.", y: 129)
+        container.addSubview(accNote)
 
-        // Canlı Rehber ve Spinner (Erişilebilirlik bekleme durumunda)
-        accProgressIndicator = NSProgressIndicator(frame: NSRect(x: 34, y: 184, width: 16, height: 16))
+        // Canlı Algılama Göstergesi
+        accProgressIndicator = NSProgressIndicator(frame: NSRect(x: 175, y: 161, width: 14, height: 14))
         accProgressIndicator.style = .spinning
         accProgressIndicator.controlSize = .small
         accProgressIndicator.isDisplayedWhenStopped = false
         container.addSubview(accProgressIndicator)
 
         accGuideLabel = NSTextField(labelWithString: "İzinler Sistem Ayarları'ndan otomatik olarak anlık algılanmaktadır.")
-        accGuideLabel.frame = NSRect(x: 56, y: 183, width: 562, height: 18)
-        accGuideLabel.font = NSFont.systemFont(ofSize: 11)
+        accGuideLabel.frame = NSRect(x: 195, y: 159, width: 420, height: 18)
+        accGuideLabel.font = NSFont.systemFont(ofSize: 10.5)
         accGuideLabel.textColor = .secondaryLabelColor
         container.addSubview(accGuideLabel)
 
-        container.addSubview(createSeparator(y: 207))
+        // Ayırıcı
+        container.addSubview(createSeparator(y: 187))
 
-        // 3. BÖLÜM: MİKROFON DONANIM & SES TESTİ
-        let testHeader = NSTextField(labelWithString: "Mikrofon Donanım ve Deşifre Testi")
-        testHeader.frame = NSRect(x: 32, y: 217, width: 300, height: 20)
-        testHeader.font = NSFont.systemFont(ofSize: 13, weight: .bold)
-        container.addSubview(testHeader)
+        // 3. MİKROFON DONANIM VE DEŞİFRE TESTİ
+        let testSectionLabel = createSectionLabel(text: "Donanım Testi", y: 204)
+        container.addSubview(testSectionLabel)
 
-        let testSub = NSTextField(labelWithString: "Mikrofonunuzun ses yakaladığından ve modelin metin ürettiğinden emin olun:")
-        testSub.frame = NSRect(x: 32, y: 237, width: 586, height: 16)
-        testSub.font = NSFont.systemFont(ofSize: 11)
-        testSub.textColor = .secondaryLabelColor
-        container.addSubview(testSub)
-
-        testRecordButton = NSButton(frame: NSRect(x: 32, y: 257, width: 210, height: 28))
-        testRecordButton.title = "2 Saniyelik Test Kaydı Yap"
+        testRecordButton = NSButton(frame: NSRect(x: 175, y: 201, width: 170, height: 28))
+        testRecordButton.title = "2 Sn Test Kaydı Yap"
         testRecordButton.bezelStyle = .rounded
         testRecordButton.target = self
         testRecordButton.action = #selector(testRecordClicked)
         container.addSubview(testRecordButton)
 
         testStatusLabel = NSTextField(labelWithString: "Durum: Hazır (Butona basıp konuşun)")
-        testStatusLabel.frame = NSRect(x: 252, y: 261, width: 366, height: 20)
+        testStatusLabel.frame = NSRect(x: 355, y: 205, width: 260, height: 20)
         testStatusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
         testStatusLabel.textColor = .secondaryLabelColor
         container.addSubview(testStatusLabel)
 
-        let resultContainer = NSBox(frame: NSRect(x: 32, y: 292, width: 586, height: 125))
+        let testNote = NSTextField(wrappingLabelWithString: "Mikrofonun ses aldığını ve seçili AI modelinin metin ürettiğini buradan canlı test edin:")
+        testNote.frame = NSRect(x: 175, y: 233, width: 440, height: 18)
+        testNote.font = NSFont.systemFont(ofSize: 11)
+        testNote.textColor = .secondaryLabelColor
+        container.addSubview(testNote)
+
+        let resultContainer = NSBox(frame: NSRect(x: 175, y: 257, width: 440, height: 115))
         resultContainer.boxType = .custom
         resultContainer.isTransparent = false
         resultContainer.borderWidth = 1
         resultContainer.cornerRadius = 8
         resultContainer.borderColor = NSColor.separatorColor.withAlphaComponent(0.20)
-        resultContainer.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.5)
+        resultContainer.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.40)
         resultContainer.titlePosition = .noTitle
 
         let resultFlipped = FlippedContentView(frame: resultContainer.bounds)
-        testAudioResultLabel = NSTextField(wrappingLabelWithString: "")
-        testAudioResultLabel.frame = NSRect(x: 14, y: 10, width: 558, height: 105)
+        testAudioResultLabel = NSTextField(wrappingLabelWithString: "Test butonuna bastığınızda 2 saniyelik ses kaydedilir ve aktif yapay zeka modeliyle deşifre edilir. Çıktı burada listelenir.")
+        testAudioResultLabel.frame = NSRect(x: 12, y: 10, width: 416, height: 95)
         testAudioResultLabel.font = NSFont.systemFont(ofSize: 11.5)
-        testAudioResultLabel.textColor = .labelColor
+        testAudioResultLabel.textColor = .secondaryLabelColor
         testAudioResultLabel.maximumNumberOfLines = 5
         resultFlipped.addSubview(testAudioResultLabel)
 
         resultContainer.contentView = resultFlipped
         container.addSubview(resultContainer)
+
+        let tipLabel = NSTextField(labelWithString: "💡 Sistem Ayarları'nda izin anahtarlarını değiştirdiğinizde durum anında güncellenir.")
+        tipLabel.frame = NSRect(x: 175, y: 382, width: 440, height: 20)
+        tipLabel.font = NSFont.systemFont(ofSize: 10.5)
+        tipLabel.textColor = .tertiaryLabelColor
+        container.addSubview(tipLabel)
 
         return container
     }
@@ -865,10 +813,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         switch mic.status {
         case .authorized:
             micStatusLabel.textColor = .systemGreen
-            micActionButton?.title = "Ayarlar"
+            micActionButton?.title = "Sistem Ayarları"
         case .denied:
             micStatusLabel.textColor = .systemRed
-            micActionButton?.title = "Ayarları Aç"
+            micActionButton?.title = "Sistem Ayarlarını Aç"
         case .notDetermined:
             micStatusLabel.textColor = .systemOrange
             micActionButton?.title = "İzin Ver"
@@ -882,7 +830,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         switch acc.status {
         case .authorized:
             accStatusLabel.textColor = .systemGreen
-            accActionButton?.title = "Ayarlar"
+            accActionButton?.title = "Sistem Ayarları"
             accProgressIndicator?.stopAnimation(nil)
             if !lastKnownAccStatus && permissionPollTimer != nil {
                 accGuideLabel?.stringValue = "✅ Yetki verildi! Voice Typing kullanıma hazır."
@@ -892,7 +840,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             lastKnownAccStatus = true
         case .denied:
             accStatusLabel.textColor = .systemRed
-            accActionButton?.title = "Ayarları Aç"
+            accActionButton?.title = "Sistem Ayarlarını Aç"
             lastKnownAccStatus = false
         default:
             accStatusLabel.textColor = .systemOrange
