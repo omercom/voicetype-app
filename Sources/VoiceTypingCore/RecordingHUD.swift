@@ -230,21 +230,10 @@ public class RecordingHUD: NSObject {
         }
     }
 
-    /// Canlı akış sırasında (Gemini Live) gelen ara metinleri dinamik ve yumuşak şekilde gösterir.
+    /// Kullanıcı isteği doğrultusunda gösterge kapsülü sade ve minimal tutulur;
+    /// deşifre/çeviri metni indikatörün içerisine yazılmaz, kapsül genişliği ve "Dinliyor..." durumu sabit kalır.
     public func updateInterimText(_ text: String) {
-        executeOnMainThread { [weak self] in
-            guard let self = self, (self.currentState == .recording || self.currentState == .transcribing) else { return }
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-
-            self.statusLabel.stringValue = trimmed
-
-            // Metin genişliğine göre Dynamic Island tarzı yumuşak genişleme (152px - 340px)
-            let font = self.statusLabel.font ?? NSFont.systemFont(ofSize: 12, weight: .medium)
-            let textWidth = (trimmed as NSString).size(withAttributes: [.font: font]).width
-            let targetWidth = min(340.0, max(self.hudWidth, textWidth + 56.0))
-            self.updatePosition(width: targetWidth)
-        }
+        // İndikatör içerisine çevrilen/deşifre edilen metin yazılmaz, kapsül boyutu ve sade görünüm korunur.
     }
 
     // MARK: - Durum 2: Deşifre Ediliyor (Transcribing)
@@ -257,10 +246,6 @@ public class RecordingHUD: NSObject {
             self.stopPulseAnimation()
             self.currentState = .transcribing
 
-            let hasLiveText = !self.statusLabel.stringValue.isEmpty &&
-                              self.statusLabel.stringValue != "Dinliyor..." &&
-                              self.statusLabel.stringValue != "Yazılıyor..."
-
             self.pulsingDot.isHidden = true
             self.waveformContainer.isHidden = true
             self.checkmarkLabel.isHidden = true
@@ -269,19 +254,12 @@ public class RecordingHUD: NSObject {
             self.spinner.isHidden = false
             self.spinner.startAnimation(nil)
 
-            if !hasLiveText {
-                self.statusLabel.stringValue = "Yazılıyor..."
-                self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
-                self.updatePosition(width: self.hudWidth)
-            } else {
-                self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
-                // Mevcut canlı metni ve genişliği koru, son kelimeler akmaya devam edebilir
-            }
+            self.statusLabel.stringValue = "Yazılıyor..."
+            self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
+            self.updatePosition(width: self.hudWidth)
 
             if !self.panel.isVisible || self.panel.alphaValue < 0.1 {
-                if !hasLiveText {
-                    self.updatePosition(width: self.hudWidth)
-                }
+                self.updatePosition(width: self.hudWidth)
                 self.panel.orderFrontRegardless()
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.14

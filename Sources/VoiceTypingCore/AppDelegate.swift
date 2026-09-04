@@ -310,9 +310,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         if isGeminiLive {
             let session = Transcriber.shared.startLiveGeminiSession(
                 config: config,
-                onInterim: { interimText in
-                    RecordingHUD.shared.updateInterimText(interimText)
-                },
+                onInterim: nil,
                 completion: { [weak self] result in
                     self?.handleTranscriptionResult(result: result, config: config)
                 }
