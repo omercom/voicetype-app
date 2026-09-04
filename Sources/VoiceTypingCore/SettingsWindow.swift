@@ -858,7 +858,6 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let featureItems = [
             "• Google Gemini 3.5 Transcribe Live (Gerçek Zamanlı WebSocket Akışı)",
             "• Groq Whisper Large v3 (Düşük Gecikmeli Bulut Deşifre Motoru)",
-            "• 280ms Akustik Uzatma Penceresi (Son kelimelerin kesilmesini önler)",
             "• Konuşurken arka plan sesini/müziği akıllıca duraklatma",
             "• Kararlı metin algılama (Settled Silence Debounce)",
             "• Sıfır telemetri ve güvenli yerel pano entegrasyonu"
