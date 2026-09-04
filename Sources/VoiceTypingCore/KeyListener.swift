@@ -116,10 +116,8 @@ public class KeyListener {
 
         while isRunning {
             guard AXIsProcessTrusted() else {
-                print("[KeyListener] ⚠️ Erişilebilirlik (Accessibility) izni bekleniyor... (Sistem Ayarları > Gizlilik ve Güvenlik > Erişilebilirlik)")
-                let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-                _ = AXIsProcessTrustedWithOptions(options)
-                Thread.sleep(forTimeInterval: 2.0)
+                // Erişilebilirlik izni henüz yoksa arka planda sessizce iznin verilmesini bekle
+                Thread.sleep(forTimeInterval: 0.5)
                 continue
             }
 

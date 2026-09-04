@@ -52,21 +52,38 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             self?.refreshMenuStates()
         }
 
-        // KeyListener bağla
-        setupKeyListener()
+        // İzinleri başlat ve hazır olduğunda ses ve tuş dinleyicisini aktive et
+        startPermissionsFlow()
+    }
 
-        // Başlangıç açılış sesi çal (Wispr Flow success.wav)
-        SoundManager.shared.playStartup()
+    private func startPermissionsFlow() {
+        // 1. Önce Mikrofon İzni: Eğer henüz sorulmadıysa, doğrudan native macOS sistem diyaloğu açılır.
+        // Kullanıcı "İzin Ver" (Allow) dediğinde otomatik onaylanır, ayarlar penceresi açılmaz.
+        PermissionManager.shared.requestMicrophonePermission { [weak self] micGranted in
+            print("[AppDelegate] Mikrofon izni durumu: \(micGranted)")
 
-        // Başlangıç izin kontrolü
-        let mic = PermissionManager.shared.getMicrophoneStatus()
-        let acc = PermissionManager.shared.getAccessibilityStatus()
-        print("[AppDelegate] Başlatıldı. İzinler: Mikrofon=\(mic.status), Erişilebilirlik=\(acc.status)")
+            // 2. Erişilebilirlik İzni Kontrolü
+            DispatchQueue.main.async {
+                self?.checkAccessibilityAndActivate()
+            }
+        }
+    }
 
-        if !acc.status.isAuthorized || !mic.status.isAuthorized {
-            print("[AppDelegate] ⚠️ Eksik izin tespit edildi. Ayarlar penceresi açılıyor...")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                SettingsWindowController.shared.showWindow(nil)
+    private func checkAccessibilityAndActivate() {
+        if AXIsProcessTrusted() {
+            // Her iki izin de tam! Sıfır pencere açılarak sessizce ve hızla hazır moda geçilir
+            print("[AppDelegate] ✅ Tüm izinler onaylı. Voice Typing aktif edildi.")
+            setupKeyListener()
+            SoundManager.shared.playStartup()
+            refreshMenuStates()
+        } else {
+            // Erişilebilirlik izni eksikse, Sistem Ayarları'nı kapatmayan ve izin verilince otomatik kapanan minimal pencereyi göster
+            print("[AppDelegate] ⚠️ Erişilebilirlik izni bekleniyor, yönlendirici açılıyor...")
+            AccessibilityPromptController.shared.showPrompt { [weak self] in
+                print("[AppDelegate] 🎉 Erişilebilirlik izni verildi! Sistem başlatılıyor.")
+                self?.setupKeyListener()
+                SoundManager.shared.playStartup()
+                self?.refreshMenuStates()
             }
         }
     }

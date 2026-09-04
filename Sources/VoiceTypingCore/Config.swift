@@ -220,49 +220,67 @@ public class ConfigManager {
     ]
 
     private init() {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let userConfigDir = homeDir.appendingPathComponent(".voice_typing")
+        try? FileManager.default.createDirectory(at: userConfigDir, withIntermediateDirectories: true)
+        let primaryConfigURL = userConfigDir.appendingPathComponent("config.json")
+        let legacyConfigURL = homeDir.appendingPathComponent(".voice_typing_config.json")
+
         let potentialPaths = [
+            primaryConfigURL.path,
+            legacyConfigURL.path,
             FileManager.default.currentDirectoryPath + "/config.json",
             Bundle.main.bundlePath + "/Contents/Resources/config.json",
-            Bundle.main.bundleURL.deletingLastPathComponent().path + "/config.json",
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".voice_typing_config.json").path
+            Bundle.main.bundleURL.deletingLastPathComponent().path + "/config.json"
         ]
 
-        var resolvedURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/config.json")
-        var loadedConfig: AppConfig? = nil
+        var bestConfig: AppConfig? = nil
 
         for path in potentialPaths {
             let url = URL(fileURLWithPath: path)
             if FileManager.default.fileExists(atPath: path),
                let data = try? Data(contentsOf: url),
                let decoded = try? JSONDecoder().decode(AppConfig.self, from: data) {
-                resolvedURL = url
-                loadedConfig = decoded
-                break
+                // Eğer daha önce config bulunmadıysa veya bu config dolu API anahtarlarına sahipse seç
+                if bestConfig == nil {
+                    bestConfig = decoded
+                } else if (!decoded.gemini_api_key.isEmpty || !decoded.groq_api_key.isEmpty) &&
+                          (bestConfig!.gemini_api_key.isEmpty && bestConfig!.groq_api_key.isEmpty) {
+                    bestConfig = decoded
+                }
             }
         }
 
-        // Eğer mevcut dizin yazılabilir değilse veya kök dizindeyse, ev dizinindeki dosyayı hedefle
-        let parentDir = resolvedURL.deletingLastPathComponent().path
-        if !FileManager.default.isWritableFile(atPath: parentDir) || parentDir == "/" {
-            resolvedURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".voice_typing_config.json")
-        }
+        var finalConfig = bestConfig ?? AppConfig.defaultConfig
 
         // Eski turbo modelini kaldır ve whisper-large-v3'e yükselt
-        if loadedConfig?.groq_model == "whisper-large-v3-turbo" {
-            loadedConfig?.groq_model = "whisper-large-v3"
+        if finalConfig.groq_model == "whisper-large-v3-turbo" {
+            finalConfig.groq_model = "whisper-large-v3"
         }
 
-        self.configURL = resolvedURL
-        self.config = loadedConfig ?? AppConfig.defaultConfig
+        self.configURL = primaryConfigURL
+        self.config = finalConfig
+
+        // Eğer birincil dosyada henüz kayıt yoksa veya API anahtarları olan yapılandırma varsa hemen senkronize et
+        if !FileManager.default.fileExists(atPath: primaryConfigURL.path) || !finalConfig.gemini_api_key.isEmpty || !finalConfig.groq_api_key.isEmpty {
+            _ = save()
+        }
     }
 
     public func reload() {
-        if let data = try? Data(contentsOf: configURL),
-           var decoded = try? JSONDecoder().decode(AppConfig.self, from: data) {
-            if decoded.groq_model == "whisper-large-v3-turbo" {
-                decoded.groq_model = "whisper-large-v3"
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let legacyURL = homeDir.appendingPathComponent(".voice_typing_config.json")
+        let candidateURLs = [configURL, legacyURL]
+
+        for url in candidateURLs {
+            if let data = try? Data(contentsOf: url),
+               var decoded = try? JSONDecoder().decode(AppConfig.self, from: data) {
+                if decoded.groq_model == "whisper-large-v3-turbo" {
+                    decoded.groq_model = "whisper-large-v3"
+                }
+                self.config = decoded
+                break
             }
-            self.config = decoded
         }
     }
 
@@ -277,7 +295,15 @@ public class ConfigManager {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(config)
+
+            // 1. Birincil kullanıcı yapılandırması: ~/.voice_typing/config.json
             try data.write(to: configURL, options: .atomic)
+
+            // 2. Geriye dönük uyumluluk: ~/.voice_typing_config.json
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser
+            let legacyURL = homeDir.appendingPathComponent(".voice_typing_config.json")
+            try? data.write(to: legacyURL, options: .atomic)
+
             return true
         } catch {
             print("[Hata] Yapılandırma dosyası kaydedilemedi: \(error.localizedDescription)")

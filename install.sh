@@ -39,6 +39,71 @@ fi
 echo "🔏 4/5. Ad-hoc güvenlik imzası uygulanıyor (codesign)..."
 codesign --force --deep --sign - "$TARGET_APP"
 
+# 4.5. Kullanıcı yapılandırmasını ve API anahtarlarını otomatik aktar / koru
+echo "🔑 4.5/5. API anahtarları ve kullanıcı yapılandırması kontrol ediliyor..."
+USER_CONFIG_DIR="$HOME/.voice_typing"
+mkdir -p "$USER_CONFIG_DIR"
+
+python3 - << 'PY_EOF'
+import json
+import os
+
+user_cfg = os.path.expanduser("~/.voice_typing/config.json")
+legacy_cfg = os.path.expanduser("~/.voice_typing_config.json")
+project_cfg = os.path.abspath("config.json")
+project_env = os.path.abspath(".env")
+
+data = {}
+
+if os.path.exists(user_cfg):
+    try:
+        with open(user_cfg, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        pass
+
+if not data and os.path.exists(legacy_cfg):
+    try:
+        with open(legacy_cfg, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        pass
+
+if os.path.exists(project_cfg):
+    try:
+        with open(project_cfg, "r", encoding="utf-8") as f:
+            pdata = json.load(f)
+            if not data:
+                data = pdata
+            else:
+                for k in ["groq_api_key", "gemini_api_key", "provider", "gemini_model", "groq_model"]:
+                    if not data.get(k) and pdata.get(k):
+                        data[k] = pdata[k]
+    except Exception:
+        pass
+
+if os.path.exists(project_env):
+    try:
+        with open(project_env, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("GROQ_API_KEY=") and not data.get("groq_api_key"):
+                    data["groq_api_key"] = line.split("=", 1)[1].strip("\"' ")
+                elif line.startswith("GEMINI_API_KEY=") and not data.get("gemini_api_key"):
+                    data["gemini_api_key"] = line.split("=", 1)[1].strip("\"' ")
+    except Exception:
+        pass
+
+if data:
+    with open(user_cfg, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    with open(legacy_cfg, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    groq_ok = "✅" if data.get("groq_api_key") else "⚪"
+    gemini_ok = "✅" if data.get("gemini_api_key") else "⚪"
+    print(f"   ➔ API Anahtarları korundu ve eşitlendi (Groq: {groq_ok}, Gemini: {gemini_ok})")
+PY_EOF
+
 # 5. LaunchAgent oluştur (Mac açıldığında otomatik başlama)
 echo "🚀 5/5. Başlangıçta otomatik çalışma (LaunchAgent) yapılandırılıyor..."
 LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
