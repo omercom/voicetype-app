@@ -247,10 +247,10 @@ class TestVoiceEngineLive(unittest.TestCase):
             buf = io.BytesIO(f.read())
             buf.name = "sample.mp3"
 
-        res = transcriber.transcribe_groq(buf, model="whisper-large-v3-turbo")
+        res = transcriber.transcribe_groq(buf, model="whisper-large-v3")
         self.assertTrue(res["success"], f"Groq hatası: {res.get('error')}")
         self.assertIn("Kadıköy", res["text"])
-        self.assertLess(res["latency"], 2.0)
+        self.assertLess(res["latency"], 3.0)
 
     def test_gemini_transcription(self):
         sample_path = Path("samples/01_gunluk_konusma.mp3")

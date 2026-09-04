@@ -17,7 +17,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "provider": "groq",  # "groq" veya "gemini"
     "groq_api_key": "",
     "gemini_api_key": "",
-    "groq_model": "whisper-large-v3-turbo",  # "whisper-large-v3-turbo" (~0.3s) veya "whisper-large-v3"
+    "groq_model": "whisper-large-v3",  # "whisper-large-v3" (Yüksek Kalite)
     "gemini_model": "gemini-3.6-flash",
     "language": "tr",  # "tr", "en", "auto"
     "trigger_key": 54,  # Sağ Command tuşu (0x36 = 54)
@@ -30,7 +30,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 AVAILABLE_MODELS = {
     "groq": [
-        {"id": "whisper-large-v3-turbo", "name": "Whisper Large v3 Turbo (~0.3s - En Hızlı)", "speed": "~0.3s", "price": "0.00018 USD/dk"},
         {"id": "whisper-large-v3", "name": "Whisper Large v3 (En Yüksek Doğruluk)", "speed": "~0.4s", "price": "0.00018 USD/dk"}
     ],
     "gemini": [
@@ -119,6 +118,6 @@ def get_active_model(config: Dict[str, Any]) -> str:
     """Aktif sağlayıcıya göre seçili model adını döner."""
     provider = config.get("provider", "groq").lower()
     if provider == "groq":
-        return config.get("groq_model", "whisper-large-v3-turbo")
+        return config.get("groq_model", "whisper-large-v3")
     return config.get("gemini_model", "gemini-3.6-flash")
 

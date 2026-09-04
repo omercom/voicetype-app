@@ -109,7 +109,7 @@ class VoiceTypingApp(rumps.App):
         self.menu.add(self.provider_menu)
 
         # 2. Groq Modelleri
-        current_groq_m = self.config.get("groq_model", "whisper-large-v3-turbo")
+        current_groq_m = self.config.get("groq_model", "whisper-large-v3")
         self.groq_models_menu = rumps.MenuItem("Groq Modeli")
         self.groq_model_items = {}
         for m in AVAILABLE_MODELS.get("groq", []):
@@ -298,7 +298,7 @@ class VoiceTypingApp(rumps.App):
         if hasattr(self, "item_gemini"):
             self.item_gemini.state = (current_provider == "gemini")
 
-        current_groq_m = self.config.get("groq_model", "whisper-large-v3-turbo")
+        current_groq_m = self.config.get("groq_model", "whisper-large-v3")
         for mid, item in getattr(self, "groq_model_items", {}).items():
             item.state = (mid == current_groq_m)
 
@@ -359,8 +359,7 @@ class VoiceTypingApp(rumps.App):
             "• Tuşu bıraktığınız anda konuşmanız deşifre edilip o anki aktif metin alanına (textbox) anında yazılır.\n"
             "• Konuşmaktan vazgeçerseniz Esc tuşuna basarak kaydı iptal edebilirsiniz.\n\n"
             "Fiyatlandırma & Modeller (Best Prices):\n"
-            "• Groq Whisper Turbo: ~0.3s hız, 0.00018 USD/dakika (Günlük 8 saat ücretsiz kota)\n"
-            "• Groq Whisper Large: En yüksek Türkçe doğruluk, 0.00018 USD/dakika\n"
+            "• Groq Whisper Large v3: ~0.4s hız, en yüksek Türkçe doğruluk (0.00018 USD/dakika)\n"
             "• Google Gemini 3.6 Flash: Doğal dil & bağlam düzeltmeli, ücretsiz / düşük maliyet\n"
         )
         rumps.alert(title="Hakkında & Kullanım", message=msg)

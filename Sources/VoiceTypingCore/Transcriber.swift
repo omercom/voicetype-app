@@ -45,7 +45,7 @@ public class Transcriber {
         completion: @escaping (TranscriptionResult) -> Void
     ) {
         let apiKey = config.groq_api_key.trimmingCharacters(in: .whitespacesAndNewlines)
-        let model = config.groq_model.isEmpty ? "whisper-large-v3-turbo" : config.groq_model
+        let model = (config.groq_model.isEmpty || config.groq_model == "whisper-large-v3-turbo") ? "whisper-large-v3" : config.groq_model
 
         guard !apiKey.isEmpty else {
             completion(TranscriptionResult(
