@@ -690,5 +690,83 @@ final class VoiceTypingTests: XCTestCase {
             "Sen harika bir insansın. seni çok seviyorum",
             "Örtüşen kelimeler mükerrer eklenmeden akıcı birleştirilmeli."
         )
+
+        // Durum 9: Kullanıcının gerçek WebSocket canlı akış senaryosu:
+        // Birikmiş metin tam noktalı ("Sen harika bir insansın. Seni çok seviyorum. Çok güzel."),
+        // Interim metin noktalama işaretsiz ham metin ("sen harika bir insansın seni çok seviyorum çok")
+        let t9 = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: "Sen harika bir insansın. Seni çok seviyorum. Çok güzel.",
+            interim: "sen harika bir insansın seni çok seviyorum çok"
+        )
+        XCTAssertEqual(
+            t9,
+            "Sen harika bir insansın. Seni çok seviyorum. Çok güzel.",
+            "Noktalama işaretsiz ara interim asla tamamlanmış noktalı cümlenin sonuna mükerrer eklenmemeli!"
+        )
+
+        // Durum 10: Kümülatif inputTranscription parçaları (noktalama veya büyük/küçük harf farkı olsa bile)
+        let t10 = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: "Sen harika bir insansın.",
+            interim: "Sen harika bir insansın, seni çok seviyorum."
+        )
+        XCTAssertEqual(
+            t10,
+            "Sen harika bir insansın, seni çok seviyorum.",
+            "Kümülatif güncellemeler baştaki cümleyi yinelememeli, güncel halini almalı."
+        )
+    }
+
+    func testGeminiLiveDeduplicateRepeatedPhrases() {
+        // Test 1: Kullanıcının bildirdiği tam duplicate metin (8 kelimelik kuyruk tekrarı)
+        let input1 = "Sen harika bir insansın. Seni çok seviyorum. Çok güzel. Sen harika bir insansın. Seni çok seviyorum. Çok"
+        let dedup1 = LiveGeminiStreamSession.deduplicateRepeatedPhrases(input1)
+        XCTAssertEqual(
+            dedup1,
+            "Sen harika bir insansın. Seni çok seviyorum. Çok güzel.",
+            "Kullanıcının karşılaştığı mükerrer son eklenme hatasız ayıklanmalı."
+        )
+
+        // Test 2: Birebir ardışık tekrarlanan tam cümle
+        let input2 = "Bugün hava çok güzel. Bugün hava çok güzel."
+        let dedup2 = LiveGeminiStreamSession.deduplicateRepeatedPhrases(input2)
+        XCTAssertEqual(dedup2, "Bugün hava çok güzel.", "Tam cümle tekrarı teke indirilmeli.")
+
+        // Test 3: Cümle içinde ardışık 3 kelimelik tekrar
+        let input3 = "Toplantı yarın saat üçte olacak toplantı yarın saat üçte olacak diye konuştuk."
+        let dedup3 = LiveGeminiStreamSession.deduplicateRepeatedPhrases(input3)
+        XCTAssertEqual(dedup3, "Toplantı yarın saat üçte olacak diye konuştuk.")
+
+        // Test 4: Doğal Türkçe ikilemeler (1 kelime tekrarları) KORUNMALI
+        let input4 = "Evet evet, çok çok teşekkür ederim."
+        let dedup4 = LiveGeminiStreamSession.deduplicateRepeatedPhrases(input4)
+        XCTAssertEqual(dedup4, "Evet evet, çok çok teşekkür ederim.", "Evet evet ve çok çok gibi doğal ikilemeler korunmalı.")
+
+        // Test 5: Normal akıcı cümle (tekrarsız) bozulmamalı
+        let input5 = "Yarın sabah erkenden buluşup projeyi teslim edeceğiz."
+        let dedup5 = LiveGeminiStreamSession.deduplicateRepeatedPhrases(input5)
+        XCTAssertEqual(dedup5, input5)
+    }
+
+    func testGeminiLiveIsCoveredHelper() {
+        // Alt küme kontrolü
+        XCTAssertTrue(LiveGeminiStreamSession.isCovered(
+            subText: "sen harika bir insansın seni çok seviyorum çok",
+            in: "Sen harika bir insansın. Seni çok seviyorum. Çok güzel."
+        ))
+
+        XCTAssertTrue(LiveGeminiStreamSession.isCovered(
+            subText: "Seni çok seviyorum",
+            in: "Sen harika bir insansın. Seni çok seviyorum. Çok güzel."
+        ))
+
+        XCTAssertFalse(LiveGeminiStreamSession.isCovered(
+            subText: "Yarın buluşalım",
+            in: "Sen harika bir insansın. Seni çok seviyorum. Çok güzel."
+        ))
+
+        XCTAssertFalse(LiveGeminiStreamSession.isCovered(
+            subText: "Çok güzel canım",
+            in: "Sen harika bir insansın. Seni çok seviyorum. Çok güzel."
+        ))
     }
 }

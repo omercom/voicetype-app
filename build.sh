@@ -28,8 +28,13 @@ if [ -f "config.json" ]; then
     cp "config.json" "$APP_BUNDLE/Contents/Resources/config.json" 2>/dev/null || true
 fi
 
-# Ad-hoc codesign (macOS TCC izinlerinin kalıcı olarak hatırlanması için)
-codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+# Güvenlik İmzası (macOS TCC izinlerinin yeniden derlemede kaybolmaması için sabit kimlik kullanılır)
+SIGN_IDENTITY="VoiceTyping Local Certificate"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+    codesign --force --deep -s "$SIGN_IDENTITY" "$APP_BUNDLE" 2>/dev/null || codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+else
+    codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+fi
 
 echo "✅ Build complete! Binary located at ./VoiceTyping ($(ls -lh ./VoiceTyping | awk '{print $5}'))"
 echo "✅ App bundle created at ./$APP_BUNDLE"

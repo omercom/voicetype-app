@@ -641,9 +641,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     public static func updateDockVisibility(_ show: Bool) {
         DispatchQueue.main.async {
-            NSApp.setActivationPolicy(show ? .regular : .accessory)
             if show {
+                NSApp.setActivationPolicy(.regular)
                 NSApp.activate(ignoringOtherApps: true)
+            } else {
+                let isSettingsVisible = SettingsWindowController.shared.window?.isVisible ?? false
+                let isAccVisible = AccessibilityPromptController.shared.window?.isVisible ?? false
+                if !isSettingsVisible && !isAccVisible {
+                    NSApp.setActivationPolicy(.accessory)
+                }
             }
         }
     }

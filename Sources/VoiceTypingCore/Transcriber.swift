@@ -50,6 +50,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     private var startTime: CFAbsoluteTime = 0
     private var accumulatedText: String = ""
     private var latestInterimText: String = ""
+    private var modelTurnFallbackText: String = ""
     private var safetyTimer: DispatchSourceTimer?
     private var finalizationTimer: DispatchSourceTimer?
     private var serverCloseReason: String?
@@ -138,7 +139,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let cancelled = self.isCancelled
                 let finished = self.isAudioFinished
                 let completed = self.isCompleted
-                let hasText = !self.accumulatedText.isEmpty || !self.latestInterimText.isEmpty
+                let hasText = !self.accumulatedText.isEmpty || !self.latestInterimText.isEmpty || !self.modelTurnFallbackText.isEmpty
                 self.lock.unlock()
 
                 if cancelled || completed { return }
@@ -223,13 +224,21 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let trimmed = interimText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
                     lock.lock()
-                    self.latestInterimText = trimmed
                     let currentAccum = self.accumulatedText
                     let endSent = self.hasSentStreamEnd
-                    lock.unlock()
 
-                    let preview = Self.reconcileTranscriptionText(accumulated: currentAccum, interim: trimmed)
-                    onInterim?(preview)
+                    // Eğer birikmiş kesinleşmiş metin zaten bu ara metni tamamen kapsıyorsa,
+                    // ara metni bayat/mükerrer olarak değerlendirip sıfırla
+                    if !currentAccum.isEmpty && Self.isCovered(subText: trimmed, in: currentAccum) {
+                        self.latestInterimText = ""
+                        lock.unlock()
+                        onInterim?(currentAccum)
+                    } else {
+                        self.latestInterimText = trimmed
+                        lock.unlock()
+                        let preview = Self.reconcileTranscriptionText(accumulated: currentAccum, interim: trimmed)
+                        onInterim?(preview)
+                    }
 
                     if endSent {
                         scheduleFinalization(delayMs: 450)
@@ -243,26 +252,21 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
                     lock.lock()
-                    if self.accumulatedText.isEmpty {
-                        self.accumulatedText = trimmed
-                    } else if trimmed.lowercased().contains(self.accumulatedText.lowercased()) {
-                        self.accumulatedText = trimmed
-                    } else if self.accumulatedText.lowercased().contains(trimmed.lowercased()) {
-                        // Zaten birikmiş metinde mevcut, tekrar ekleme yapma
-                    } else {
-                        self.accumulatedText = Self.reconcileTranscriptionText(accumulated: self.accumulatedText, interim: trimmed)
-                    }
-                    if self.latestInterimText.lowercased() == trimmed.lowercased() ||
-                       self.accumulatedText.lowercased().contains(self.latestInterimText.lowercased()) {
+                    self.accumulatedText = Self.reconcileTranscriptionText(accumulated: self.accumulatedText, interim: trimmed)
+
+                    // Kesinleşmiş metin güncellendiğinde, eğer latestInterimText artık birikmiş metnin
+                    // içindeyse veya kapsanıyorsa derhal temizle ki mükerrer eklenmesin
+                    if self.latestInterimText.isEmpty || Self.isCovered(subText: self.latestInterimText, in: self.accumulatedText) {
                         self.latestInterimText = ""
                     }
+
                     let current = self.accumulatedText
                     let endSent = self.hasSentStreamEnd
                     lock.unlock()
                     onInterim?(current)
 
                     if endSent {
-                        scheduleFinalization(delayMs: 400)
+                        scheduleFinalization(delayMs: 350)
                     }
                 }
             }
@@ -274,19 +278,17 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let text = textParts.compactMap { $0["text"] as? String }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
                     lock.lock()
-                    // Eğer kullanıcı konuşma metni zaten inputTranscription ile geldiyse modelTurn cevabını ASLA ekleme!
-                    if self.accumulatedText.isEmpty {
-                        self.accumulatedText = text
-                        let current = self.accumulatedText
-                        let endSent = self.hasSentStreamEnd
-                        lock.unlock()
-                        onInterim?(current)
+                    self.modelTurnFallbackText = text
+                    let hasAccum = !self.accumulatedText.isEmpty
+                    let endSent = self.hasSentStreamEnd
+                    lock.unlock()
 
-                        if endSent {
-                            scheduleFinalization(delayMs: 400)
-                        }
-                    } else {
-                        lock.unlock()
+                    if !hasAccum {
+                        onInterim?(text)
+                    }
+
+                    if endSent {
+                        scheduleFinalization(delayMs: 350)
                     }
                 }
             }
@@ -398,7 +400,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         // Eğer sunucu henüz ilk kelimeleri üretme aşamasındaysa (örn. dosya akışı veya konuşma sonu),
         // ilk kelimelerin gelmesi için 2500ms tanı (metin geldiğinde sayaç 400ms'ye çekilecektir).
         lock.lock()
-        let hasText = !accumulatedText.isEmpty || !latestInterimText.isEmpty
+        let hasText = !accumulatedText.isEmpty || !latestInterimText.isEmpty || !modelTurnFallbackText.isEmpty
         lock.unlock()
         let delay = hasText ? 650 : 2500
         scheduleFinalization(delayMs: delay)
@@ -442,72 +444,215 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         lock.unlock()
     }
 
-    public static func reconcileTranscriptionText(accumulated: String, interim: String) -> String {
-        let trimmedAccum = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedInterim = interim.trimmingCharacters(in: .whitespacesAndNewlines)
+    // MARK: - Normalizasyon ve Mükerrer İfade Çözümleme
 
-        var result: String
+    public static func cleanNoiseTags(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]().,"))
+        if lower == "blank_audio" || lower == "sessizlik" || lower == "ses yok" || lower == "boşluk" || lower == "gürültü" || lower == "music" || lower == "müzik" {
+            return ""
+        }
+        return trimmed
+    }
 
-        if trimmedAccum.isEmpty {
-            result = trimmedInterim
-        } else if trimmedInterim.isEmpty {
-            result = trimmedAccum
-        } else {
-            let lowerAccum = trimmedAccum.lowercased()
-            let lowerInterim = trimmedInterim.lowercased()
-
-            if lowerAccum == lowerInterim {
-                result = trimmedAccum
-            } else if lowerAccum.contains(lowerInterim) {
-                // Interim zaten birikmiş metnin içinde tamamen var (örneğin kullanıcının cümlesi biterken interim daha kısa kalmış)
-                result = trimmedAccum
-            } else if lowerInterim.contains(lowerAccum) {
-                // Interim daha güncel ve birikmiş metnin tamamını kapsıyor
-                result = trimmedInterim
-            } else if lowerAccum.hasSuffix(lowerInterim) {
-                result = trimmedAccum
-            } else if lowerInterim.hasPrefix(lowerAccum) {
-                result = trimmedInterim
+    public static func normalizeTokens(_ text: String) -> [String] {
+        let lower = text.lowercased(with: Locale(identifier: "tr_TR"))
+        var cleaned = ""
+        cleaned.reserveCapacity(lower.count)
+        for char in lower {
+            if char.isLetter || char.isNumber {
+                cleaned.append(char)
             } else {
-                // Kelime düzeyinde örtüşme (overlap) kontrolü:
-                // Örneğin accum: "Sen harika bir insansın", interim: "insansın seni çok seviyorum"
-                let accumWords = trimmedAccum.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-                let interimWords = trimmedInterim.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+                cleaned.append(" ")
+            }
+        }
+        return cleaned.split(separator: " ").map(String.init).filter { !$0.isEmpty }
+    }
 
-                let puncSet = CharacterSet(charactersIn: ".,!?;:…\"'()[]{}")
-                var overlapCount = 0
-                let maxCheck = min(accumWords.count, interimWords.count)
-                for count in stride(from: maxCheck, through: 1, by: -1) {
-                    let accumTail = accumWords.suffix(count).map {
-                        $0.lowercased().trimmingCharacters(in: puncSet)
-                    }
-                    let interimHead = interimWords.prefix(count).map {
-                        $0.lowercased().trimmingCharacters(in: puncSet)
-                    }
-                    if accumTail == interimHead {
-                        overlapCount = count
-                        break
-                    }
+    public static func isCovered(subText: String, in fullText: String) -> Bool {
+        let subTokens = normalizeTokens(subText)
+        guard !subTokens.isEmpty else { return true }
+        let fullTokens = normalizeTokens(fullText)
+        guard !fullTokens.isEmpty else { return false }
+
+        if subTokens.count > fullTokens.count {
+            return false
+        }
+
+        let maxStart = fullTokens.count - subTokens.count
+        for start in 0...maxStart {
+            var matches = true
+            for i in 0..<subTokens.count {
+                if fullTokens[start + i] != subTokens[i] {
+                    matches = false
+                    break
                 }
+            }
+            if matches {
+                return true
+            }
+        }
 
-                if overlapCount > 0 {
-                    let newWords = interimWords.dropFirst(overlapCount)
-                    if newWords.isEmpty {
-                        result = trimmedAccum
-                    } else {
-                        result = "\(trimmedAccum) \(newWords.joined(separator: " "))"
-                    }
-                } else {
-                    result = "\(trimmedAccum) \(trimmedInterim)"
+        return false
+    }
+
+    public static func deduplicateRepeatedPhrases(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 6 else { return trimmed }
+
+        var wordTokens: [String] = []
+        var wordRanges: [Range<String.Index>] = []
+
+        trimmed.enumerateSubstrings(in: trimmed.startIndex..<trimmed.endIndex, options: .byWords) { substring, range, _, _ in
+            if let word = substring {
+                wordTokens.append(word.lowercased(with: Locale(identifier: "tr_TR")))
+                wordRanges.append(range)
+            }
+        }
+
+        let totalWords = wordTokens.count
+        guard totalWords >= 4 else { return trimmed }
+
+        // 1. Cümlenin sonundaki K kelimelik blok, cümlenin başındaki K kelimelik blok ile aynı mı? (K >= 2)
+        // Kullanıcının bildirdiği hata: "Sen harika bir insansın. Seni çok seviyorum. Çok güzel. Sen harika bir insansın. Seni çok seviyorum. Çok"
+        let maxK = totalWords / 2
+        for k in stride(from: maxK, through: 2, by: -1) {
+            let tail = wordTokens.suffix(k)
+            let head = wordTokens.prefix(k)
+            if Array(tail) == Array(head) {
+                let tailStartIndex = totalWords - k
+                if tailStartIndex >= k {
+                    let cutIndex = wordRanges[tailStartIndex].lowerBound
+                    let result = String(trimmed[trimmed.startIndex..<cutIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    return result
                 }
             }
         }
 
-        let lower = result.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]().,"))
-        if lower == "blank_audio" || lower == "sessizlik" || lower == "ses yok" || lower == "boşluk" || lower == "gürültü" {
-            return ""
+        // 2. Ardışık mükerrer blok kontrolü: [A, B, C, A, B, C] -> [A, B, C] (K >= 2)
+        for k in stride(from: maxK, through: 2, by: -1) {
+            var i = 0
+            while i + 2 * k <= wordTokens.count {
+                let block1 = wordTokens[i..<(i + k)]
+                let block2 = wordTokens[(i + k)..<(i + 2 * k)]
+                if Array(block1) == Array(block2) {
+                    let cutStart = wordRanges[i + k].lowerBound
+                    let cutEnd = wordRanges[i + 2 * k - 1].upperBound
+                    var before = String(trimmed[trimmed.startIndex..<cutStart]).trimmingCharacters(in: .whitespaces)
+                    let after = String(trimmed[cutEnd..<trimmed.endIndex]).trimmingCharacters(in: .whitespaces)
+                    if before.hasSuffix(",") && !after.isEmpty {
+                        before = String(before.dropLast())
+                    }
+                    let combined = after.isEmpty ? before : "\(before) \(after)"
+                    return deduplicateRepeatedPhrases(combined)
+                }
+                i += 1
+            }
         }
-        return result
+
+        // 3. Genel kuyruk tekrarı: Son K kelime, metnin herhangi bir önceki yerinde aynen geçmiş mi? (K >= 3)
+        if totalWords >= 6 {
+            let maxTail = min(totalWords / 2, 12)
+            for tailLen in stride(from: maxTail, through: 3, by: -1) {
+                let tailSlice = wordTokens.suffix(tailLen)
+                let searchLimit = totalWords - tailLen
+                for start in 0...(searchLimit - tailLen) {
+                    let candidate = wordTokens[start..<(start + tailLen)]
+                    if Array(tailSlice) == Array(candidate) {
+                        let cutIndex = wordRanges[totalWords - tailLen].lowerBound
+                        let result = String(trimmed[trimmed.startIndex..<cutIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        return result
+                    }
+                }
+            }
+        }
+
+        return trimmed
+    }
+
+    public static func reconcileTranscriptionText(accumulated: String, interim: String) -> String {
+        let trimmedAccum = cleanNoiseTags(accumulated)
+        let trimmedIncoming = cleanNoiseTags(interim)
+
+        if trimmedAccum.isEmpty {
+            return trimmedIncoming
+        }
+        if trimmedIncoming.isEmpty {
+            return trimmedAccum
+        }
+
+        if trimmedAccum == trimmedIncoming {
+            return trimmedAccum
+        }
+
+        let accumTokens = normalizeTokens(trimmedAccum)
+        let incomingTokens = normalizeTokens(trimmedIncoming)
+
+        if accumTokens.isEmpty { return trimmedIncoming }
+        if incomingTokens.isEmpty { return trimmedAccum }
+
+        if accumTokens == incomingTokens {
+            return trimmedAccum.count >= trimmedIncoming.count ? trimmedAccum : trimmedIncoming
+        }
+
+        // 1. Incoming zaten tamamen Accumulated içinde var mı? (Örn. interim daha kısa kalmış ve birikmiş cümlenin alt kümesi)
+        if isCovered(subText: trimmedIncoming, in: trimmedAccum) {
+            return trimmedAccum
+        }
+
+        // 2. Kümülatif devam: Incoming, Accumulated ile başlayıp üzerine yeni kelimeler ekliyor mu?
+        if incomingTokens.starts(with: accumTokens) {
+            return trimmedIncoming
+        }
+
+        // 3. Ters kapsama: Accumulated zaten tamamen Incoming içinde var mı? (Örn. baştan güncellenmiş kümülatif metin)
+        if isCovered(subText: trimmedAccum, in: trimmedIncoming) {
+            return trimmedIncoming
+        }
+
+        // 4. Ortak önek (Longest Common Prefix) kontrolü:
+        // Her ikisi de baştan akıyorsa ve ilk kelimeleri büyük oranda ortaksa
+        let minTokensCount = min(accumTokens.count, incomingTokens.count)
+        var commonPrefixCount = 0
+        for i in 0..<minTokensCount {
+            if accumTokens[i] == incomingTokens[i] {
+                commonPrefixCount += 1
+            } else {
+                break
+            }
+        }
+        if commonPrefixCount >= 3 && Double(commonPrefixCount) >= Double(accumTokens.count) * 0.6 {
+            return incomingTokens.count >= accumTokens.count ? trimmedIncoming : trimmedAccum
+        }
+
+        // 5. Dikiş noktası örtüşmesi (Seam Overlap):
+        // Accumulated sonundaki kelimeler ile Incoming başındaki kelimelerin örtüşmesi
+        let maxCheck = min(accumTokens.count, incomingTokens.count)
+        var overlapCount = 0
+        for count in stride(from: maxCheck, through: 1, by: -1) {
+            let accumTail = accumTokens.suffix(count)
+            let incomingHead = incomingTokens.prefix(count)
+            if Array(accumTail) == Array(incomingHead) {
+                overlapCount = count
+                break
+            }
+        }
+
+        var result: String
+        if overlapCount > 0 {
+            let incomingWords = trimmedIncoming.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            if overlapCount >= incomingWords.count {
+                result = trimmedAccum
+            } else {
+                let newWords = incomingWords.dropFirst(overlapCount)
+                let remainder = newWords.joined(separator: " ")
+                result = "\(trimmedAccum) \(remainder)"
+            }
+        } else {
+            result = "\(trimmedAccum) \(trimmedIncoming)"
+        }
+
+        return deduplicateRepeatedPhrases(result)
     }
 
     private func finishAndComplete() {
@@ -521,10 +666,20 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         }
         isCompleted = true
         let latency = CFAbsoluteTimeGetCurrent() - startTime
-        let text = LiveGeminiStreamSession.reconcileTranscriptionText(
-            accumulated: accumulatedText,
-            interim: latestInterimText
-        )
+
+        var text = accumulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            text = latestInterimText.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if !latestInterimText.isEmpty && !Self.isCovered(subText: latestInterimText, in: text) {
+            text = Self.reconcileTranscriptionText(accumulated: text, interim: latestInterimText)
+        }
+
+        if text.isEmpty {
+            text = modelTurnFallbackText.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        text = Self.deduplicateRepeatedPhrases(text)
+
         let ws = webSocketTask
         webSocketTask = nil
         let sess = session
@@ -556,6 +711,9 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         isCancelled = true
         isCompleted = true
         pendingChunks.removeAll()
+        accumulatedText = ""
+        latestInterimText = ""
+        modelTurnFallbackText = ""
         let ws = webSocketTask
         webSocketTask = nil
         let sess = session
