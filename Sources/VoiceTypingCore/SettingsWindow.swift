@@ -5,7 +5,7 @@ private class FlippedContentView: NSView {
     override var isFlipped: Bool { return true }
 }
 
-public class SettingsWindowController: NSWindowController {
+public class SettingsWindowController: NSWindowController, NSWindowDelegate {
     public static let shared = SettingsWindowController()
 
     // Header & Tab Navigation
@@ -49,7 +49,7 @@ public class SettingsWindowController: NSWindowController {
 
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 625),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -58,6 +58,7 @@ public class SettingsWindowController: NSWindowController {
         window.center()
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        window.delegate = self
 
         setupUI()
         loadValues()
@@ -65,6 +66,21 @@ public class SettingsWindowController: NSWindowController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        if isCapturingKey {
+            stopCapturingKey(cancelled: true)
+        }
+        if AudioRecorder.shared.isRecording {
+            _ = AudioRecorder.shared.stop()
+        }
+    }
+
+    public func selectTab(index: Int) {
+        guard index >= 0 && index < segmentedControl.segmentCount else { return }
+        segmentedControl.selectedSegment = index
+        tabView.selectTabViewItem(at: index)
     }
 
     public override func showWindow(_ sender: Any?) {
@@ -83,7 +99,7 @@ public class SettingsWindowController: NSWindowController {
         contentView.addSubview(mainContainer)
 
         // =====================================================================
-        // ÜST BÖLÜM: MODERN SEGMENTED TAB SWITCHER
+        // ÜST BÖLÜM: MODERN SEGMENTED TAB SWITCHER (APPLE HIG ROUNDED STYLE)
         // =====================================================================
         segmentedControl = NSSegmentedControl(
             labels: ["🛡️ İzinler & Kurulum", "🤖 Yapay Zeka & Modeller", "⌨️ Kısayol & Davranış"],
@@ -91,19 +107,20 @@ public class SettingsWindowController: NSWindowController {
             target: self,
             action: #selector(tabSegmentChanged(_:))
         )
-        segmentedControl.frame = NSRect(x: 50, y: 12, width: 520, height: 28)
+        segmentedControl.frame = NSRect(x: 35, y: 14, width: 550, height: 28)
         segmentedControl.selectedSegment = 0
-        segmentedControl.segmentStyle = .texturedRounded
+        segmentedControl.segmentStyle = .rounded
+        segmentedControl.segmentDistribution = .fillEqually
         mainContainer.addSubview(segmentedControl)
 
-        let topSeparator = NSBox(frame: NSRect(x: 20, y: 46, width: 580, height: 1))
+        let topSeparator = NSBox(frame: NSRect(x: 20, y: 52, width: 580, height: 1))
         topSeparator.boxType = .separator
         mainContainer.addSubview(topSeparator)
 
         // =====================================================================
         // ORTA BÖLÜM: TAB VIEW (NO TABS NO BORDER)
         // =====================================================================
-        tabView = NSTabView(frame: NSRect(x: 15, y: 52, width: 590, height: 505))
+        tabView = NSTabView(frame: NSRect(x: 15, y: 58, width: 590, height: 506))
         tabView.tabViewType = .noTabsNoBorder
 
         let tab1Item = NSTabViewItem(identifier: "tab1")
@@ -543,7 +560,7 @@ public class SettingsWindowController: NSWindowController {
         }
     }
 
-    private func loadValues() {
+    public func loadValues() {
         let cfg = ConfigManager.shared.config
 
         // Provider
@@ -633,12 +650,17 @@ public class SettingsWindowController: NSWindowController {
             if event.type == .flagsChanged {
                 let isMod = KeyListener.isModifier(keyCode: Int64(code))
                 if isMod {
+                    let isPressed = !event.modifierFlags.intersection([.command, .option, .control, .shift, .function, .capsLock]).isEmpty || (event.modifierFlags.rawValue & 0x0080207F) != 0
+                    if isPressed {
+                        self.stopCapturingKey(capturedKeyCode: code)
+                        return nil
+                    }
+                }
+            } else if event.type == .keyDown {
+                if !event.isARepeat {
                     self.stopCapturingKey(capturedKeyCode: code)
                     return nil
                 }
-            } else if event.type == .keyDown {
-                self.stopCapturingKey(capturedKeyCode: code)
-                return nil
             }
 
             return event
@@ -664,20 +686,23 @@ public class SettingsWindowController: NSWindowController {
     }
 
     private func updateTriggerKeyUI() {
+        // Eski özel tuş geçici öğelerini temizle (standart olmayanları sil)
+        let standardKeyCodes = Set(TriggerKeyOption.standardKeys.map { $0.keyCode })
+        if let menu = triggerKeyPopUp.menu {
+            for item in menu.items where item.tag != -1 && !standardKeyCodes.contains(item.tag) {
+                menu.removeItem(item)
+            }
+        }
+
         if let item = triggerKeyPopUp.itemArray.first(where: { $0.tag == selectedTriggerKeyCode }) {
             triggerKeyPopUp.select(item)
         } else {
             let title = "Özel: \(TriggerKeyOption.name(for: selectedTriggerKeyCode))"
-            if let customItem = triggerKeyPopUp.itemArray.first(where: { $0.tag == selectedTriggerKeyCode }) {
-                customItem.title = title
-                triggerKeyPopUp.select(customItem)
-            } else {
-                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-                item.tag = selectedTriggerKeyCode
-                let insertIdx = max(0, triggerKeyPopUp.numberOfItems - 1)
-                triggerKeyPopUp.menu?.insertItem(item, at: insertIdx)
-                triggerKeyPopUp.select(item)
-            }
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            item.tag = selectedTriggerKeyCode
+            let insertIdx = max(0, triggerKeyPopUp.numberOfItems - 1)
+            triggerKeyPopUp.menu?.insertItem(item, at: insertIdx)
+            triggerKeyPopUp.select(item)
         }
         updateTriggerKeyHint()
     }

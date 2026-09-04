@@ -325,5 +325,20 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertNotNil(controller.window)
         XCTAssertEqual(controller.window?.title, "⚙️ Voice Typing - Ayarlar ve Tercihler")
         controller.refreshPermissionStatuses()
+        controller.loadValues()
+
+        // Sekme geçiş kontrolü
+        controller.selectTab(index: 1)
+        controller.selectTab(index: 2)
+        controller.selectTab(index: 0)
+    }
+
+    func testCapsLockAndModifierDetection() {
+        // Caps Lock (57) modifier listesinde olmalı
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 57), "Caps Lock (57) modifier olarak algılanmalı.")
+        // Standart tuşlar
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 54)) // Right Cmd
+        XCTAssertTrue(KeyListener.isModifier(keyCode: 63)) // Fn / Globe
+        XCTAssertFalse(KeyListener.isModifier(keyCode: 96)) // F5
     }
 }

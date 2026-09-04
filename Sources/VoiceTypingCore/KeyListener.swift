@@ -67,6 +67,8 @@ public class KeyListener {
             return (flags.rawValue & 0x00000002) != 0 || (flags.contains(.maskShift) && !currentKeyDown)
         case 60: // Right Shift
             return (flags.rawValue & 0x00000004) != 0 || (flags.contains(.maskShift) && !currentKeyDown)
+        case 57: // Caps Lock
+            return flags.contains(.maskAlphaShift) || (flags.rawValue & 0x00000080) != 0
         default:
             return !flags.isEmpty
         }
@@ -165,11 +167,31 @@ public class KeyListener {
                 DispatchQueue.main.async { [weak self] in
                     self?.onCancel?()
                 }
+                // Esc kaydı iptal ettiğinde aktif penceredeki açık diyaloğu veya tam ekranı kapatmasın
+                return nil
             }
             return Unmanaged.passRetained(event)
         }
 
-        // 2. Tetikleyici Tuş Kontrolü
+        // 2. Modifier tuş basılıyken başka tuşa basıldıysa (örn: Cmd+C, Cmd+V, Cmd+Tab)
+        // Bu durum bir sesle yazma değil, normal klavye kısayoludur; kaydı hemen iptal et
+        if isKeyDown && KeyListener.isModifier(keyCode: targetKeyCode) && type == .keyDown && keyCode != targetKeyCode {
+            lock.lock()
+            let wasActive = isRecording
+            isRecording = false
+            isKeyDown = false
+            inToggleMode = false
+            lock.unlock()
+
+            if wasActive {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onCancel?()
+                }
+            }
+            return Unmanaged.passRetained(event)
+        }
+
+        // 3. Tetikleyici Tuş Kontrolü
         if keyCode == targetKeyCode {
             if KeyListener.isModifier(keyCode: targetKeyCode) {
                 if type == .flagsChanged {
@@ -192,11 +214,14 @@ public class KeyListener {
                         isKeyDown = true
                         handleKeyDown()
                     }
+                    // Normal tetikleyici tuş basıldığında aktif uygulamaya karakter göndermesin (yutulsun)
+                    return nil
                 } else if type == .keyUp {
                     if isKeyDown {
                         isKeyDown = false
                         handleKeyUp()
                     }
+                    return nil
                 }
             }
         }
