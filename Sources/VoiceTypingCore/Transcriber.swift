@@ -110,7 +110,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         ]
 
         let prompt = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !prompt.isEmpty {
+        if !prompt.isEmpty && ConfigManager.supportsSystemPrompt(model: model) {
             setupDict["systemInstruction"] = [
                 "parts": [
                     ["text": prompt]
@@ -1142,17 +1142,11 @@ public class Transcriber {
         request.timeoutInterval = 25.0
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let userPrompt = config.gemini_system_prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let prompt = userPrompt.isEmpty ? """
-        Sen bir ses deşifre (transcription) sistemisin. Bu ses kaydındaki konuşmayı harfi harfine, doğru imla ve noktalama ile yazıya dök. Eğer ses kaydında belirgin bir insan konuşması yoksa, ortam gürültüsü veya sessizlik varsa kesinlikle hiçbir şey yazma, sadece boş bırak. Asla selamlama, özet veya fazladan yorum ekleme. Sadece konuşulan metni döndür.
-        """ : userPrompt
-
         let base64Audio = audioData.base64EncodedString()
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "contents": [
                 [
                     "parts": [
-                        ["text": prompt],
                         [
                             "inline_data": [
                                 "mime_type": "audio/wav",
@@ -1162,12 +1156,22 @@ public class Transcriber {
                     ]
                 ]
             ],
-            "system_instruction": [
+            "generationConfig": [
+                "temperature": 0.0,
+                "maxOutputTokens": 2048
+            ]
+        ]
+
+        // Saf ses modelleri (transcribe) system_instruction desteklemez; sadece çok modlu Flash/Pro modellerine gönder
+        if ConfigManager.supportsSystemPrompt(model: model) {
+            let userPrompt = config.gemini_system_prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            let prompt = userPrompt.isEmpty ? AppConfig.defaultGeminiSystemPrompt : userPrompt
+            payload["system_instruction"] = [
                 "parts": [
                     ["text": prompt]
                 ]
             ]
-        ]
+        }
 
         guard let httpBody = try? JSONSerialization.data(withJSONObject: payload) else {
             completion(TranscriptionResult(

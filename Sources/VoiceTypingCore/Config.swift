@@ -219,44 +219,52 @@ public class ConfigManager {
     public static let availableGroqModels: [ModelOption] = [
         ModelOption(
             id: "whisper-large-v3",
-            name: "Whisper Large v3 (Yüksek Kalite)",
+            name: "Whisper Large v3 (Saf Ses Deşifre)",
             price: "0.111 USD / saat",
-            speed: "~0.4s (Yüksek Doğruluk)"
+            speed: "Standart"
         )
     ]
 
     public static let availableGeminiModels: [ModelOption] = [
         ModelOption(
             id: "gemini-3.5-transcribe-live",
-            name: "Gemini 3.5 Transcribe Live (Canlı Akış / Düşük Gecikme)",
-            price: "Ücretsiz Kota / Standart",
-            speed: "0.05s - 0.2s (Canlı Akış)"
-        ),
-        ModelOption(
-            id: "gemini-3.5-transcribe",
-            name: "Gemini 3.5 Transcribe (REST)",
-            price: "Ücretsiz Kota / Standart",
-            speed: "~0.4s (Hızlı REST)"
-        ),
-        ModelOption(
-            id: "gemini-3.5-flash",
-            name: "Gemini 3.5 Flash",
-            price: "Ücretsiz Kota / Düşük Maliyet",
-            speed: "~0.7s (Hızlı & Doğal Dil)"
+            name: "Gemini 3.5 Transcribe Live (Canlı Akış - Saf Ses)",
+            price: "Ücretsiz Kota",
+            speed: "Canlı Akış"
         ),
         ModelOption(
             id: "gemini-3.6-flash",
-            name: "Gemini 3.6 Flash",
-            price: "Ücretsiz Kota / Düşük Maliyet",
-            speed: "~0.8s (Bağlamsal Zeka)"
+            name: "Gemini 3.6 Flash (Sistem İstemi & Çeviri Destekli)",
+            price: "Ücretsiz Kota",
+            speed: "Hızlı"
+        ),
+        ModelOption(
+            id: "gemini-3.5-flash",
+            name: "Gemini 3.5 Flash (Sistem İstemi & Çeviri Destekli)",
+            price: "Ücretsiz Kota",
+            speed: "Hızlı"
         ),
         ModelOption(
             id: "gemini-3.5-flash-lite",
-            name: "Gemini 3.5 Flash Lite",
-            price: "Ücretsiz Kota / Standart",
-            speed: "~0.5s (Hafif Model)"
+            name: "Gemini 3.5 Flash Lite (Hafif Model)",
+            price: "Ücretsiz Kota",
+            speed: "Hafif"
+        ),
+        ModelOption(
+            id: "gemini-3.5-transcribe",
+            name: "Gemini 3.5 Transcribe (REST - Saf Ses)",
+            price: "Ücretsiz Kota",
+            speed: "Standart"
         )
     ]
+
+    public static func supportsSystemPrompt(model: String) -> Bool {
+        let m = model.lowercased()
+        if m.contains("transcribe") || m.contains("whisper") {
+            return false
+        }
+        return m.contains("flash") || m.contains("pro")
+    }
 
     private init() {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
