@@ -870,30 +870,34 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertTrue(polished.contains("SPM"), "Özel sözlük terimi 'SPM' büyük harfle yazılmalı.")
     }
 
-    func testTextPolisherDictationModes() {
+    func testTextPolisherNaturalPreservation() {
         let polisher = TextPolisher.shared
+        let config = AppConfig.defaultConfig
+
+        // Cihaz içi katı regex biçimlendirme kaldırıldı; kullanıcının orijinal ifadesi doğal tutulur
+        let input = "toplantı saat üçe ertelendi lütfen belgeleri hazırlayın"
+        let result = polisher.polish(text: input, config: config)
+        XCTAssertEqual(result, "Toplantı saat üçe ertelendi lütfen belgeleri hazırlayın")
+
+        // Boşluk ve temel noktalama temizliği
+        let noisyInput = "  merhaba   dünya  !  "
+        let noisyResult = polisher.polish(text: noisyInput, config: config)
+        XCTAssertEqual(noisyResult, "Merhaba dünya!")
+    }
+
+    func testGeminiSystemPromptConfiguration() {
         var config = AppConfig.defaultConfig
+        XCTAssertFalse(config.gemini_system_prompt.isEmpty)
+        XCTAssertEqual(config.gemini_system_prompt, AppConfig.defaultGeminiSystemPrompt)
 
-        // 1. Birebir (Direct) Mod
-        config.dictation_mode = "direct"
-        let directInput = "merhaba nasılsın"
-        let directResult = polisher.polish(text: directInput, config: config)
-        XCTAssertEqual(directResult, "Merhaba nasılsın")
-
-        // 2. Profesyonel / E-posta Modu
-        config.dictation_mode = "formal"
-        let formalInput = "toplantı saat üçe ertelendi lütfen belgeleri hazırlayın"
-        let formalResult = polisher.polish(text: formalInput, config: config)
-        XCTAssertTrue(formalResult.hasSuffix("."), "Formal modda cümle sonuna nokta eklenmeli.")
-        XCTAssertTrue(formalResult.hasPrefix("Toplantı"), "Cümle başı büyük harfle başlamalı.")
-
-        // 3. Madde İmleri (Bullet Points) Modu
-        config.dictation_mode = "bullet_points"
-        let bulletInput = "İlk olarak veritabanını hazırla. İkinci olarak API'yi bağla. Son olarak testleri çalıştır."
-        let bulletResult = polisher.polish(text: bulletInput, config: config)
-        XCTAssertTrue(bulletResult.contains("- Veritabanını hazırla"), "İlk madde biçimlendirilmeli.")
-        XCTAssertTrue(bulletResult.contains("- API'yi bağla"), "İkinci madde biçimlendirilmeli.")
-        XCTAssertTrue(bulletResult.contains("- Testleri çalıştır"), "Üçüncü madde biçimlendirilmeli.")
+        // Özel prompt atama ve doğrulama
+        config.gemini_system_prompt = "Sen bir yazılımcısın. Deşifre edilen teknik terimleri aynen koru."
+        let data = try? JSONEncoder().encode(config)
+        XCTAssertNotNil(data)
+        if let data = data {
+            let decoded = try? JSONDecoder().decode(AppConfig.self, from: data)
+            XCTAssertEqual(decoded?.gemini_system_prompt, "Sen bir yazılımcısın. Deşifre edilen teknik terimleri aynen koru.")
+        }
     }
 
     func testDictationHistoryManager() {

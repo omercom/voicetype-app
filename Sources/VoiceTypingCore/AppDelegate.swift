@@ -16,10 +16,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchAtLoginMenuItem: NSMenuItem!
     private var triggerKeyMenuItems: [NSMenuItem] = []
 
-    // Dikte Modları & Geçmiş
-    private var directModeMenuItem: NSMenuItem!
-    private var formalModeMenuItem: NSMenuItem!
-    private var bulletModeMenuItem: NSMenuItem!
+    // Geçmiş & Gelişmiş Özellikler
     private var historyParentMenuItem: NSMenuItem!
     private var historyMenu: NSMenu!
     private var hapticMenuItem: NSMenuItem!
@@ -198,25 +195,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         providerParent.submenu = providerMenu
         menu.addItem(providerParent)
 
-        // 5b. Dikte Modu Submenu (Yazım Stili)
-        let dictationMenu = NSMenu()
-        directModeMenuItem = NSMenuItem(title: "Birebir (Doğal Konuşma)", action: #selector(selectDirectMode), keyEquivalent: "")
-        directModeMenuItem.target = self
-        dictationMenu.addItem(directModeMenuItem)
-
-        formalModeMenuItem = NSMenuItem(title: "Profesyonel / E-posta", action: #selector(selectFormalMode), keyEquivalent: "")
-        formalModeMenuItem.target = self
-        dictationMenu.addItem(formalModeMenuItem)
-
-        bulletModeMenuItem = NSMenuItem(title: "Madde İmleri (Notlar)", action: #selector(selectBulletMode), keyEquivalent: "")
-        bulletModeMenuItem.target = self
-        dictationMenu.addItem(bulletModeMenuItem)
-
-        let dictationParent = NSMenuItem(title: "Dikte Modu", action: nil, keyEquivalent: "")
-        dictationParent.submenu = dictationMenu
-        menu.addItem(dictationParent)
-
-        // 5c. Son Dikteler (History) Submenu
+        // 5b. Son Dikteler (History) Submenu
         historyMenu = NSMenu()
         historyParentMenuItem = NSMenuItem(title: "Son Dikteler", action: nil, keyEquivalent: "")
         historyParentMenuItem.submenu = historyMenu
@@ -277,10 +256,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         for item in triggerKeyMenuItems {
             item.state = (item.tag == cfg.trigger_key) ? .on : .off
         }
-
-        directModeMenuItem?.state = (cfg.dictation_mode.lowercased() == "direct") ? .on : .off
-        formalModeMenuItem?.state = (cfg.dictation_mode.lowercased() == "formal") ? .on : .off
-        bulletModeMenuItem?.state = (cfg.dictation_mode.lowercased() == "bullet_points") ? .on : .off
 
         soundEffectsMenuItem.state = cfg.play_sounds ? .on : .off
         hapticMenuItem?.state = cfg.haptic_feedback ? .on : .off
@@ -644,24 +619,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let currentlyEnabled = LaunchAtLoginManager.shared.isEnabled
         LaunchAtLoginManager.shared.setEnabled(!currentlyEnabled)
         refreshMenuStates()
-    }
-
-    @objc private func selectDirectMode() {
-        ConfigManager.shared.update { $0.dictation_mode = "direct" }
-        refreshMenuStates()
-        SettingsWindowController.shared.loadValues()
-    }
-
-    @objc private func selectFormalMode() {
-        ConfigManager.shared.update { $0.dictation_mode = "formal" }
-        refreshMenuStates()
-        SettingsWindowController.shared.loadValues()
-    }
-
-    @objc private func selectBulletMode() {
-        ConfigManager.shared.update { $0.dictation_mode = "bullet_points" }
-        refreshMenuStates()
-        SettingsWindowController.shared.loadValues()
     }
 
     @objc private func toggleHapticFeedback() {

@@ -20,8 +20,38 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var modeSegmentedControl: NSSegmentedControl!
     private var modePopUp: NSPopUpButton!
     private var modeInfoLabel: NSTextField!
-    private var dictationModeSegmentedControl: NSSegmentedControl!
     private var customVocabField: NSTextField!
+    // Tab 2: Gemini Sistem İstemi & Prompt Şablonları
+    private var geminiPromptPresetPopUp: NSPopUpButton!
+    private var geminiPromptTextView: NSTextView!
+    private var geminiPromptScrollView: NSScrollView!
+
+    private let promptPresets: [(name: String, prompt: String)] = [
+        (
+            "Varsayılan (Doğal Dikte - Konuşulanı Yorumsuz Yaz)",
+            "Sen profesyonel bir ses deşifre asistanısın. Kullanıcının konuşmasını dinle ve doğrudan yazıya dök. Asla selamlama, özet, onaylama ('Tabii ki', 'Anladım' gibi) veya fazladan yorum ekleme; sadece konuşulan metni temiz, doğru imla ve akıcı bir dille yaz."
+        ),
+        (
+            "Profesyonel / E-posta (Resmi Dilbilgisi & İmla)",
+            "Sen bir yönetici asistanısın. Konuşulan metni resmi, kurumsal ve net bir e-posta / iş yazışması üslubuna dönüştür. İmla ve noktalama kurallarına tam uy, gereksiz laf kalabalıklarını temizle. Sadece nihai metni yaz."
+        ),
+        (
+            "Madde İmleri & Notlar (Tireli Liste Biçimi)",
+            "Konuşmayı önemli fikirler ve yapılacak işler (action items) halinde alt alta tireli maddeler (- ...) biçiminde özetle ve listele. Başka hiçbir giriş veya kapanış cümlesi ekleme."
+        ),
+        (
+            "Yazılımcı / Teknik (Kod, Değişken ve Terimleri Koru)",
+            "Yazılım geliştiricisi için dikte yapıyorsun. Teknik terimleri, komutları, fonksiyon adlarını, camelCase veya snake_case yapıları kesinlikle bozmadan, doğru İngilizce/Türkçe teknik terminolojiyle yaz."
+        ),
+        (
+            "İngilizceye Çevirerek Yaz (Anında Canlı Çeviri)",
+            "Kullanıcının Türkçe veya farklı dilde söylediği sözleri anında akıcı, doğal ve grameri kusursuz bir İngilizce'ye çevirerek yaz. Yalnızca İngilizce çeviriyi döndür, yorum ekleme."
+        ),
+        (
+            "Özel İstemi Kullan...",
+            ""
+        )
+    ]
     private var languageField: NSTextField!
     private var playSoundsCheckbox: NSButton!
     private var hapticFeedbackCheckbox: NSButton!
@@ -332,50 +362,28 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         // Ayırıcı
         container.addSubview(createSeparator(y: 158))
 
-        // 3. Dikte Modu (Yazım Stili)
-        let dictLabel = createSectionLabel(text: "Dikte Modu", y: 170)
-        container.addSubview(dictLabel)
-
-        dictationModeSegmentedControl = NSSegmentedControl(
-            labels: ["Birebir (Doğal)", "Profesyonel / E-posta", "Madde İmleri (Notlar)"],
-            trackingMode: .selectOne,
-            target: nil,
-            action: nil
-        )
-        dictationModeSegmentedControl.frame = NSRect(x: 175, y: 168, width: 440, height: 26)
-        dictationModeSegmentedControl.segmentStyle = .rounded
-        dictationModeSegmentedControl.segmentDistribution = .fillEqually
-        dictationModeSegmentedControl.selectedSegment = 0
-        container.addSubview(dictationModeSegmentedControl)
-
-        let dictNote = createNoteLabel(text: "Birebir: Doğal konuşma akışı. Profesyonel: Resmi dilbilgisi & imla. Madde İmleri: Liste (- ...) biçimi.", y: 196)
-        container.addSubview(dictNote)
-
-        // Ayırıcı
-        container.addSubview(createSeparator(y: 224))
-
-        // 4. Özel Sözlük (Terim Havuzu)
-        let vocabLabel = createSectionLabel(text: "Özel Sözlük", y: 236)
+        // 3. Özel Sözlük (Terim Havuzu)
+        let vocabLabel = createSectionLabel(text: "Özel Sözlük", y: 172)
         container.addSubview(vocabLabel)
 
         customVocabField = createSingleLineInputField(
-            frame: NSRect(x: 175, y: 234, width: 440, height: 24),
+            frame: NSRect(x: 175, y: 170, width: 440, height: 24),
             placeholder: "Kubernetes, PostgreSQL, Next.js, SPM..."
         )
         container.addSubview(customVocabField)
 
-        let vocabNote = createNoteLabel(text: "Teknik terimleri virgülle ayırarak girin. Whisper ve Gemini modelleri bu kelimeleri öncelikli tanır.", y: 260)
+        let vocabNote = createNoteLabel(text: "Teknik terimleri virgülle ayırarak girin. Whisper ve Gemini modelleri bu kelimeleri öncelikli tanır.", y: 196)
         container.addSubview(vocabNote)
 
         // Ayırıcı
-        container.addSubview(createSeparator(y: 288))
+        container.addSubview(createSeparator(y: 224))
 
-        // 5. Konuşma Dili
-        let langLabel = createSectionLabel(text: "Konuşma Dili", y: 300)
+        // 4. Konuşma Dili
+        let langLabel = createSectionLabel(text: "Konuşma Dili", y: 238)
         container.addSubview(langLabel)
 
         languageField = createSingleLineInputField(
-            frame: NSRect(x: 175, y: 298, width: 60, height: 24),
+            frame: NSRect(x: 175, y: 236, width: 60, height: 24),
             placeholder: "tr",
             isMonospaced: false
         )
@@ -383,48 +391,48 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(languageField)
 
         let langHint = NSTextField(labelWithString: "('tr': Türkçe, 'en': İngilizce, 'auto': Otomatik Algıla)")
-        langHint.frame = NSRect(x: 245, y: 301, width: 370, height: 20)
+        langHint.frame = NSRect(x: 245, y: 239, width: 370, height: 20)
         langHint.font = NSFont.systemFont(ofSize: 11)
         langHint.textColor = .secondaryLabelColor
         container.addSubview(langHint)
 
         // Ayırıcı
-        container.addSubview(createSeparator(y: 326))
+        container.addSubview(createSeparator(y: 266))
 
-        // 6. Seçenekler (Tercihler)
-        let optsLabel = createSectionLabel(text: "Seçenekler", y: 338)
+        // 5. Seçenekler (Tercihler)
+        let optsLabel = createSectionLabel(text: "Seçenekler", y: 280)
         container.addSubview(optsLabel)
 
         hapticFeedbackCheckbox = NSButton(checkboxWithTitle: "Dokunsal titreşim (Trackpad Force Touch tıkı)", target: nil, action: nil)
-        hapticFeedbackCheckbox.frame = NSRect(x: 175, y: 336, width: 440, height: 18)
+        hapticFeedbackCheckbox.frame = NSRect(x: 175, y: 278, width: 440, height: 18)
         container.addSubview(hapticFeedbackCheckbox)
 
         removeFillerWordsCheckbox = NSButton(checkboxWithTitle: "Dolgu kelimelerini otomatik temizle ('ııı', 'şey', 'yani', 'hımm')", target: nil, action: nil)
-        removeFillerWordsCheckbox.frame = NSRect(x: 175, y: 360, width: 440, height: 18)
+        removeFillerWordsCheckbox.frame = NSRect(x: 175, y: 302, width: 440, height: 18)
         container.addSubview(removeFillerWordsCheckbox)
 
         saveHistoryCheckbox = NSButton(checkboxWithTitle: "Dikte geçmişini menü çubuğunda sakla (Son 15 dikte)", target: nil, action: nil)
-        saveHistoryCheckbox.frame = NSRect(x: 175, y: 384, width: 440, height: 18)
+        saveHistoryCheckbox.frame = NSRect(x: 175, y: 326, width: 440, height: 18)
         container.addSubview(saveHistoryCheckbox)
 
         muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "Konuşurken arka plan medyasını/müziği duraklat", target: nil, action: nil)
-        muteSystemAudioCheckbox.frame = NSRect(x: 175, y: 408, width: 440, height: 18)
+        muteSystemAudioCheckbox.frame = NSRect(x: 175, y: 350, width: 440, height: 18)
         container.addSubview(muteSystemAudioCheckbox)
 
         playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal", target: nil, action: nil)
-        playSoundsCheckbox.frame = NSRect(x: 175, y: 432, width: 440, height: 18)
+        playSoundsCheckbox.frame = NSRect(x: 175, y: 374, width: 440, height: 18)
         container.addSubview(playSoundsCheckbox)
 
         restoreClipboardCheckbox = NSButton(checkboxWithTitle: "Metin yapıştırıldıktan sonra panoyu geri yükle", target: nil, action: nil)
-        restoreClipboardCheckbox.frame = NSRect(x: 175, y: 456, width: 440, height: 18)
+        restoreClipboardCheckbox.frame = NSRect(x: 175, y: 398, width: 440, height: 18)
         container.addSubview(restoreClipboardCheckbox)
 
         launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat", target: nil, action: nil)
-        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 480, width: 440, height: 18)
+        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 422, width: 440, height: 18)
         container.addSubview(launchAtLoginCheckbox)
 
         showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini kalıcı olarak göster", target: nil, action: nil)
-        showDockIconCheckbox.frame = NSRect(x: 175, y: 504, width: 440, height: 18)
+        showDockIconCheckbox.frame = NSRect(x: 175, y: 446, width: 440, height: 18)
         container.addSubview(showDockIconCheckbox)
 
         return container
@@ -562,7 +570,51 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let groqNote = createNoteLabel(text: "Whisper Large modelini Groq LPU bulut donanımında ~0.3 saniyede tamamlar.", y: 388)
         container.addSubview(groqNote)
 
+        container.addSubview(createSeparator(y: 410))
+
+        // 4. Gemini Sistem İstemi (System Instruction / Cevap & Yazım Tarzı)
+        let promptSection = createSectionLabel(text: "Sistem İstemi", y: 422)
+        container.addSubview(promptSection)
+
+        geminiPromptPresetPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 420, width: 440, height: 26), pullsDown: false)
+        for preset in promptPresets {
+            geminiPromptPresetPopUp.addItem(withTitle: preset.name)
+        }
+        geminiPromptPresetPopUp.target = self
+        geminiPromptPresetPopUp.action = #selector(promptPresetChanged(_:))
+        container.addSubview(geminiPromptPresetPopUp)
+
+        geminiPromptScrollView = NSScrollView(frame: NSRect(x: 175, y: 450, width: 440, height: 54))
+        geminiPromptScrollView.hasVerticalScroller = true
+        geminiPromptScrollView.hasHorizontalScroller = false
+        geminiPromptScrollView.autohidesScrollers = true
+        geminiPromptScrollView.borderType = .bezelBorder
+
+        let contentSize = geminiPromptScrollView.contentSize
+        geminiPromptTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: contentSize.width, height: contentSize.height))
+        geminiPromptTextView.minSize = NSSize(width: 0.0, height: contentSize.height)
+        geminiPromptTextView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        geminiPromptTextView.isVerticallyResizable = true
+        geminiPromptTextView.isHorizontallyResizable = false
+        geminiPromptTextView.autoresizingMask = [.width]
+        geminiPromptTextView.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
+        geminiPromptTextView.textContainer?.widthTracksTextView = true
+        geminiPromptTextView.font = NSFont.systemFont(ofSize: 11)
+        geminiPromptTextView.isRichText = false
+        geminiPromptScrollView.documentView = geminiPromptTextView
+        container.addSubview(geminiPromptScrollView)
+
+        let promptNote = createNoteLabel(text: "Gemini bu sistem talimatına (systemInstruction) göre çıktıyı biçimlendirir ve üslubu belirler.", y: 508)
+        container.addSubview(promptNote)
+
         return container
+    }
+
+    @objc private func promptPresetChanged(_ sender: NSPopUpButton) {
+        let idx = sender.indexOfSelectedItem
+        if idx >= 0 && idx < promptPresets.count - 1 {
+            geminiPromptTextView.string = promptPresets[idx].prompt
+        }
     }
 
     @objc private func providerSegmentedChanged(_ sender: NSSegmentedControl) {
@@ -1000,17 +1052,15 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         modeSegmentedControl.selectedSegment = modeIdx
         updateModeInfoText(for: modeIdx)
 
-        // Dikte Modu
-        let dictModeIdx: Int
-        switch cfg.dictation_mode.lowercased() {
-        case "formal":
-            dictModeIdx = 1
-        case "bullet_points":
-            dictModeIdx = 2
-        default:
-            dictModeIdx = 0
+        // Gemini Sistem İstemi (System Prompt)
+        let currentPrompt = cfg.gemini_system_prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let promptToDisplay = currentPrompt.isEmpty ? AppConfig.defaultGeminiSystemPrompt : currentPrompt
+        geminiPromptTextView.string = promptToDisplay
+        if let matchIdx = promptPresets.firstIndex(where: { $0.prompt == promptToDisplay }) {
+            geminiPromptPresetPopUp.selectItem(at: matchIdx)
+        } else {
+            geminiPromptPresetPopUp.selectItem(at: promptPresets.count - 1)
         }
-        dictationModeSegmentedControl.selectedSegment = dictModeIdx
 
         // Özel Sözlük
         customVocabField.stringValue = cfg.custom_vocabulary
@@ -1332,12 +1382,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         default: modeStr = "hold"
         }
 
-        let dictMode: String
-        switch dictationModeSegmentedControl.selectedSegment {
-        case 1: dictMode = "formal"
-        case 2: dictMode = "bullet_points"
-        default: dictMode = "direct"
-        }
+        let rawPrompt = geminiPromptTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let geminiPrompt = rawPrompt.isEmpty ? AppConfig.defaultGeminiSystemPrompt : rawPrompt
 
         let customVocab = customVocabField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let hapticOn = hapticFeedbackCheckbox.state == .on
@@ -1362,7 +1408,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.language = language.isEmpty ? "tr" : language
             cfg.trigger_key = triggerKey
             cfg.trigger_mode = modeStr
-            cfg.dictation_mode = dictMode
+            cfg.dictation_mode = "direct"
+            cfg.gemini_system_prompt = geminiPrompt
             cfg.custom_vocabulary = customVocab
             cfg.haptic_feedback = hapticOn
             cfg.remove_filler_words = removeFillerOn
