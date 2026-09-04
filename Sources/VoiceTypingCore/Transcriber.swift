@@ -45,6 +45,8 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     private var isSetupComplete: Bool = false
     private var pendingChunks: [Data] = []
     private var isAudioFinished: Bool = false
+    private var hasSentStreamEnd: Bool = false
+    private var streamEndSentTime: CFAbsoluteTime = 0
     private var startTime: CFAbsoluteTime = 0
     private var accumulatedText: String = ""
     private var latestInterimText: String = ""
@@ -223,21 +225,21 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                     lock.lock()
                     self.latestInterimText = trimmed
                     let currentAccum = self.accumulatedText
-                    let finished = self.isAudioFinished
+                    let endSent = self.hasSentStreamEnd
                     lock.unlock()
 
                     let preview: String
                     if currentAccum.isEmpty {
                         preview = trimmed
-                    } else if trimmed.hasPrefix(currentAccum) {
+                    } else if trimmed.lowercased().hasPrefix(currentAccum.lowercased()) {
                         preview = trimmed
                     } else {
                         preview = "\(currentAccum) \(trimmed)"
                     }
                     onInterim?(preview)
 
-                    if finished {
-                        scheduleFinalization(delayMs: 600)
+                    if endSent {
+                        scheduleFinalization(delayMs: 450)
                     }
                 }
             }
@@ -250,16 +252,22 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                     lock.lock()
                     if self.accumulatedText.isEmpty {
                         self.accumulatedText = trimmed
-                    } else {
+                    } else if trimmed.lowercased().hasPrefix(self.accumulatedText.lowercased()) {
+                        self.accumulatedText = trimmed
+                    } else if !self.accumulatedText.lowercased().hasSuffix(trimmed.lowercased()) {
                         self.accumulatedText += " \(trimmed)"
                     }
+                    if self.latestInterimText.lowercased() == trimmed.lowercased() ||
+                       self.accumulatedText.lowercased().hasSuffix(self.latestInterimText.lowercased()) {
+                        self.latestInterimText = ""
+                    }
                     let current = self.accumulatedText
-                    let finished = self.isAudioFinished
+                    let endSent = self.hasSentStreamEnd
                     lock.unlock()
                     onInterim?(current)
 
-                    if finished {
-                        scheduleFinalization(delayMs: 500)
+                    if endSent {
+                        scheduleFinalization(delayMs: 400)
                     }
                 }
             }
@@ -273,14 +281,18 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                     lock.lock()
                     if self.accumulatedText.isEmpty {
                         self.accumulatedText = text
+                    } else if text.lowercased().hasPrefix(self.accumulatedText.lowercased()) {
+                        self.accumulatedText = text
+                    } else if !self.accumulatedText.lowercased().hasSuffix(text.lowercased()) {
+                        self.accumulatedText += " \(text)"
                     }
                     let current = self.accumulatedText
-                    let finished = self.isAudioFinished
+                    let endSent = self.hasSentStreamEnd
                     lock.unlock()
                     onInterim?(current)
 
-                    if finished {
-                        scheduleFinalization(delayMs: 500)
+                    if endSent {
+                        scheduleFinalization(delayMs: 400)
                     }
                 }
             }
@@ -290,10 +302,14 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                                  (serverContent["generationComplete"] as? Bool) == true
             if isTurnComplete {
                 lock.lock()
-                let finished = self.isAudioFinished
+                let endSent = self.hasSentStreamEnd
+                let timeSinceEnd = CFAbsoluteTimeGetCurrent() - self.streamEndSentTime
                 lock.unlock()
-                if finished {
-                    finishAndComplete()
+
+                // Yalnızca stream end gönderildikten sonra ve sunucunun stream end'i işlemesine yetecek süre (>= 150ms) geçtikten sonra
+                // gelen turnComplete sinyali oturumun sonlandırılması için geçerlidir.
+                if endSent && timeSinceEnd >= 0.15 {
+                    scheduleFinalization(delayMs: 100)
                 }
             }
         }
@@ -364,6 +380,11 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     }
 
     private func sendRawStreamEnd(ws: URLSessionWebSocketTask) {
+        lock.lock()
+        hasSentStreamEnd = true
+        streamEndSentTime = CFAbsoluteTimeGetCurrent()
+        lock.unlock()
+
         let endPayload: [String: Any] = [
             "realtimeInput": [
                 "audioStreamEnd": true
@@ -377,6 +398,16 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 }
             }
         }
+
+        // Akıllı bekleme:
+        // Eğer halihazırda metin geldiyse, son kelimelerin akması için 650ms bekle.
+        // Eğer sunucu henüz ilk kelimeleri üretme aşamasındaysa (örn. dosya akışı veya konuşma sonu),
+        // ilk kelimelerin gelmesi için 2500ms tanı (metin geldiğinde sayaç 400ms'ye çekilecektir).
+        lock.lock()
+        let hasText = !accumulatedText.isEmpty || !latestInterimText.isEmpty
+        lock.unlock()
+        let delay = hasText ? 650 : 2500
+        scheduleFinalization(delayMs: delay)
     }
 
     private func startSafetyTimeout(seconds: Double) {
@@ -417,6 +448,27 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         lock.unlock()
     }
 
+    public static func reconcileTranscriptionText(accumulated: String, interim: String) -> String {
+        var text = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedInterim = interim.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if text.isEmpty {
+            text = trimmedInterim
+        } else if !trimmedInterim.isEmpty {
+            if trimmedInterim.lowercased().hasPrefix(text.lowercased()) {
+                text = trimmedInterim
+            } else if !text.lowercased().hasSuffix(trimmedInterim.lowercased()) {
+                text = "\(text) \(trimmedInterim)"
+            }
+        }
+
+        let lower = text.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]().,"))
+        if lower == "blank_audio" || lower == "sessizlik" || lower == "ses yok" || lower == "boşluk" || lower == "gürültü" {
+            return ""
+        }
+        return text
+    }
+
     private func finishAndComplete() {
         cancelSafetyTimer()
         cancelFinalizationTimer()
@@ -428,14 +480,10 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         }
         isCompleted = true
         let latency = CFAbsoluteTimeGetCurrent() - startTime
-        var text = accumulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.isEmpty {
-            text = latestInterimText.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        let lower = text.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]().,"))
-        if lower == "blank_audio" || lower == "sessizlik" || lower == "ses yok" || lower == "boşluk" || lower == "gürültü" {
-            text = ""
-        }
+        let text = LiveGeminiStreamSession.reconcileTranscriptionText(
+            accumulated: accumulatedText,
+            interim: latestInterimText
+        )
         let ws = webSocketTask
         webSocketTask = nil
         let sess = session
