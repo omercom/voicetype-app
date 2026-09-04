@@ -60,8 +60,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.title = "Voice Typing - Ayarlar"
         window.center()
         window.isReleasedWhenClosed = false
-        // Pencerenin Sistem Ayarları açıldığında arkaya kaybolmaması için floating ve hidesOnDeactivate=false
-        window.level = .floating
+        // Standart Apple tercihleri penceresi davranışı (.normal)
+        window.level = .normal
         window.hidesOnDeactivate = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         super.init(window: window)
@@ -95,9 +95,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         refreshPermissionStatuses()
         loadValues()
         super.showWindow(sender)
-        window?.level = .floating
         window?.makeKeyAndOrderFront(sender)
-        window?.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
         startPermissionPollTimer()
     }

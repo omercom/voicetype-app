@@ -24,6 +24,9 @@ if [ -d "Sources/VoiceTypingCore/Resources" ]; then
         cp "Sources/VoiceTypingCore/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
     fi
 fi
+if [ -f "config.json" ]; then
+    cp "config.json" "$APP_BUNDLE/Contents/Resources/config.json" 2>/dev/null || true
+fi
 
 # Ad-hoc codesign (macOS TCC izinlerinin kalıcı olarak hatırlanması için)
 codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
