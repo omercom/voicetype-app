@@ -62,16 +62,8 @@ public final class TextPolisher {
             processed = applyCustomVocabulary(text: processed, vocabularyString: config.custom_vocabulary)
         }
 
-        // 3. Dikte Modu Biçimlendirmesi (Dictation Mode)
-        switch config.dictation_mode.lowercased() {
-        case "formal", "profesyonel", "eposta":
-            processed = formatFormal(text: processed)
-        case "bullet_points", "bullets", "notlar", "madde":
-            processed = formatBulletPoints(text: processed)
-        default:
-            // "direct" (birebir): sadece temel noktalama ve boşluk düzeni
-            processed = cleanWhitespaceAndPunctuation(text: processed)
-        }
+        // 3. Temel boşluk ve noktalama temizliği (Kullanıcının sözlerine ve cümle yapısına doğrudan dokunmaz)
+        processed = cleanWhitespaceAndPunctuation(text: processed)
 
         return processed.trimmingCharacters(in: .whitespacesAndNewlines)
     }

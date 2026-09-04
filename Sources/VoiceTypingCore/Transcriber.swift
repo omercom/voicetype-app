@@ -31,6 +31,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     public let apiKey: String
     public let model: String
     public let language: String
+    public let systemPrompt: String
 
     public var onInterim: ((String) -> Void)?
     public var onCompletion: ((TranscriptionResult) -> Void)?
@@ -56,10 +57,11 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     private var serverCloseReason: String?
     private var serverCloseCode: URLSessionWebSocketTask.CloseCode?
 
-    public init(apiKey: String, model: String = "gemini-3.5-transcribe-live", language: String = "tr") {
+    public init(apiKey: String, model: String = "gemini-3.5-transcribe-live", language: String = "tr", systemPrompt: String = "") {
         self.apiKey = apiKey
         self.model = model.isEmpty ? "gemini-3.5-transcribe-live" : model
         self.language = language
+        self.systemPrompt = systemPrompt
     }
 
     public func start() {
@@ -97,17 +99,25 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         }
 
         let modelPath = model.hasPrefix("models/") ? model : "models/\(model)"
-        let setupPayload: [String: Any] = [
-            "setup": [
-                "model": modelPath,
-                "generationConfig": [
-                    "responseModalities": ["TEXT"]
-                ],
-                "inputAudioTranscription": [
-                    "languageCodes": langCodes
-                ]
+        var setupDict: [String: Any] = [
+            "model": modelPath,
+            "generationConfig": [
+                "responseModalities": ["TEXT"]
+            ],
+            "inputAudioTranscription": [
+                "languageCodes": langCodes
             ]
         ]
+
+        let prompt = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prompt.isEmpty {
+            setupDict["systemInstruction"] = [
+                "parts": [
+                    ["text": prompt]
+                ]
+            ]
+        }
+        let setupPayload: [String: Any] = ["setup": setupDict]
 
         if let setupData = try? JSONSerialization.data(withJSONObject: setupPayload) {
             ws.send(.data(setupData)) { [weak self] error in
@@ -812,7 +822,12 @@ public class Transcriber {
             return nil
         }
 
-        let session = LiveGeminiStreamSession(apiKey: apiKey, model: model, language: config.language)
+        let session = LiveGeminiStreamSession(
+            apiKey: apiKey,
+            model: model,
+            language: config.language,
+            systemPrompt: config.gemini_system_prompt
+        )
         session.onInterim = onInterim
         session.onCompletion = completion
 
@@ -872,7 +887,12 @@ public class Transcriber {
             pcmData = audioData
         }
 
-        let session = LiveGeminiStreamSession(apiKey: apiKey, model: model, language: config.language)
+        let session = LiveGeminiStreamSession(
+            apiKey: apiKey,
+            model: model,
+            language: config.language,
+            systemPrompt: config.gemini_system_prompt
+        )
 
         session.onCompletion = { [weak self] result in
             if result.success {
@@ -1122,9 +1142,10 @@ public class Transcriber {
         request.timeoutInterval = 25.0
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let prompt = """
+        let userPrompt = config.gemini_system_prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = userPrompt.isEmpty ? """
         Sen bir ses deşifre (transcription) sistemisin. Bu ses kaydındaki konuşmayı harfi harfine, doğru imla ve noktalama ile yazıya dök. Eğer ses kaydında belirgin bir insan konuşması yoksa, ortam gürültüsü veya sessizlik varsa kesinlikle hiçbir şey yazma, sadece boş bırak. Asla selamlama, özet veya fazladan yorum ekleme. Sadece konuşulan metni döndür.
-        """
+        """ : userPrompt
 
         let base64Audio = audioData.base64EncodedString()
         let payload: [String: Any] = [
@@ -1139,6 +1160,11 @@ public class Transcriber {
                             ]
                         ]
                     ]
+                ]
+            ],
+            "system_instruction": [
+                "parts": [
+                    ["text": prompt]
                 ]
             ]
         ]

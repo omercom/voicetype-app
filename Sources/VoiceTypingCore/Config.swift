@@ -106,6 +106,9 @@ public struct AppConfig: Codable {
     public var custom_vocabulary: String
     public var dictation_mode: String
     public var save_history: Bool
+    public var gemini_system_prompt: String
+
+    public static let defaultGeminiSystemPrompt = "Sen profesyonel bir ses deşifre asistanısın. Kullanıcının konuşmasını dinle ve doğrudan yazıya dök. Asla selamlama, özet, onaylama ('Tabii ki', 'Anladım' gibi) veya fazladan yorum ekleme; sadece konuşulan metni temiz, doğru imla ve akıcı bir dille yaz."
 
     public static let defaultConfig = AppConfig(
         provider: "groq",
@@ -126,7 +129,8 @@ public struct AppConfig: Codable {
         remove_filler_words: true,
         custom_vocabulary: "",
         dictation_mode: "direct",
-        save_history: true
+        save_history: true,
+        gemini_system_prompt: AppConfig.defaultGeminiSystemPrompt
     )
 
     enum CodingKeys: String, CodingKey {
@@ -134,6 +138,7 @@ public struct AppConfig: Codable {
         case language, trigger_key, trigger_mode, play_sounds, restore_clipboard
         case paste_delay_ms, min_record_duration, mute_system_audio, show_dock_icon
         case haptic_feedback, remove_filler_words, custom_vocabulary, dictation_mode, save_history
+        case gemini_system_prompt
     }
 
     public init(
@@ -155,7 +160,8 @@ public struct AppConfig: Codable {
         remove_filler_words: Bool = true,
         custom_vocabulary: String = "",
         dictation_mode: String = "direct",
-        save_history: Bool = true
+        save_history: Bool = true,
+        gemini_system_prompt: String = AppConfig.defaultGeminiSystemPrompt
     ) {
         self.provider = provider
         self.groq_api_key = groq_api_key
@@ -176,6 +182,7 @@ public struct AppConfig: Codable {
         self.custom_vocabulary = custom_vocabulary
         self.dictation_mode = dictation_mode
         self.save_history = save_history
+        self.gemini_system_prompt = gemini_system_prompt
     }
 
     public init(from decoder: Decoder) throws {
@@ -199,6 +206,7 @@ public struct AppConfig: Codable {
         custom_vocabulary = try container.decodeIfPresent(String.self, forKey: .custom_vocabulary) ?? ""
         dictation_mode = try container.decodeIfPresent(String.self, forKey: .dictation_mode) ?? "direct"
         save_history = try container.decodeIfPresent(Bool.self, forKey: .save_history) ?? true
+        gemini_system_prompt = try container.decodeIfPresent(String.self, forKey: .gemini_system_prompt) ?? AppConfig.defaultGeminiSystemPrompt
     }
 }
 
