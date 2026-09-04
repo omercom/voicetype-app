@@ -959,11 +959,6 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         refreshPermissionStatuses()
         loadValues()
 
-        // Dinamik Dock İkonu: Pencere açıldığında Dock'ta görün
-        if !ConfigManager.shared.config.show_dock_icon {
-            NSApp.setActivationPolicy(.regular)
-        }
-
         super.showWindow(sender)
 
         // Apple TG Pro standardı: Ekranın tam ortasında (visibleFrame merkezinde) konumlandır
@@ -991,14 +986,6 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
         if AudioRecorder.shared.isRecording {
             _ = AudioRecorder.shared.stop()
-        }
-
-        // Dinamik Dock İkonu: Pencere kapandığında Dock ikonunu otomatik kaldır (sessiz arka plan modu)
-        if !ConfigManager.shared.config.show_dock_icon && !(AccessibilityPromptController.shared.window?.isVisible ?? false) {
-            DispatchQueue.main.async {
-                NSApp.setActivationPolicy(.accessory)
-                NSApp.deactivate()
-            }
         }
     }
 
