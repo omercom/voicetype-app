@@ -18,6 +18,10 @@
     <string>1</string>
     <key>LSUIElement</key>
     <true/>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>VoiceTyping sesinizi deşifre edip yazıya dökmek için mikrofona erişim gerektirir.</string>
 </dict>

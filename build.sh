@@ -20,7 +20,13 @@ if [ -n "$BUNDLE_DIR" ] && [ -d "$BUNDLE_DIR" ]; then
 fi
 if [ -d "Sources/VoiceTypingCore/Resources" ]; then
     cp -R Sources/VoiceTypingCore/Resources/Sounds/*.wav "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
+    if [ -f "Sources/VoiceTypingCore/Resources/AppIcon.icns" ]; then
+        cp "Sources/VoiceTypingCore/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+    fi
 fi
+
+# Ad-hoc codesign (macOS TCC izinlerinin kalıcı olarak hatırlanması için)
+codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
 
 echo "✅ Build complete! Binary located at ./VoiceTyping ($(ls -lh ./VoiceTyping | awk '{print $5}'))"
 echo "✅ App bundle created at ./$APP_BUNDLE"

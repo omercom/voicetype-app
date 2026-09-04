@@ -37,6 +37,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var playSoundsCheckbox: NSButton!
     private var restoreClipboardCheckbox: NSButton!
     private var muteSystemAudioCheckbox: NSButton!
+    private var launchAtLoginCheckbox: NSButton!
 
     // Footer
     private var statusMessageLabel: NSTextField!
@@ -487,8 +488,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         container.addSubview(modeBox)
 
-        // Kart 3: Sistem & Pano
-        let sysBox = createCardBox(frame: NSRect(x: 10, y: 327, width: 570, height: 185), title: "🔊 Ses ve Pano Tercihleri")
+        // Kart 3: Sistem, Pano & Başlangıç
+        let sysBox = createCardBox(frame: NSRect(x: 10, y: 327, width: 570, height: 215), title: "🔊 Sistem, Ses ve Başlangıç Tercihleri")
         let sysContent = sysBox.contentView as! FlippedContentView
 
         playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal (Başlangıç, bitiş ve başarı bildirim tonları)", target: nil, action: nil)
@@ -503,8 +504,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         restoreClipboardCheckbox.frame = NSRect(x: 16, y: 94, width: 538, height: 22)
         sysContent.addSubview(restoreClipboardCheckbox)
 
-        let clipInfo = NSTextField(labelWithString: "YouTube, müzik veya video seslerinin mikrofona karışmasını önlemek için konuşurken sistem sesi 0ms ile susturulur, bitince otomatik geri açılır.")
-        clipInfo.frame = NSRect(x: 16, y: 124, width: 538, height: 38)
+        launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat (Login Items / Startup)", target: nil, action: nil)
+        launchAtLoginCheckbox.frame = NSRect(x: 16, y: 124, width: 538, height: 22)
+        sysContent.addSubview(launchAtLoginCheckbox)
+
+        let clipInfo = NSTextField(labelWithString: "YouTube, müzik veya video seslerinin mikrofona karışmasını önlemek için konuşurken sistem sesi susturulur, bitince otomatik geri açılır.")
+        clipInfo.frame = NSRect(x: 16, y: 154, width: 538, height: 38)
         clipInfo.font = NSFont.systemFont(ofSize: 11)
         clipInfo.textColor = .secondaryLabelColor
         sysContent.addSubview(clipInfo)
@@ -612,6 +617,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         playSoundsCheckbox.state = cfg.play_sounds ? .on : .off
         restoreClipboardCheckbox.state = cfg.restore_clipboard ? .on : .off
         muteSystemAudioCheckbox.state = cfg.mute_system_audio ? .on : .off
+        launchAtLoginCheckbox.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
 
         statusMessageLabel.stringValue = "Ayarlar başarıyla yüklendi."
         statusMessageLabel.textColor = .secondaryLabelColor
@@ -912,7 +918,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let playSounds = playSoundsCheckbox.state == .on
         let restoreClip = restoreClipboardCheckbox.state == .on
         let muteAudio = muteSystemAudioCheckbox.state == .on
+        let launchLogin = launchAtLoginCheckbox.state == .on
         let triggerKey = selectedTriggerKeyCode
+
+        LaunchAtLoginManager.shared.setEnabled(launchLogin)
 
         let success = ConfigManager.shared.update { cfg in
             cfg.provider = selectedProvider
