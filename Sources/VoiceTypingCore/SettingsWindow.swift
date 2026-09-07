@@ -63,6 +63,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var muteSystemAudioCheckbox: NSButton!
     private var launchAtLoginCheckbox: NSButton!
     private var showDockIconCheckbox: NSButton!
+    private var onlyInTextFieldsCheckbox: NSButton!
 
     // Tab 2: Yapay Zeka & Modeller
     private var providerSegmentedControl: NSSegmentedControl!
@@ -439,6 +440,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini kalıcı olarak göster", target: self, action: #selector(checkboxChanged(_:)))
         showDockIconCheckbox.frame = NSRect(x: 175, y: 422, width: 440, height: 18)
         container.addSubview(showDockIconCheckbox)
+
+        onlyInTextFieldsCheckbox = NSButton(checkboxWithTitle: "Yalnızca yazı yazma alanındayken çalıştır (Target-Lock)", target: self, action: #selector(checkboxChanged(_:)))
+        onlyInTextFieldsCheckbox.frame = NSRect(x: 175, y: 446, width: 440, height: 18)
+        container.addSubview(onlyInTextFieldsCheckbox)
 
         return container
     }
@@ -1122,9 +1127,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         removeFillerWordsCheckbox.state = cfg.remove_filler_words ? .on : .off
         saveHistoryCheckbox.state = cfg.save_history ? .on : .off
         playSoundsCheckbox.state = cfg.play_sounds ? .on : .off
-        muteSystemAudioCheckbox.state = cfg.mute_system_audio ? .on : .off
+        muteSystemAudioCheckbox.state = (cfg.pause_media_playback || cfg.mute_system_audio) ? .on : .off
         launchAtLoginCheckbox.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
         showDockIconCheckbox.state = cfg.show_dock_icon ? .on : .off
+        onlyInTextFieldsCheckbox.state = cfg.only_in_text_fields ? .on : .off
 
         updateSystemPromptVisibility()
 
@@ -1472,6 +1478,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let hapticOn = hapticFeedbackCheckbox.state == .on
         let removeFillerOn = removeFillerWordsCheckbox.state == .on
         let saveHistOn = saveHistoryCheckbox.state == .on
+        let onlyInTextFieldsOn = onlyInTextFieldsCheckbox.state == .on
 
         let playSounds = playSoundsCheckbox.state == .on
         let muteAudio = muteSystemAudioCheckbox.state == .on
@@ -1498,8 +1505,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.save_history = saveHistOn
             cfg.play_sounds = playSounds
             cfg.restore_clipboard = false
+            cfg.pause_media_playback = muteAudio
             cfg.mute_system_audio = muteAudio
             cfg.show_dock_icon = showDock
+            cfg.only_in_text_fields = onlyInTextFieldsOn
         }
 
         AppDelegate.updateDockVisibility(showDock)

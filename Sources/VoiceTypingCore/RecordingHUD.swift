@@ -23,7 +23,10 @@ public class RecordingHUD: NSObject {
 
     public private(set) var currentState: HUDState = .idle
     public var isVisible: Bool {
-        return panel.isVisible && panel.alphaValue > 0.05
+        if currentState == .idle {
+            return panel.isVisible && panel.alphaValue > 0.05
+        }
+        return true
     }
     public var currentStatusText: String {
         return statusLabel?.stringValue ?? ""

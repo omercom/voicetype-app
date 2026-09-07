@@ -100,6 +100,7 @@ public struct AppConfig: Codable {
     public var paste_delay_ms: Int
     public var min_record_duration: Double
     public var mute_system_audio: Bool
+    public var pause_media_playback: Bool
     public var show_dock_icon: Bool
     public var haptic_feedback: Bool
     public var remove_filler_words: Bool
@@ -107,6 +108,7 @@ public struct AppConfig: Codable {
     public var dictation_mode: String
     public var save_history: Bool
     public var gemini_system_prompt: String
+    public var only_in_text_fields: Bool
 
     public static let defaultGeminiSystemPrompt = "Sen profesyonel bir ses deşifre asistanısın. Kullanıcının konuşmasını dinle ve doğrudan yazıya dök. Asla selamlama, özet, onaylama ('Tabii ki', 'Anladım' gibi) veya fazladan yorum ekleme; sadece konuşulan metni temiz, doğru imla ve akıcı bir dille yaz."
 
@@ -124,21 +126,23 @@ public struct AppConfig: Codable {
         paste_delay_ms: 20,
         min_record_duration: 0.20,
         mute_system_audio: true,
+        pause_media_playback: true,
         show_dock_icon: false,
         haptic_feedback: true,
         remove_filler_words: true,
         custom_vocabulary: "",
         dictation_mode: "direct",
         save_history: true,
-        gemini_system_prompt: AppConfig.defaultGeminiSystemPrompt
+        gemini_system_prompt: AppConfig.defaultGeminiSystemPrompt,
+        only_in_text_fields: true
     )
 
     enum CodingKeys: String, CodingKey {
         case provider, groq_api_key, gemini_api_key, groq_model, gemini_model
         case language, trigger_key, trigger_mode, play_sounds, restore_clipboard
-        case paste_delay_ms, min_record_duration, mute_system_audio, show_dock_icon
+        case paste_delay_ms, min_record_duration, mute_system_audio, pause_media_playback, show_dock_icon
         case haptic_feedback, remove_filler_words, custom_vocabulary, dictation_mode, save_history
-        case gemini_system_prompt
+        case gemini_system_prompt, only_in_text_fields
     }
 
     public init(
@@ -155,13 +159,15 @@ public struct AppConfig: Codable {
         paste_delay_ms: Int,
         min_record_duration: Double,
         mute_system_audio: Bool = true,
+        pause_media_playback: Bool = true,
         show_dock_icon: Bool = false,
         haptic_feedback: Bool = true,
         remove_filler_words: Bool = true,
         custom_vocabulary: String = "",
         dictation_mode: String = "direct",
         save_history: Bool = true,
-        gemini_system_prompt: String = AppConfig.defaultGeminiSystemPrompt
+        gemini_system_prompt: String = AppConfig.defaultGeminiSystemPrompt,
+        only_in_text_fields: Bool = true
     ) {
         self.provider = provider
         self.groq_api_key = groq_api_key
@@ -176,6 +182,7 @@ public struct AppConfig: Codable {
         self.paste_delay_ms = paste_delay_ms
         self.min_record_duration = min_record_duration
         self.mute_system_audio = mute_system_audio
+        self.pause_media_playback = pause_media_playback
         self.show_dock_icon = show_dock_icon
         self.haptic_feedback = haptic_feedback
         self.remove_filler_words = remove_filler_words
@@ -183,6 +190,7 @@ public struct AppConfig: Codable {
         self.dictation_mode = dictation_mode
         self.save_history = save_history
         self.gemini_system_prompt = gemini_system_prompt
+        self.only_in_text_fields = only_in_text_fields
     }
 
     public init(from decoder: Decoder) throws {
@@ -200,6 +208,7 @@ public struct AppConfig: Codable {
         paste_delay_ms = try container.decodeIfPresent(Int.self, forKey: .paste_delay_ms) ?? 20
         min_record_duration = try container.decodeIfPresent(Double.self, forKey: .min_record_duration) ?? 0.20
         mute_system_audio = try container.decodeIfPresent(Bool.self, forKey: .mute_system_audio) ?? true
+        pause_media_playback = try container.decodeIfPresent(Bool.self, forKey: .pause_media_playback) ?? true
         show_dock_icon = try container.decodeIfPresent(Bool.self, forKey: .show_dock_icon) ?? false
         haptic_feedback = try container.decodeIfPresent(Bool.self, forKey: .haptic_feedback) ?? true
         remove_filler_words = try container.decodeIfPresent(Bool.self, forKey: .remove_filler_words) ?? true
@@ -207,6 +216,7 @@ public struct AppConfig: Codable {
         dictation_mode = try container.decodeIfPresent(String.self, forKey: .dictation_mode) ?? "direct"
         save_history = try container.decodeIfPresent(Bool.self, forKey: .save_history) ?? true
         gemini_system_prompt = try container.decodeIfPresent(String.self, forKey: .gemini_system_prompt) ?? AppConfig.defaultGeminiSystemPrompt
+        only_in_text_fields = try container.decodeIfPresent(Bool.self, forKey: .only_in_text_fields) ?? true
     }
 }
 
