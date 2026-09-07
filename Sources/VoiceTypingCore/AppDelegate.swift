@@ -13,6 +13,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var soundEffectsMenuItem: NSMenuItem!
     private var restoreClipboardMenuItem: NSMenuItem?
     private var muteAudioMenuItem: NSMenuItem!
+    private var pauseMediaMenuItem: NSMenuItem!
     private var launchAtLoginMenuItem: NSMenuItem!
     private var triggerKeyMenuItems: [NSMenuItem] = []
 
@@ -22,9 +23,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var hapticMenuItem: NSMenuItem!
     private var fillerWordsMenuItem: NSMenuItem!
     private var saveHistoryMenuItem: NSMenuItem!
+    private var onlyInTextFieldsMenuItem: NSMenuItem!
 
     private var isTranscribing: Bool = false
     private var isFinishingRecord: Bool = false
+    private var activeTargetContext: TargetContext?
     private var postRollWorkItem: DispatchWorkItem?
     private var currentLiveSession: LiveGeminiStreamSession?
     private var lastRecordedAudioData: Data?
@@ -205,6 +208,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         fillerWordsMenuItem.target = self
         menu.addItem(fillerWordsMenuItem)
 
+        pauseMediaMenuItem = NSMenuItem(title: "Konuşurken Medyayı Duraklat (Play/Pause)", action: #selector(togglePauseMediaPlayback), keyEquivalent: "")
+        pauseMediaMenuItem.target = self
+        menu.addItem(pauseMediaMenuItem)
+
         muteAudioMenuItem = NSMenuItem(title: "Konuşurken Medyayı Sustur", action: #selector(toggleMuteSystemAudio), keyEquivalent: "")
         muteAudioMenuItem.target = self
         menu.addItem(muteAudioMenuItem)
@@ -212,6 +219,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         saveHistoryMenuItem = NSMenuItem(title: "Dikte Geçmişini Kaydet", action: #selector(toggleSaveHistory), keyEquivalent: "")
         saveHistoryMenuItem.target = self
         menu.addItem(saveHistoryMenuItem)
+
+        onlyInTextFieldsMenuItem = NSMenuItem(title: "Sadece Yazı Alanında Çalıştır", action: #selector(toggleOnlyInTextFields), keyEquivalent: "")
+        onlyInTextFieldsMenuItem.target = self
+        menu.addItem(onlyInTextFieldsMenuItem)
 
         launchAtLoginMenuItem = NSMenuItem(title: "Başlangıçta Otomatik Çalıştır", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLoginMenuItem.target = self
@@ -244,8 +255,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         soundEffectsMenuItem.state = cfg.play_sounds ? .on : .off
         hapticMenuItem?.state = cfg.haptic_feedback ? .on : .off
         fillerWordsMenuItem?.state = cfg.remove_filler_words ? .on : .off
+        pauseMediaMenuItem.state = cfg.pause_media_playback ? .on : .off
         muteAudioMenuItem.state = cfg.mute_system_audio ? .on : .off
         saveHistoryMenuItem?.state = cfg.save_history ? .on : .off
+        onlyInTextFieldsMenuItem?.state = cfg.only_in_text_fields ? .on : .off
         restoreClipboardMenuItem?.state = cfg.restore_clipboard ? .on : .off
         launchAtLoginMenuItem.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
 
@@ -349,6 +362,34 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         let config = ConfigManager.shared.config
 
+        // 0. Hedef Metin Alanı Doğrulaması ve Kilidi (Target-Lock)
+        if let target = TargetInputManager.shared.captureTargetContext() {
+            self.activeTargetContext = target
+            print("[AppDelegate] 🎯 Hedef yazı alanı kilitlendi: \(target.appName) (\(target.role)) [PID: \(target.pid)]")
+        } else if config.only_in_text_fields {
+            print("[AppDelegate] ⚠️ Odakta geçerli bir yazı alanı bulunamadı. Kural gereği kayıt başlatılmadı.")
+            SoundManager.shared.playCancel()
+            HapticManager.shared.playCancel()
+            RecordingHUD.shared.showError(message: "Yazı alanı seçili değil")
+            setStatus(title: "⚠️", menuText: "Durum: Yazı Alanı Seçili Değil", revertAfter: 2.0)
+            return
+        } else {
+            if let frontApp = NSWorkspace.shared.frontmostApplication {
+                let appRef = AXUIElementCreateApplication(frontApp.processIdentifier)
+                self.activeTargetContext = TargetContext(
+                    pid: frontApp.processIdentifier,
+                    bundleIdentifier: frontApp.bundleIdentifier ?? "",
+                    appName: frontApp.localizedName ?? "",
+                    runningApp: frontApp,
+                    element: appRef,
+                    window: nil,
+                    role: "AXFallbackApp"
+                )
+            } else {
+                self.activeTargetContext = nil
+            }
+        }
+
         let geminiModel = config.gemini_model.lowercased()
         let isGeminiLive = (config.provider.lowercased() == "gemini") &&
                            (geminiModel.isEmpty || geminiModel.contains("gemini-3.5-transcribe-live")) &&
@@ -379,6 +420,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         if started {
             SoundManager.shared.playStart()
             HapticManager.shared.playStart()
+            if config.pause_media_playback {
+                MediaPlaybackManager.shared.pauseForDictation()
+            }
             if config.mute_system_audio {
                 SystemAudioManager.shared.muteForDictation(delay: 0.15)
             }
@@ -389,6 +433,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             currentLiveSession = nil
             lastRecordedAudioData = nil
             SystemAudioManager.shared.restoreAfterDictation()
+            MediaPlaybackManager.shared.resumeAfterDictation()
             SoundManager.shared.playCancel()
             HapticManager.shared.playCancel()
             setStatus(title: "⚠️ Hata", menuText: "Durum: Mikrofon Başlatılamadı!", revertAfter: 2.0)
@@ -403,10 +448,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Çok kısa basma - kazara dokunma
         guard duration >= config.min_record_duration else {
+            activeTargetContext = nil
             currentLiveSession?.cancel()
             currentLiveSession = nil
             lastRecordedAudioData = nil
             SystemAudioManager.shared.restoreAfterDictation()
+            MediaPlaybackManager.shared.resumeAfterDictation()
             _ = AudioRecorder.shared.stop()
             RecordingHUD.shared.dismiss(animated: true)
             setStatus(title: "🎙️", menuText: readyMenuText)
@@ -426,7 +473,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             // Mikrofon kaydını durdur ve kalan tüm PCM verisini akıt
             let (data, actualDuration) = AudioRecorder.shared.stop()
 
-            // Mikrofon sustuktan sonra arka plan medyasını (müzik vb.) geri aç ve bitiş sesini çal
+            // Mikrofon sustuktan sonra ana ses çıkışını geri aç ve bitiş sesini çal
             SystemAudioManager.shared.restoreAfterDictation()
             SoundManager.shared.playStop()
 
@@ -435,6 +482,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self.currentLiveSession?.cancel()
                 self.currentLiveSession = nil
                 self.lastRecordedAudioData = nil
+                MediaPlaybackManager.shared.resumeAfterDictation()
                 RecordingHUD.shared.dismiss(animated: true)
                 self.setStatus(title: "🎙️", menuText: self.readyMenuText)
                 return
@@ -478,6 +526,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 if !result.text.isEmpty {
                     let polishedText = TextPolisher.shared.polish(text: result.text, config: config)
                     guard !polishedText.isEmpty else {
+                        MediaPlaybackManager.shared.resumeAfterDictation()
                         RecordingHUD.shared.dismiss(animated: true)
                         self.setStatus(title: "🎙️", menuText: self.readyMenuText)
                         return
@@ -489,12 +538,17 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                         model: result.model
                     )
 
+                    let target = self.activeTargetContext
+                    self.activeTargetContext = nil
+
                     TextInjector.shared.inject(
                         text: polishedText,
+                        targetContext: target,
                         pasteDelayMs: config.paste_delay_ms
                     )
                     SoundManager.shared.playSuccess()
                     HapticManager.shared.playSuccess()
+                    MediaPlaybackManager.shared.resumeAfterDictation()
                     RecordingHUD.shared.showSuccess(text: "Yapıştırıldı")
                     self.setStatus(
                         title: "✅",
@@ -502,6 +556,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                         revertAfter: 1.5
                     )
                 } else {
+                    MediaPlaybackManager.shared.resumeAfterDictation()
                     RecordingHUD.shared.dismiss(animated: true)
                     self.setStatus(title: "🎙️", menuText: self.readyMenuText)
                 }
@@ -523,6 +578,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self.isTranscribing = false
                 self.currentLiveSession = nil
                 self.lastRecordedAudioData = nil
+                MediaPlaybackManager.shared.resumeAfterDictation()
                 SoundManager.shared.playCancel()
                 HapticManager.shared.playCancel()
                 RecordingHUD.shared.showError(message: "Deşifre Hatası")
@@ -533,6 +589,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCancel() {
+        activeTargetContext = nil
         postRollWorkItem?.cancel()
         postRollWorkItem = nil
         isFinishingRecord = false
@@ -540,6 +597,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         currentLiveSession = nil
         lastRecordedAudioData = nil
         SystemAudioManager.shared.restoreAfterDictation()
+        MediaPlaybackManager.shared.resumeAfterDictation()
         AudioRecorder.shared.cancel()
         Transcriber.shared.cancel()
         isTranscribing = false
@@ -592,6 +650,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         refreshMenuStates()
     }
 
+    @objc private func togglePauseMediaPlayback() {
+        let current = ConfigManager.shared.config.pause_media_playback
+        ConfigManager.shared.update { $0.pause_media_playback = !current }
+        refreshMenuStates()
+    }
+
     @objc private func toggleMuteSystemAudio() {
         let current = ConfigManager.shared.config.mute_system_audio
         ConfigManager.shared.update { $0.mute_system_audio = !current }
@@ -624,6 +688,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleSaveHistory() {
         let current = ConfigManager.shared.config.save_history
         ConfigManager.shared.update { $0.save_history = !current }
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+    }
+
+    @objc private func toggleOnlyInTextFields() {
+        let current = ConfigManager.shared.config.only_in_text_fields
+        ConfigManager.shared.update { $0.only_in_text_fields = !current }
         refreshMenuStates()
         SettingsWindowController.shared.loadValues()
     }
@@ -686,6 +757,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         isExplicitQuit = true
         KeyListener.shared.stop()
         AudioRecorder.shared.cancel()
+        SystemAudioManager.shared.restoreAfterDictation()
+        MediaPlaybackManager.shared.resumeAfterDictation()
         RecordingHUD.shared.dismiss(animated: false)
         NSApplication.shared.terminate(nil)
     }

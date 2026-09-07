@@ -60,7 +60,7 @@ public class TextInjector {
     }
 
     /// macOS'ta donanım seviyesinde en güvenilir Cmd + V simülasyonu.
-    /// Hem down hem up olaylarında maskCommand bayrağını koruyarak tüm uygulamalarda kusursuz çalışır.
+    /// Event tap üzerinden aktif pencereye tek ve temiz bir Cmd + V sinyali gönderir.
     public func simulateCmdV() {
         let vKeyCode: CGKeyCode = 0x09 // kVK_ANSI_V
         let source = CGEventSource(stateID: .combinedSessionState)
@@ -85,19 +85,30 @@ public class TextInjector {
         eventUp.post(tap: tapLocation)
     }
 
-    /// Dikte edilen metni panoya yazar ve aktif pencereye yapıştırır.
+    /// Dikte edilen metni panoya yazar ve aktif veya arka plandaki hedef pencereye yapıştırır.
     @discardableResult
     public func paste(
         text: String,
+        targetContext: TargetContext? = nil,
         restoreClipboard: Bool = false,
         pasteDelayMs: Int = 20
     ) -> Bool {
         guard !text.isEmpty else { return false }
 
+        // 1. Hedef Bağlam ve Arka Plandan Kurtarma (Smart Target Restoration)
+        // Eğer hedef uygulama arka plandaysa AppleScript ve WindowServer ile öne getirilir ve odaklanır.
+        if let target = targetContext {
+            let isFrontmost = (NSWorkspace.shared.frontmostApplication?.processIdentifier == target.pid)
+            if !isFrontmost {
+                print("[TextInjector] 🔄 Hedef (\(target.appName) [PID: \(target.pid)]) arka planda kalmış. Öne çağrılıp odak kurtarılıyor...")
+                TargetInputManager.shared.restoreTargetFocus(to: target)
+            }
+        }
+
         let pb = NSPasteboard.general
         let snapshot = restoreClipboard ? captureClipboardSnapshot() : []
 
-        // 1. Panoya hem standart UTF8 metni (tüm macOS uygulamaları için) hem de transient etiketlerini yaz
+        // 2. Panoya hem standart UTF8 metni hem de transient etiketlerini yaz
         pb.clearContents()
         pb.setString(text, forType: .string)
         pb.setData(Data(), forType: Self.transientType)
@@ -129,9 +140,16 @@ public class TextInjector {
     @discardableResult
     public func inject(
         text: String,
+        targetContext: TargetContext? = nil,
         pasteDelayMs: Int = 20
     ) -> Bool {
         let config = ConfigManager.shared.config
-        return paste(text: text, restoreClipboard: config.restore_clipboard, pasteDelayMs: pasteDelayMs)
+        return paste(
+            text: text,
+            targetContext: targetContext,
+            restoreClipboard: config.restore_clipboard,
+            pasteDelayMs: pasteDelayMs
+        )
     }
 }
+

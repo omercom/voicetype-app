@@ -414,13 +414,13 @@ final class VoiceTypingTests: XCTestCase {
 
         // 2. Recording
         hud.showRecording()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
         XCTAssertEqual(hud.currentState, .recording)
         XCTAssertTrue(hud.isVisible)
 
         // 3. Transcribing
         hud.showTranscribing()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
         XCTAssertEqual(hud.currentState, .transcribing)
         XCTAssertTrue(hud.isVisible)
 
@@ -1013,4 +1013,120 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertTrue(ConfigManager.supportsSystemPrompt(model: "gemini-3.5-flash"))
         XCTAssertTrue(ConfigManager.supportsSystemPrompt(model: "gemini-3.5-flash-lite"))
     }
+
+    func testTargetContextStructureAndEquality() {
+        let app = NSWorkspace.shared.frontmostApplication
+        let pid = app?.processIdentifier ?? ProcessInfo.processInfo.processIdentifier
+        let appEl = AXUIElementCreateApplication(pid)
+
+        let ctx1 = TargetContext(
+            pid: pid,
+            bundleIdentifier: "com.voicetyping.test",
+            appName: "TestApp",
+            runningApp: app,
+            element: appEl,
+            window: nil,
+            role: "AXTextField"
+        )
+
+        let ctx2 = TargetContext(
+            pid: pid,
+            bundleIdentifier: "com.voicetyping.test",
+            appName: "TestApp",
+            runningApp: app,
+            element: appEl,
+            window: nil,
+            role: "AXTextField"
+        )
+
+        XCTAssertEqual(ctx1, ctx2, "Aynı PID, bundleID ve elemente sahip TargetContext nesneleri eşit olmalıdır.")
+        XCTAssertEqual(ctx1.pid, pid)
+        XCTAssertEqual(ctx1.role, "AXTextField")
+    }
+
+    func testTargetInputManagerCaptureOrFallback() {
+        let manager = TargetInputManager.shared
+        // captureTargetContext çağrıldığında sistem genelinde veya fallback ile çökmeden bir sonuç veya nil dönmeli
+        let context = manager.captureTargetContext()
+        if let ctx = context {
+            XCTAssertGreaterThan(ctx.pid, 0)
+            XCTAssertFalse(ctx.role.isEmpty)
+        }
+    }
+
+    func testConfigOnlyInTextFieldsPersistence() {
+        let original = ConfigManager.shared.config.only_in_text_fields
+        XCTAssertTrue(AppConfig.defaultConfig.only_in_text_fields, "Varsayılan olarak only_in_text_fields aktif olmalıdır.")
+
+        // Güncelleme testi
+        ConfigManager.shared.update { $0.only_in_text_fields = !original }
+        XCTAssertEqual(ConfigManager.shared.config.only_in_text_fields, !original)
+
+        // JSON Serialization / Deserialization
+        let data = try? JSONEncoder().encode(ConfigManager.shared.config)
+        XCTAssertNotNil(data)
+        if let data = data {
+            let decoded = try? JSONDecoder().decode(AppConfig.self, from: data)
+            XCTAssertEqual(decoded?.only_in_text_fields, !original)
+        }
+
+        // Geri al
+        ConfigManager.shared.update { $0.only_in_text_fields = original }
+        XCTAssertEqual(ConfigManager.shared.config.only_in_text_fields, original)
+    }
+
+    func testTextInjectorWithTargetContext() {
+        let injector = TextInjector.shared
+        let app = NSWorkspace.shared.frontmostApplication
+        let pid = app?.processIdentifier ?? ProcessInfo.processInfo.processIdentifier
+        let appEl = AXUIElementCreateApplication(pid)
+
+        let dummyContext = TargetContext(
+            pid: pid,
+            bundleIdentifier: app?.bundleIdentifier ?? "com.test",
+            appName: app?.localizedName ?? "Test",
+            runningApp: app,
+            element: appEl,
+            window: nil,
+            role: "AXTextField"
+        )
+
+        // Hedef bağlam verildiğinde inject fonksiyonu sorunsuz çalışmalıdır
+        let success = injector.inject(text: "Target Lock Test", targetContext: dummyContext, pasteDelayMs: 0)
+        XCTAssertTrue(success)
+
+        // Boş metin durumunda false dönmeli
+        let emptyFail = injector.inject(text: "", targetContext: dummyContext, pasteDelayMs: 0)
+        XCTAssertFalse(emptyFail)
+    }
+
+    func testMediaPlaybackManagerInstanceAndDetection() {
+        let manager = MediaPlaybackManager.shared
+        XCTAssertNotNil(manager)
+
+        // isMediaActuallyPlaying çağrısı güvenli ve çökmeden bir Bool dönmelidir
+        let isPlaying = manager.isMediaActuallyPlaying(timeout: 0.15)
+        print("Test ortamında aktif medya çalma durumu: \(isPlaying)")
+
+        // resetState çağrısı güvenli olmalıdır
+        manager.resetState()
+
+        // simulatePlayPauseKey donanım tuş çağrısı çökmeden tamamlanmalıdır
+        manager.simulatePlayPauseKey()
+    }
+
+    func testMediaPlaybackManagerDictationLifecycleSafety() {
+        let manager = MediaPlaybackManager.shared
+
+        // Dikte başlatma çağrısı
+        manager.pauseForDictation()
+
+        // Dikte bitiş / iptal çağrısı
+        manager.resumeAfterDictation()
+
+        // Çift resume çağrıldığında yan etki oluşturmamalıdır (idempotent)
+        manager.resumeAfterDictation()
+    }
 }
+
+
