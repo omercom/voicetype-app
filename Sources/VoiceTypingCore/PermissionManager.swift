@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import AVFoundation
+import Speech
 
 public enum PermissionStatus {
     case authorized
@@ -63,6 +64,60 @@ public class PermissionManager {
     public func openMicrophoneSettings() {
         requestMicrophonePermission { _ in
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+    }
+
+    // MARK: - Speech Recognition (Apple Speech)
+
+    public func getSpeechRecognitionStatus() -> (status: PermissionStatus, description: String, badge: String) {
+        // Test veya CLI ortamı kontrolü (xctest SIGABRT önleme)
+        if Bundle.main.bundleIdentifier == "com.apple.dt.xctest.tool" || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return (.authorized, "Yetki Verildi (Aktif)", PermissionStatus.authorized.badge)
+        }
+        guard Bundle.main.object(forInfoDictionaryKey: "NSSpeechRecognitionUsageDescription") != nil else {
+            return (.denied, "Erişim Reddedildi", PermissionStatus.denied.badge)
+        }
+        let auth = SFSpeechRecognizer.authorizationStatus()
+        switch auth {
+        case .authorized:
+            return (.authorized, "Yetki Verildi (Aktif)", PermissionStatus.authorized.badge)
+        case .denied:
+            return (.denied, "Erişim Reddedildi", PermissionStatus.denied.badge)
+        case .restricted:
+            return (.restricted, "Kısıtlı (MDM)", PermissionStatus.restricted.badge)
+        case .notDetermined:
+            return (.notDetermined, "Henüz İstenmedi", PermissionStatus.notDetermined.badge)
+        @unknown default:
+            return (.unknown, "Bilinmeyen", PermissionStatus.unknown.badge)
+        }
+    }
+
+    public func requestSpeechRecognitionPermission(completion: @escaping (Bool) -> Void) {
+        if Bundle.main.bundleIdentifier == "com.apple.dt.xctest.tool" || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            DispatchQueue.main.async { completion(true) }
+            return
+        }
+        guard Bundle.main.object(forInfoDictionaryKey: "NSSpeechRecognitionUsageDescription") != nil else {
+            DispatchQueue.main.async { completion(false) }
+            return
+        }
+        let status = SFSpeechRecognizer.authorizationStatus()
+        if status == .notDetermined {
+            SFSpeechRecognizer.requestAuthorization { authStatus in
+                DispatchQueue.main.async {
+                    completion(authStatus == .authorized)
+                }
+            }
+        } else {
+            completion(status == .authorized)
+        }
+    }
+
+    public func openSpeechRecognitionSettings() {
+        requestSpeechRecognitionPermission { _ in
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition") {
                 NSWorkspace.shared.open(url)
             }
         }

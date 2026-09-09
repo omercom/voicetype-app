@@ -86,9 +86,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         PermissionManager.shared.requestMicrophonePermission { [weak self] micGranted in
             print("[AppDelegate] Mikrofon izni durumu: \(micGranted)")
 
-            // 2. Erişilebilirlik İzni Kontrolü
-            DispatchQueue.main.async {
-                self?.checkAccessibilityAndActivate()
+            // 2. İkinci Olarak Konuşma Tanıma İzni (Apple Speech): İlk kurulumda mikrofon hemen ardından istenir
+            PermissionManager.shared.requestSpeechRecognitionPermission { speechGranted in
+                print("[AppDelegate] Konuşma tanıma izni durumu: \(speechGranted)")
+
+                // 3. Erişilebilirlik İzni Kontrolü
+                DispatchQueue.main.async {
+                    self?.checkAccessibilityAndActivate()
+                }
             }
         }
     }
