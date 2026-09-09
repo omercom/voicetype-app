@@ -29,6 +29,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var isTranscribing: Bool = false
     private var isFinishingRecord: Bool = false
     private var activeTargetContext: TargetContext?
+    private var activeAccessibilityLease: TargetAppAccessibilityLease?
+    private var recoverAudioMenuItem: NSMenuItem?
     private var postRollWorkItem: DispatchWorkItem?
     private var currentLiveSession: (any LiveStreamSession)?
     private var lastRecordedAudioData: Data?
@@ -68,6 +70,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Ayarlar güncellendiğinde menüyü yenile
         SettingsWindowController.shared.onConfigUpdated = { [weak self] in
+            KeyListener.shared.updateTriggerKeyConfiguration()
             self?.refreshMenuStates()
         }
 
@@ -240,6 +243,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Kurtarma Ses Deposu (Dictation Recovery)
+        recoverAudioMenuItem = NSMenuItem(title: "💾 Son Sesi Masaüstüne Kaydet", action: #selector(exportRecoveredAudioAction), keyEquivalent: "")
+        recoverAudioMenuItem?.target = self
+        if let recItem = recoverAudioMenuItem {
+            menu.addItem(recItem)
+        }
+
+        menu.addItem(NSMenuItem.separator())
+
         // 7. Çıkış
         let quitItem = NSMenuItem(title: "Çıkış", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
@@ -289,6 +301,20 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             handleRecordStop(duration: 1.0)
         } else {
             handleRecordStart()
+        }
+    }
+
+    @objc private func exportRecoveredAudioAction() {
+        if let savedURL = DictationRecoveryAudioStore.shared.exportLatestRecoveryToDesktop() {
+            RecordingHUD.shared.showSuccess(text: "Ses Masaüstüne Kaydedildi")
+            let alert = NSAlert()
+            alert.messageText = "Ses Başarıyla Kurtarıldı"
+            alert.informativeText = "Son ses kaydınız Masaüstünüze kaydedildi:\n\(savedURL.lastPathComponent)"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Tamam")
+            alert.runModal()
+        } else {
+            RecordingHUD.shared.showError(message: "Kurtarılacak Ses Yok")
         }
     }
 
@@ -445,23 +471,30 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             started = AudioRecorder.shared.start()
         }
 
+        if let target = activeTargetContext {
+            activeAccessibilityLease = ChromiumAccessibilityController.shared.beginObservation(
+                processIdentifier: target.pid,
+                bundleIdentifier: target.bundleIdentifier
+            )
+        }
+
         if started {
             SoundManager.shared.playStart()
             HapticManager.shared.playStart()
-            if config.pause_media_playback {
-                MediaPlaybackManager.shared.pauseForDictation()
-            }
+            BackgroundAudioController.shared.handleDictationStarted(config: config)
             if config.mute_system_audio {
                 SystemAudioManager.shared.muteForDictation(delay: 0.15)
             }
             setStatus(title: "🔴 Dinliyor...", menuText: "Durum: Dinleniyor (Konuşun)...")
             RecordingHUD.shared.showRecording()
         } else {
+            activeAccessibilityLease?.end()
+            activeAccessibilityLease = nil
             currentLiveSession?.cancel()
             currentLiveSession = nil
             lastRecordedAudioData = nil
             SystemAudioManager.shared.restoreAfterDictation()
-            MediaPlaybackManager.shared.resumeAfterDictation()
+            BackgroundAudioController.shared.handleDictationEnded(config: config)
             SoundManager.shared.playCancel()
             HapticManager.shared.playCancel()
             setStatus(title: "⚠️ Hata", menuText: "Durum: Mikrofon Başlatılamadı!", revertAfter: 2.0)
@@ -476,12 +509,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Çok kısa basma - kazara dokunma
         guard duration >= config.min_record_duration else {
+            activeAccessibilityLease?.end()
+            activeAccessibilityLease = nil
             activeTargetContext = nil
             currentLiveSession?.cancel()
             currentLiveSession = nil
             lastRecordedAudioData = nil
             SystemAudioManager.shared.restoreAfterDictation()
-            MediaPlaybackManager.shared.resumeAfterDictation()
+            BackgroundAudioController.shared.handleDictationEnded(config: config)
             _ = AudioRecorder.shared.stop()
             RecordingHUD.shared.dismiss(animated: true)
             setStatus(title: "🎙️", menuText: readyMenuText)
@@ -507,16 +542,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
             guard actualDuration >= config.min_record_duration, let audioData = data, !audioData.isEmpty else {
                 // Sessizlik veya ses alınamadı
+                self.activeAccessibilityLease?.end()
+                self.activeAccessibilityLease = nil
                 self.currentLiveSession?.cancel()
                 self.currentLiveSession = nil
                 self.lastRecordedAudioData = nil
-                MediaPlaybackManager.shared.resumeAfterDictation()
+                BackgroundAudioController.shared.handleDictationEnded(config: config)
                 RecordingHUD.shared.dismiss(animated: true)
                 self.setStatus(title: "🎙️", menuText: self.readyMenuText)
                 return
             }
 
             self.lastRecordedAudioData = audioData
+            DictationRecoveryAudioStore.shared.saveLastRecording(wavData: audioData)
 
             if let liveSession = self.currentLiveSession {
                 self.isTranscribing = true
@@ -544,17 +582,25 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
+            self.activeAccessibilityLease?.end()
+            self.activeAccessibilityLease = nil
+
             if result.success {
                 self.isTranscribing = false
                 self.currentLiveSession = nil
                 self.lastRecordedAudioData = nil
+                DictationRecoveryAudioStore.shared.clear()
+                self.recoverAudioMenuItem?.isHidden = true
 
                 print("[Deşifre Başarılı] [\(result.provider.uppercased()) - \(result.model)] (\(String(format: "%.2f", result.latency))s): \"\(result.text)\"")
 
                 if !result.text.isEmpty {
-                    let polishedText = TextPolisher.shared.polish(text: result.text, config: config)
+                    let target = self.activeTargetContext
+                    self.activeTargetContext = nil
+
+                    let polishedText = TextPolisher.shared.polish(text: result.text, config: config, targetContext: target)
                     guard !polishedText.isEmpty else {
-                        MediaPlaybackManager.shared.resumeAfterDictation()
+                        BackgroundAudioController.shared.handleDictationEnded(config: config)
                         RecordingHUD.shared.dismiss(animated: true)
                         self.setStatus(title: "🎙️", menuText: self.readyMenuText)
                         return
@@ -566,17 +612,17 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                         model: result.model
                     )
 
-                    let target = self.activeTargetContext
-                    self.activeTargetContext = nil
+                    // Akıllı Boşluk (Smart Spacing): Ardışık diktelerde kelimelerin birbirine yapışmasını önler
+                    let textToInject = TextPolisher.applySmartSpacing(polishedText)
 
                     TextInjector.shared.inject(
-                        text: polishedText,
+                        text: textToInject,
                         targetContext: target,
                         pasteDelayMs: config.paste_delay_ms
                     )
                     SoundManager.shared.playSuccess()
                     HapticManager.shared.playSuccess()
-                    MediaPlaybackManager.shared.resumeAfterDictation()
+                    BackgroundAudioController.shared.handleDictationEnded(config: config)
                     RecordingHUD.shared.showSuccess(text: "Yapıştırıldı")
                     self.setStatus(
                         title: "✅",
@@ -584,7 +630,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                         revertAfter: 1.5
                     )
                 } else {
-                    MediaPlaybackManager.shared.resumeAfterDictation()
+                    BackgroundAudioController.shared.handleDictationEnded(config: config)
                     RecordingHUD.shared.dismiss(animated: true)
                     self.setStatus(title: "🎙️", menuText: self.readyMenuText)
                 }
@@ -613,10 +659,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self.isTranscribing = false
                 self.currentLiveSession = nil
                 self.lastRecordedAudioData = nil
-                MediaPlaybackManager.shared.resumeAfterDictation()
+                DictationRecoveryAudioStore.shared.markFailed(error: result.error ?? "Deşifre Hatası")
+                self.recoverAudioMenuItem?.isHidden = false
+                BackgroundAudioController.shared.handleDictationEnded(config: config)
                 SoundManager.shared.playCancel()
                 HapticManager.shared.playCancel()
-                RecordingHUD.shared.showError(message: "Deşifre Hatası")
+                RecordingHUD.shared.showError(message: "Deşifre Hatası (Ses Korundu)")
                 let errMsg = result.error ?? "Bilinmeyen hata"
                 self.setStatus(title: "⚠️ Hata", menuText: "Hata: \(errMsg)", revertAfter: 3.0)
             }
@@ -624,6 +672,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCancel() {
+        activeAccessibilityLease?.end()
+        activeAccessibilityLease = nil
         activeTargetContext = nil
         postRollWorkItem?.cancel()
         postRollWorkItem = nil
@@ -632,7 +682,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         currentLiveSession = nil
         lastRecordedAudioData = nil
         SystemAudioManager.shared.restoreAfterDictation()
-        MediaPlaybackManager.shared.resumeAfterDictation()
+        BackgroundAudioController.shared.handleDictationEnded(config: ConfigManager.shared.config)
         AudioRecorder.shared.cancel()
         Transcriber.shared.cancel()
         isTranscribing = false
@@ -783,6 +833,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let code = sender.tag
         ConfigManager.shared.update { $0.trigger_key = code }
         KeyListener.shared.resetState()
+        KeyListener.shared.updateTriggerKeyConfiguration()
         refreshMenuStates()
         SettingsWindowController.shared.loadValues()
     }
@@ -799,11 +850,19 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quitApp() {
         isExplicitQuit = true
         KeyListener.shared.stop()
-        AudioRecorder.shared.cancel()
+        GlobeKeySuppressor.shared.restoreOriginal()
+        AudioRecorder.shared.cleanTeardown()
         SystemAudioManager.shared.restoreAfterDictation()
-        MediaPlaybackManager.shared.resumeAfterDictation()
+        BackgroundAudioController.shared.handleDictationEnded(config: ConfigManager.shared.config)
         RecordingHUD.shared.dismiss(animated: false)
         NSApplication.shared.terminate(nil)
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        GlobeKeySuppressor.shared.restoreOriginal()
+        AudioRecorder.shared.cleanTeardown()
+        SystemAudioManager.shared.restoreAfterDictation()
+        BackgroundAudioController.shared.handleDictationEnded(config: ConfigManager.shared.config)
     }
 
     // MARK: - Dock & Görev Çubuğu Yönetimi

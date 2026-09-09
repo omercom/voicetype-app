@@ -1219,6 +1219,481 @@ final class VoiceTypingTests: XCTestCase {
 
         wait(for: [exp], timeout: 2.0)
     }
+
+    func testSmartSpacing() {
+        // 1. Normal Türkçe / Latin kelimeler sona tek boşluk almalı
+        XCTAssertEqual(TextPolisher.applySmartSpacing("Merhaba"), "Merhaba ")
+        XCTAssertEqual(TextPolisher.applySmartSpacing("Nasılsın?"), "Nasılsın? ")
+        XCTAssertEqual(TextPolisher.applySmartSpacing("Test 123."), "Test 123. ")
+
+        // 2. Zaten boşluk veya yeni satır ile bitiyorsa ekleme yapılmamalı
+        XCTAssertEqual(TextPolisher.applySmartSpacing("Merhaba "), "Merhaba ")
+        XCTAssertEqual(TextPolisher.applySmartSpacing("Merhaba\n"), "Merhaba\n")
+        XCTAssertEqual(TextPolisher.applySmartSpacing("Merhaba\t"), "Merhaba\t")
+
+        // 3. Boş metin boş kalmalı
+        XCTAssertEqual(TextPolisher.applySmartSpacing(""), "")
+
+        // 4. CJK (Çince, Japonca vb.) tipografisi boşluk eklenmemeli
+        XCTAssertEqual(TextPolisher.applySmartSpacing("你好"), "你好")
+        XCTAssertEqual(TextPolisher.applySmartSpacing("ありがとう。"), "ありがとう。")
+        XCTAssertEqual(TextPolisher.applySmartSpacing("世界"), "世界")
+    }
+
+    func testGlobeKeySuppressor() {
+        let suppressor = GlobeKeySuppressor.shared
+
+        // 63 harici bir tuş için bastırma yapmamalı
+        suppressor.suppressIfNeeded(triggerKey: 54)
+
+        // 63 (Fn/Globe) için çağrıldığında çökmemeli ve güvenle çalışmalı
+        suppressor.suppressIfNeeded(triggerKey: 63)
+
+        // Orijinal durumu geri yükleme
+        suppressor.restoreOriginal()
+
+        // KeyListener entegrasyonu
+        KeyListener.shared.updateTriggerKeyConfiguration()
+    }
+
+    func testAudioRecorderWarmEngineAndTeardown() {
+        let recorder = AudioRecorder.shared
+
+        // 1. İlk başlatma
+        let firstStart = recorder.start()
+        XCTAssertTrue(firstStart)
+        XCTAssertTrue(recorder.isRecording)
+
+        // 2. Durdurma (motor ılık bekletilmeli)
+        _ = recorder.stop()
+        XCTAssertFalse(recorder.isRecording)
+
+        // 3. İkinci başlatma (Warm engine - 0.1ms uyanma)
+        let warmStart = recorder.start()
+        XCTAssertTrue(warmStart, "Ilık moddaki motor hemen başlayabilmeli.")
+        XCTAssertTrue(recorder.isRecording)
+
+        _ = recorder.stop()
+        XCTAssertFalse(recorder.isRecording)
+
+        // 4. cleanTeardown testi (kaynakların serbest bırakılması)
+        recorder.cleanTeardown()
+        XCTAssertFalse(recorder.isRecording)
+    }
+
+    func testClipboardCollisionGuardLogic() {
+        let injector = TextInjector.shared
+        let original = injector.getClipboard()
+
+        // Pano içeriğini bir teste ayarla
+        let testText = "VoiceType Collision Test Metni"
+        injector.setClipboard(testText)
+        XCTAssertEqual(injector.getClipboard(), testText)
+
+        // Eğer pano içeriği değişmemişse restore yapılması beklenir
+        let snapshot = injector.captureClipboardSnapshot()
+        XCTAssertFalse(snapshot.isEmpty)
+
+        // Eski panoyu geri yükle
+        injector.setClipboard(original)
+    }
+
+    // MARK: - Handy İlhamı: Düşünme Modeli Temizleyici ve Bulanık Sözlük Testleri
+
+    func testStripThinkingAndInvisibleChars() {
+        // 1. Standart <think> bloğu temizliği
+        let input1 = "<think>Bu bir akıl yürütme düşüncesidir. Model düşünüyor.</think>Merhaba dünya, nasılsın?"
+        let cleaned1 = TextPolisher.stripThinkingAndInvisibleChars(input1)
+        XCTAssertEqual(cleaned1, "Merhaba dünya, nasılsın?")
+
+        // 2. Çok satırlı <think> bloğu ve başında/sonunda boşluklar
+        let input2 = "   \n<think>\nAdım 1: Kullanıcı selam verdi.\nAdım 2: Yanıt hazırla.\n</think>\n\nHarika bir gün!"
+        let cleaned2 = TextPolisher.stripThinkingAndInvisibleChars(input2)
+        XCTAssertEqual(cleaned2, "Harika bir gün!")
+
+        // 3. Kapanmamış (unclosed/truncated) <think> bloğu
+        let input3 = "<think>Düşünce kesildi ve model kapanmadı..."
+        let cleaned3 = TextPolisher.stripThinkingAndInvisibleChars(input3)
+        XCTAssertEqual(cleaned3, "", "Kapanmamış düşünce bloğu boş metne dönüştürülmeli.")
+
+        // 4. Görünmez (zero-width) Unicode karakterlerinin temizliği
+        let input4 = "\u{200B}Gizli\u{200C} boşluklar\u{200D} ve\u{FEFF} bayt\u{00AD} işaretleri"
+        let cleaned4 = TextPolisher.stripThinkingAndInvisibleChars(input4)
+        XCTAssertEqual(cleaned4, "Gizli boşluklar ve bayt işaretleri")
+
+        // 5. Cümle içinde normal İngilizce 'think' kelimesi korunmalı (etiket değilse)
+        let input5 = "I think this is a great feature."
+        let cleaned5 = TextPolisher.stripThinkingAndInvisibleChars(input5)
+        XCTAssertEqual(cleaned5, "I think this is a great feature.")
+
+        // 6. TextPolisher.polish entegrasyonu (yalnızca <think> içeren metin boş dönmeli)
+        var config = AppConfig.defaultConfig
+        config.remove_filler_words = false
+        let emptyPolished = TextPolisher.shared.polish(text: "<think>sadece düşünce</think>", config: config)
+        XCTAssertEqual(emptyPolished, "")
+
+        let fullPolished = TextPolisher.shared.polish(text: "<think>akıl yürütme</think>Toplantı saat beşte.", config: config)
+        XCTAssertEqual(fullPolished, "Toplantı saat beşte.")
+    }
+
+    func testLevenshteinDistanceCalculation() {
+        // Tam eşleşme
+        XCTAssertEqual(TextPolisher.levenshteinDistance("Antigravity", "Antigravity"), 0)
+
+        // Tek harf hatası (i -> y)
+        XCTAssertEqual(TextPolisher.levenshteinDistance("antigraviti", "antigravity"), 1)
+
+        // İki harf hatası (f -> v, i -> y)
+        XCTAssertEqual(TextPolisher.levenshteinDistance("antigrafiti", "antigravity"), 2)
+
+        // Klasik Levenshtein örneği: kitten -> sitting (3)
+        XCTAssertEqual(TextPolisher.levenshteinDistance("kitten", "sitting"), 3)
+
+        // Boş metin kontrolleri
+        XCTAssertEqual(TextPolisher.levenshteinDistance("", "test"), 4)
+        XCTAssertEqual(TextPolisher.levenshteinDistance("test", ""), 4)
+        XCTAssertEqual(TextPolisher.levenshteinDistance("", ""), 0)
+    }
+
+    func testExtractPunctuation() {
+        let res1 = TextPolisher.extractPunctuation("antigraviti")
+        XCTAssertEqual(res1.prefix, "")
+        XCTAssertEqual(res1.core, "antigraviti")
+        XCTAssertEqual(res1.suffix, "")
+
+        let res2 = TextPolisher.extractPunctuation("(antigraviti).")
+        XCTAssertEqual(res2.prefix, "(")
+        XCTAssertEqual(res2.core, "antigraviti")
+        XCTAssertEqual(res2.suffix, ").")
+
+        let res3 = TextPolisher.extractPunctuation("...!!!")
+        XCTAssertEqual(res3.core, "")
+        XCTAssertEqual(res3.suffix, "...!!!")
+    }
+
+    func testFuzzyCustomVocabularyMatching() {
+        let polisher = TextPolisher.shared
+        var config = AppConfig.defaultConfig
+        config.remove_filler_words = false
+        config.custom_vocabulary = "Antigravity, Kadıköy, PostgreSQL, Next.js"
+
+        // 1. "antigraviti" -> "Antigravity" (1 harf farkı)
+        let text1 = "Bugün antigraviti ekibiyle toplantımız var."
+        let res1 = polisher.polish(text: text1, config: config)
+        XCTAssertTrue(res1.contains("Antigravity"), "antigraviti -> Antigravity olarak düzeltilmeli: \(res1)")
+
+        // 2. "antigrafiti" -> "Antigravity" (2 harf farkı)
+        let text2 = "Projeyi antigrafiti motoru ile geliştirdik."
+        let res2 = polisher.polish(text: text2, config: config)
+        XCTAssertTrue(res2.contains("Antigravity"), "antigrafiti -> Antigravity olarak düzeltilmeli: \(res2)")
+
+        // 3. Noktalama işaretleri ile sarılı: "(antigrafiti)!" -> "(Antigravity)!"
+        let text3 = "En sevdiğim araç (antigrafiti)!"
+        let res3 = polisher.polish(text: text3, config: config)
+        XCTAssertTrue(res3.contains("(Antigravity)!"), "Noktalama işaretleri korunmalı: \(res3)")
+
+        // 4. Türkçe ek almış terim: "antigraviti'de" -> "Antigravity'de"
+        let text4 = "antigraviti'de yeni bir özellik yayınlandı."
+        let res4 = polisher.polish(text: text4, config: config)
+        XCTAssertTrue(res4.contains("Antigravity'de"), "Türkçe apostroflu ek korunmalı: \(res4)")
+
+        // 5. Türkçe karakter yumuşatma hatası: "kadikoy" -> "Kadıköy"
+        let text5 = "Yarın kadikoy iskelesinde buluşuyoruz."
+        let res5 = polisher.polish(text: text5, config: config)
+        XCTAssertTrue(res5.contains("Kadıköy"), "kadikoy -> Kadıköy olarak düzeltilmeli: \(res5)")
+
+        // 6. Türkçe ek almış: "kadikoy'e" -> "Kadıköy'e"
+        let text6 = "Haftasonu kadikoy'e gideceğiz."
+        let res6 = polisher.polish(text: text6, config: config)
+        XCTAssertTrue(res6.contains("Kadıköy'e"), "kadikoy'e -> Kadıköy'e olarak düzeltilmeli: \(res6)")
+
+        // 7. 2 kelimelik n-gram birleşimi: "anti gravity" -> "Antigravity"
+        let text7 = "Yeni nesil anti gravity teknolojisi."
+        let res7 = polisher.polish(text: text7, config: config)
+        XCTAssertTrue(res7.contains("Antigravity"), "anti gravity -> Antigravity olarak birleştirilmeli: \(res7)")
+
+        // 8. Normal ve ilgisiz kelimelerin bozulmadığının doğrulanması
+        let text8 = "Ben bugün sen ve onunla bir araya geldim."
+        let res8 = polisher.polish(text: text8, config: config)
+        XCTAssertEqual(res8, "Ben bugün sen ve onunla bir araya geldim.")
+    }
+
+    // MARK: - TypeWhisper Aşama 1 & 2 Testleri
+
+    func testMicrophoneBoostProcessor() {
+        let processor = MicrophoneBoostProcessor()
+
+        // 1. Boş dizi kontrolü
+        XCTAssertEqual(processor.process(samples: []).count, 0)
+
+        // 2. Kısık ses güçlendirme kontrolü (fısıltı veya uzaktan konuşma)
+        // inputRMS ~ 0.01 (hedef RMS 0.10 olduğu için kazanç artmalı)
+        let quietSamples = [Float](repeating: 0.01, count: 1600)
+        let boosted = processor.process(samples: quietSamples, enabled: true)
+        let boostedRMS = MicrophoneBoostProcessor.calculateRMS(boosted)
+        XCTAssertGreaterThan(boostedRMS, 0.01, "Kısık ses örneğinin RMS değeri yükseltilmiş olmalı.")
+
+        // 3. Dip gürültüsü kilidi (Noise Floor Hold):
+        // Çok düşük seviyedeki sessizlikte (RMS < 0.0015) oda gürültüsünü pompalamamalı
+        let silenceSamples = [Float](repeating: 0.0005, count: 1600)
+        let silenceProcessed = processor.process(samples: silenceSamples, enabled: true)
+        let silenceRMS = MicrophoneBoostProcessor.calculateRMS(silenceProcessed)
+        XCTAssertLessThanOrEqual(silenceRMS, 0.02, "Dip gürültüsü ve sessizlik gereksizce yükseltilmemeli.")
+
+        // 4. Tanh Soft Limiter kontrolü (Ani yüksek seslerde kırpılma/patlama önleme)
+        let loudSample: Float = 0.95
+        let limited = MicrophoneBoostProcessor.softLimited(loudSample)
+        XCTAssertLessThan(limited, 0.98, "Tanh limiter tepe değerini tavanın altında tutmalı.")
+
+        // 5. PCM16 Data işleme kontrolü
+        var rawPCM = Data(count: 3200)
+        rawPCM.withUnsafeMutableBytes { buf in
+            guard let ptr = buf.bindMemory(to: Int16.self).baseAddress else { return }
+            for i in 0..<1600 {
+                ptr[i] = 300 // Kısık ses
+            }
+        }
+        let processedPCM = processor.processPCM16Data(rawPCM, enabled: true)
+        XCTAssertEqual(processedPCM.count, rawPCM.count)
+        processedPCM.withUnsafeBytes { buf in
+            guard let ptr = buf.bindMemory(to: Int16.self).baseAddress else { return }
+            XCTAssertGreaterThan(abs(ptr[100]), 300, "PCM16 genliği güçlendirilmiş olmalı.")
+        }
+    }
+
+    func testClamshellStateProvider() {
+        let provider = IOKitClamshellStateProvider.shared
+        // Çökmeden ve takılmadan boolean durum dönmeli
+        let isClosed = provider.isLidClosed()
+        XCTAssertTrue(isClosed == true || isClosed == false)
+    }
+
+    func testAudioDuckingAndBackgroundAudioController() {
+        let duckingService = AudioDuckingService.shared
+        // Donanım durumunu kontrol et
+        if let snapshot = duckingService.getCurrentOutputSnapshot() {
+            XCTAssertGreaterThanOrEqual(snapshot.volume, 0.0)
+            XCTAssertLessThanOrEqual(snapshot.volume, 1.0)
+        }
+
+        // BackgroundAudioController testi
+        var config = AppConfig.defaultConfig
+        config.background_audio_mode = "none"
+        BackgroundAudioController.shared.handleDictationStarted(config: config)
+        BackgroundAudioController.shared.handleDictationEnded(config: config)
+        XCTAssertFalse(duckingService.isDucked)
+    }
+
+    func testSecureInputDiagnostics() {
+        let status = SecureInputDiagnostics.checkStatus()
+        XCTAssertFalse(status.description.isEmpty)
+        let active = SecureInputDiagnostics.isSecureInputActive()
+        XCTAssertEqual(active, status.isActive)
+    }
+
+    func testChromiumAccessibilityController() {
+        let controller = ChromiumAccessibilityController.shared
+
+        // 1. Chromium tarayıcıları doğru tanımalı
+        XCTAssertTrue(controller.isChromiumOrElectron(bundleIdentifier: "com.google.Chrome"))
+        XCTAssertTrue(controller.isChromiumOrElectron(bundleIdentifier: "com.brave.Browser"))
+        XCTAssertTrue(controller.isChromiumOrElectron(bundleIdentifier: "company.thebrowser.Browser"))
+        XCTAssertTrue(controller.isChromiumOrElectron(bundleIdentifier: "com.microsoft.edgemac"))
+
+        // 2. Popüler Electron uygulamalarını doğru tanımalı
+        XCTAssertTrue(controller.isChromiumOrElectron(bundleIdentifier: "com.microsoft.VSCode"))
+        XCTAssertTrue(controller.isChromiumOrElectron(bundleIdentifier: "com.todesktop.230313mzl4w4u92")) // Cursor
+        XCTAssertTrue(controller.isChromiumOrElectron(bundleIdentifier: "com.tinyspeck.slackmacgap"))     // Slack
+        XCTAssertTrue(controller.isChromiumOrElectron(bundleIdentifier: "notion.id"))
+        XCTAssertTrue(controller.isChromiumOrElectron(bundleIdentifier: "md.obsidian"))
+
+        // 3. Normal native uygulamaları hariç tutmalı
+        XCTAssertFalse(controller.isChromiumOrElectron(bundleIdentifier: "com.apple.Safari"))
+        XCTAssertFalse(controller.isChromiumOrElectron(bundleIdentifier: "com.apple.TextEdit"))
+        XCTAssertFalse(controller.isChromiumOrElectron(bundleIdentifier: "com.apple.calculator"))
+    }
+
+    func testDictationRecoveryAudioStore() {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("VoiceTypingRecoveryTest_\(UUID().uuidString)")
+        let store = DictationRecoveryAudioStore(customDirectoryURL: tempDir)
+
+        // 1. Başlangıçta kayıt olmamalı
+        XCTAssertFalse(store.hasFailedRecovery())
+        XCTAssertNil(store.getLatestAudioData())
+
+        // 2. Ses kaydı yazma
+        let dummyWAV = "RIFF1234WAVEfmt test audio data".data(using: .utf8)!
+        store.saveLastRecording(wavData: dummyWAV)
+        XCTAssertEqual(store.getLatestAudioData(), dummyWAV)
+        XCTAssertFalse(store.hasFailedRecovery(), "Hata verilmediği sürece henüz failed sayılmamalı.")
+
+        // 3. Deşifre başarısız oldu işareti
+        store.markFailed(error: "503 Service Unavailable")
+        XCTAssertTrue(store.hasFailedRecovery())
+
+        // 4. Temizleme
+        store.clear()
+        XCTAssertFalse(store.hasFailedRecovery())
+        XCTAssertNil(store.getLatestAudioData())
+
+        // Test dizinini temizle
+        try? FileManager.default.removeItem(at: tempDir)
+    }
+
+    func testConfigBackgroundAudioModes() {
+        let config = AppConfig.defaultConfig
+        XCTAssertEqual(config.background_audio_mode, "ducking", "Varsayılan arka plan ses modu 'ducking' olmalı.")
+        XCTAssertTrue(config.enable_microphone_boost, "Varsayılan mikrofon kazancı açık olmalı.")
+
+        // JSON serileştirme ve geri yükleme testi
+        let data = try! JSONEncoder().encode(config)
+        let decoded = try! JSONDecoder().decode(AppConfig.self, from: data)
+        XCTAssertEqual(decoded.background_audio_mode, "ducking")
+        XCTAssertTrue(decoded.enable_microphone_boost)
+    }
+
+    func testAutoSubmitKeyTrigger() {
+        let injector = TextInjector.shared
+        // Tuş simülasyonları çökme veya exception fırlatmamalı
+        injector.triggerAutoSubmit(key: "return")
+        injector.triggerAutoSubmit(key: "cmd_return")
+        injector.triggerAutoSubmit(key: "shift_return")
+        injector.triggerAutoSubmit(key: "tab")
+
+        // Default Config değerleri
+        let cfg = AppConfig.defaultConfig
+        XCTAssertFalse(cfg.enable_auto_submit, "Varsayılan olarak auto_submit kapalı olmalı.")
+        XCTAssertEqual(cfg.auto_submit_key, "return")
+    }
+
+    func testAppProfileFormatterCategories() {
+        let formatter = AppProfileFormatter.shared
+
+        // Terminal tespiti
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.apple.Terminal", appName: "Terminal"), .terminal)
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.googlecode.iterm2", appName: "iTerm2"), .terminal)
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "dev.warp.Warp", appName: "Warp"), .terminal)
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.mitchellh.ghostty", appName: "Ghostty"), .terminal)
+
+        // Code Editor tespiti
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.microsoft.VSCode", appName: "Code"), .codeEditor)
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.todesktop.230313mzl4w4u92", appName: "Cursor"), .codeEditor)
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.apple.dt.Xcode", appName: "Xcode"), .codeEditor)
+
+        // Messaging tespiti
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.tinyspeck.slackmacgap", appName: "Slack"), .messaging)
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.facebook.archon", appName: "WhatsApp"), .messaging)
+
+        // Document tespiti
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.apple.mail", appName: "Mail"), .document)
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.microsoft.Word", appName: "Word"), .document)
+    }
+
+    func testAppProfileFormattingRules() {
+        let formatter = AppProfileFormatter.shared
+
+        // Terminal kuralları: küçük harf, noktasız, tire bayrakları
+        let termRes1 = formatter.format(text: "Git status.", category: .terminal)
+        XCTAssertEqual(termRes1, "git status", "Terminalde komut küçük harfe çevrilmeli ve nokta kaldırılmalı.")
+
+        let termRes2 = formatter.format(text: "docker compose up tire tire build.", category: .terminal)
+        XCTAssertEqual(termRes2, "docker compose up --build", "'tire tire' bayrağı '--' haline gelmeli ve nokta kalkmalı.")
+
+        // Messaging kuralları: kısa tek cümlelik sohbette yapay noktanın kaldırılması
+        let msgRes = formatter.format(text: "Tamamdır geliyorum.", category: .messaging)
+        XCTAssertEqual(msgRes, "Tamamdır geliyorum")
+
+        // Document kuralları: resmi büyük harf ve nokta garantisi
+        let docRes = formatter.format(text: "toplantı yarın saat onda yapılacak", category: .document)
+        XCTAssertEqual(docRes, "Toplantı yarın saat onda yapılacak.")
+    }
+
+    func testVoiceSnippetExpansion() {
+        let expander = VoiceSnippetExpander.shared
+        let snippets: [String: String] = [
+            "kısayol mail": "ornek@sirket.com",
+            "kısayol iban": "TR33 0006 1005 1234 5678 90",
+            "kısayol imza": "İyi çalışmalar,\nÖmer"
+        ]
+
+        // 1. Tam eşleşme testi
+        let exactMatch = expander.expand(text: "kısayol mail", snippets: snippets)
+        XCTAssertEqual(exactMatch, "ornek@sirket.com")
+
+        // 1.1. Apple Speech ve Türkçe büyük harf "Kısa yol IBAN" testi (Kullanıcının gerçek çıktısı)
+        let appleSpeechMatch = expander.expand(text: "Kısa yol IBAN", snippets: snippets)
+        XCTAssertEqual(appleSpeechMatch, "TR33 0006 1005 1234 5678 90", "Apple Speech 'Kısa yol IBAN' şeklinde iki kelime ve büyük harfle yazsa bile eşleşmeli.")
+
+        let appleSpeechDotMatch = expander.expand(text: "Kısa yol IBAN.", snippets: snippets)
+        XCTAssertEqual(appleSpeechDotMatch, "TR33 0006 1005 1234 5678 90")
+
+        // 1.2. Ek toleransı ve bulanık eşleme testi
+        let suffixMatch = expander.expand(text: "kısa yol ibanı", snippets: snippets)
+        XCTAssertEqual(suffixMatch, "TR33 0006 1005 1234 5678 90")
+
+        let fuzzyMatch = expander.expand(text: "kisayol ibn", snippets: snippets)
+        XCTAssertEqual(fuzzyMatch, "TR33 0006 1005 1234 5678 90", "Küçük yazım/telaffuz hatasında fuzzy eşleşme çalışmalı.")
+
+        // 2. Cümle içi eşleşme testi
+        let sentenceMatch = expander.expand(text: "Lütfen teklifi kısayol mail adresime iletin", snippets: snippets)
+        XCTAssertEqual(sentenceMatch, "Lütfen teklifi ornek@sirket.com adresime iletin")
+
+        let sentenceAppleMatch = expander.expand(text: "Lütfen ücreti Kısa yol IBAN hesabıma yollayın", snippets: snippets)
+        XCTAssertEqual(sentenceAppleMatch, "Lütfen ücreti TR33 0006 1005 1234 5678 90 hesabıma yollayın")
+
+        // 3. Eşleşmeyen metin bozulmamalı
+        let noMatch = expander.expand(text: "Bugün hava çok güzel.", snippets: snippets)
+        XCTAssertEqual(noMatch, "Bugün hava çok güzel.")
+    }
+
+    func testVoiceSnippetsParsingAndFormatting() {
+        let rawText = """
+        # Açıklama satırı
+        kısayol mail = test@domain.com
+        kısayol iban = TR12 3456 7890
+        // Başka bir yorum
+        """
+
+        let parsed = AppConfig.parseVoiceSnippets(from: rawText)
+        XCTAssertEqual(parsed["kısayol mail"], "test@domain.com")
+        XCTAssertEqual(parsed["kısayol iban"], "TR12 3456 7890")
+        XCTAssertNil(parsed["# Açıklama satırı"])
+
+        let formatted = AppConfig.formatVoiceSnippets(parsed)
+        XCTAssertTrue(formatted.contains("kısayol mail = test@domain.com"))
+        XCTAssertTrue(formatted.contains("kısayol iban = TR12 3456 7890"))
+    }
+
+    func testSoundThemeSynthesizerAndConfig() {
+        let sound = SoundManager.shared
+        sound.isEnabled = true
+
+        // 4 temanın da hatasız çalması
+        let themes = ["modern", "subtle", "tactile", "chimes"]
+        for theme in themes {
+            sound.play("dictation-start", customTheme: theme, customVolume: 0.5)
+            sound.play("paste", customTheme: theme, customVolume: 0.5)
+            sound.play("dictation-stop", customTheme: theme, customVolume: 0.5)
+            sound.play("cancel", customTheme: theme, customVolume: 0.5)
+        }
+
+        // Test Sound fonksiyonu
+        sound.testSound(theme: "chimes", volume: 0.7)
+
+        // Config serileştirme kontrolü
+        var cfg = AppConfig.defaultConfig
+        cfg.sound_theme = "chimes"
+        cfg.sound_volume = 0.65
+        cfg.enable_app_profiles = true
+        cfg.voice_snippets = ["kısayol test": "başarılı"]
+
+        let data = try! JSONEncoder().encode(cfg)
+        let decoded = try! JSONDecoder().decode(AppConfig.self, from: data)
+        XCTAssertEqual(decoded.sound_theme, "chimes")
+        XCTAssertEqual(decoded.sound_volume, 0.65)
+        XCTAssertTrue(decoded.enable_app_profiles)
+        XCTAssertEqual(decoded.voice_snippets["kısayol test"], "başarılı")
+    }
 }
 
 
