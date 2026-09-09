@@ -61,6 +61,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var removeFillerWordsCheckbox: NSButton!
     private var saveHistoryCheckbox: NSButton!
     private var muteSystemAudioCheckbox: NSButton!
+    private var backgroundAudioPopUp: NSPopUpButton!
+    private var micBoostCheckbox: NSButton!
     private var launchAtLoginCheckbox: NSButton!
     private var showDockIconCheckbox: NSButton!
     private var onlyInTextFieldsCheckbox: NSButton!
@@ -76,6 +78,17 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var geminiKeyField: NSTextField!
     private var geminiModelPopUp: NSPopUpButton!
     private var geminiStatusLabel: NSTextField!
+
+    // Tab: Gelişmiş & Kısayollar (Advanced & Snippets)
+    private var autoSubmitCheckbox: NSButton!
+    private var autoSubmitKeyPopUp: NSPopUpButton!
+    private var appProfilesCheckbox: NSButton!
+    private var soundThemePopUp: NSPopUpButton!
+    private var soundVolumeSlider: NSSlider!
+    private var soundVolumeLabel: NSTextField!
+    private var testSoundButton: NSButton!
+    private var voiceSnippetsTextView: NSTextView!
+    private var voiceSnippetsScrollView: NSScrollView!
 
     // Tab 3: Sistem & İzinler
     private var micStatusLabel: NSTextField!
@@ -111,6 +124,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private let toolbarTabIdentifiers: [NSToolbarItem.Identifier] = [
         NSToolbarItem.Identifier("general"),
         NSToolbarItem.Identifier("ai"),
+        NSToolbarItem.Identifier("advanced"),
         NSToolbarItem.Identifier("permissions"),
         NSToolbarItem.Identifier("about")
     ]
@@ -171,6 +185,13 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             item.target = self
             item.action = #selector(toolbarTabClicked(_:))
             return item
+        case "advanced":
+            item.label = "Gelişmiş"
+            item.paletteLabel = "Gelişmiş & Kısayollar"
+            item.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "Gelişmiş") ?? NSImage(systemSymbolName: "gearshape.2", accessibilityDescription: "Gelişmiş")
+            item.target = self
+            item.action = #selector(toolbarTabClicked(_:))
+            return item
         case "permissions":
             item.label = "İzinler"
             item.paletteLabel = "İzinler"
@@ -220,7 +241,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         // Testler ve klavye kısayolları için senkronize segmented control
         segmentedControl = NSSegmentedControl(
-            labels: ["Genel", "Yapay Zeka", "İzinler", "Hakkında"],
+            labels: ["Genel", "Yapay Zeka", "Gelişmiş", "İzinler", "Hakkında"],
             trackingMode: .selectOne,
             target: self,
             action: #selector(tabSegmentChanged(_:))
@@ -242,13 +263,17 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         tab2Item.view = buildTab2AIProvidersView()
         tabView.addTabViewItem(tab2Item)
 
-        let tab3Item = NSTabViewItem(identifier: "tab3")
-        tab3Item.view = buildTab3PermissionsView()
+        let tab3Item = NSTabViewItem(identifier: "tabAdvanced")
+        tab3Item.view = buildTabAdvancedView()
         tabView.addTabViewItem(tab3Item)
 
-        let tab4Item = NSTabViewItem(identifier: "tab4")
-        tab4Item.view = buildTab4AboutView()
+        let tab4Item = NSTabViewItem(identifier: "tabPermissions")
+        tab4Item.view = buildTab3PermissionsView()
         tabView.addTabViewItem(tab4Item)
+
+        let tab5Item = NSTabViewItem(identifier: "tabAbout")
+        tab5Item.view = buildTab4AboutView()
+        tabView.addTabViewItem(tab5Item)
 
         mainContainer.addSubview(tabView)
 
@@ -307,7 +332,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // TAB 1: Genel & Kısayol (Two-Column Layout)
     // =========================================================================
     private func buildTab1GeneralView() -> NSView {
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 550))
 
         // 1. Kısayol Tuşu
         let keyLabel = createSectionLabel(text: "Tetikleyici Tuş", y: 18)
@@ -423,32 +448,55 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(hapticFeedbackCheckbox)
 
         removeFillerWordsCheckbox = NSButton(checkboxWithTitle: "Dolgu kelimelerini otomatik temizle ('ııı', 'şey', 'yani', 'hımm')", target: self, action: #selector(checkboxChanged(_:)))
-        removeFillerWordsCheckbox.frame = NSRect(x: 175, y: 302, width: 440, height: 18)
+        removeFillerWordsCheckbox.frame = NSRect(x: 175, y: 300, width: 440, height: 18)
         container.addSubview(removeFillerWordsCheckbox)
 
         saveHistoryCheckbox = NSButton(checkboxWithTitle: "Dikte geçmişini menü çubuğunda sakla (Son 15 dikte)", target: self, action: #selector(checkboxChanged(_:)))
-        saveHistoryCheckbox.frame = NSRect(x: 175, y: 326, width: 440, height: 18)
+        saveHistoryCheckbox.frame = NSRect(x: 175, y: 322, width: 440, height: 18)
         container.addSubview(saveHistoryCheckbox)
 
-        muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "Konuşurken arka plan medyasını/müziği duraklat", target: self, action: #selector(checkboxChanged(_:)))
-        muteSystemAudioCheckbox.frame = NSRect(x: 175, y: 350, width: 440, height: 18)
-        container.addSubview(muteSystemAudioCheckbox)
-
         playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal", target: self, action: #selector(checkboxChanged(_:)))
-        playSoundsCheckbox.frame = NSRect(x: 175, y: 374, width: 440, height: 18)
+        playSoundsCheckbox.frame = NSRect(x: 175, y: 344, width: 440, height: 18)
         container.addSubview(playSoundsCheckbox)
 
+        micBoostCheckbox = NSButton(checkboxWithTitle: "Mikrofon Akıllı Kazanç (AGC Boost - Fısıltı Güçlendirme & Tanh Sınırlayıcı)", target: self, action: #selector(checkboxChanged(_:)))
+        micBoostCheckbox.frame = NSRect(x: 175, y: 366, width: 440, height: 18)
+        container.addSubview(micBoostCheckbox)
+
         launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat", target: self, action: #selector(checkboxChanged(_:)))
-        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 398, width: 440, height: 18)
+        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 388, width: 440, height: 18)
         container.addSubview(launchAtLoginCheckbox)
 
         showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini kalıcı olarak göster", target: self, action: #selector(checkboxChanged(_:)))
-        showDockIconCheckbox.frame = NSRect(x: 175, y: 422, width: 440, height: 18)
+        showDockIconCheckbox.frame = NSRect(x: 175, y: 410, width: 440, height: 18)
         container.addSubview(showDockIconCheckbox)
 
         onlyInTextFieldsCheckbox = NSButton(checkboxWithTitle: "Yalnızca yazı yazma alanındayken çalıştır (Target-Lock)", target: self, action: #selector(checkboxChanged(_:)))
-        onlyInTextFieldsCheckbox.frame = NSRect(x: 175, y: 446, width: 440, height: 18)
+        onlyInTextFieldsCheckbox.frame = NSRect(x: 175, y: 432, width: 440, height: 18)
         container.addSubview(onlyInTextFieldsCheckbox)
+
+        // Dummy backwards compatibility
+        muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "", target: self, action: #selector(checkboxChanged(_:)))
+        muteSystemAudioCheckbox.isHidden = true
+        container.addSubview(muteSystemAudioCheckbox)
+
+        // Ayırıcı
+        container.addSubview(createSeparator(y: 456))
+
+        // 6. Arka Plan Sesi Yönetimi
+        let bgAudioLabel = createSectionLabel(text: "Arka Plan Sesi", y: 470)
+        container.addSubview(bgAudioLabel)
+
+        backgroundAudioPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 468, width: 440, height: 26), pullsDown: false)
+        backgroundAudioPopUp.addItem(withTitle: "🔉 Ses Kısma (Audio Ducking - %20'ye İndir) [Varsayılan]")
+        backgroundAudioPopUp.addItem(withTitle: "⏸️ Medyayı Duraklat (Play/Pause Tuşu)")
+        backgroundAudioPopUp.addItem(withTitle: "❌ Arka Plan Sesine Dokunma (Kapalı)")
+        backgroundAudioPopUp.target = self
+        backgroundAudioPopUp.action = #selector(backgroundAudioChanged(_:))
+        container.addSubview(backgroundAudioPopUp)
+
+        let bgAudioHint = createNoteLabel(text: "Dikte sırasında arka plandaki müzik veya video sesini otomatik kısar veya duraklatır.", y: 498)
+        container.addSubview(bgAudioHint)
 
         return container
     }
@@ -456,6 +504,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     @objc private func modeSegmentedChanged(_ sender: NSSegmentedControl) {
         modePopUp.selectItem(at: sender.selectedSegment)
         updateModeInfoText(for: sender.selectedSegment)
+        autoSave()
+    }
+
+    @objc private func backgroundAudioChanged(_ sender: NSPopUpButton) {
         autoSave()
     }
 
@@ -731,6 +783,186 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         updateProviderNote(for: provider)
         updateSystemPromptVisibility()
         autoSave()
+    }
+
+    // =========================================================================
+    // TAB: Gelişmiş & Kısayollar (Auto-Submit, App Profiles, Voice Snippets, Sound Themes)
+    // =========================================================================
+    private func buildTabAdvancedView() -> NSView {
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
+
+        // 1. Otomatik Gönderim (Auto-Submit / Enter)
+        let autoSubmitLabel = createSectionLabel(text: "Otomatik Gönderim", y: 16)
+        container.addSubview(autoSubmitLabel)
+
+        autoSubmitCheckbox = NSButton(
+            checkboxWithTitle: "Dikte bitince otomatik gönder (Auto-Submit / Enter)",
+            target: self,
+            action: #selector(checkboxChanged(_:))
+        )
+        autoSubmitCheckbox.frame = NSRect(x: 175, y: 14, width: 440, height: 18)
+        container.addSubview(autoSubmitCheckbox)
+
+        let keyLabel = NSTextField(labelWithString: "Gönderim Tuşu:")
+        keyLabel.frame = NSRect(x: 175, y: 38, width: 95, height: 20)
+        keyLabel.font = NSFont.systemFont(ofSize: 11)
+        container.addSubview(keyLabel)
+
+        autoSubmitKeyPopUp = NSPopUpButton(frame: NSRect(x: 270, y: 34, width: 220, height: 26), pullsDown: false)
+        autoSubmitKeyPopUp.addItem(withTitle: "Return / Enter (⏎)")
+        autoSubmitKeyPopUp.addItem(withTitle: "Command + Return (⌘⏎)")
+        autoSubmitKeyPopUp.addItem(withTitle: "Shift + Return (⇧⏎)")
+        autoSubmitKeyPopUp.addItem(withTitle: "Tab (⇥)")
+        autoSubmitKeyPopUp.target = self
+        autoSubmitKeyPopUp.action = #selector(autoSubmitKeyChanged(_:))
+        container.addSubview(autoSubmitKeyPopUp)
+
+        let autoSubmitNote = createNoteLabel(
+            text: "ChatGPT, Claude, Cursor, Slack veya Terminal'de dikte yapıştırıldığı an mesajı/komutu el değmeden doğrudan gönderir.",
+            y: 62
+        )
+        container.addSubview(autoSubmitNote)
+
+        // Ayırıcı
+        container.addSubview(createSeparator(y: 88))
+
+        // 2. Uygulama Profilleri (App Profiles)
+        let profileLabel = createSectionLabel(text: "Uygulama Profili", y: 100)
+        container.addSubview(profileLabel)
+
+        appProfilesCheckbox = NSButton(
+            checkboxWithTitle: "Hedef uygulamaya göre akıllı biçimlendir (App Profiles)",
+            target: self,
+            action: #selector(checkboxChanged(_:))
+        )
+        appProfilesCheckbox.frame = NSRect(x: 175, y: 98, width: 440, height: 18)
+        container.addSubview(appProfilesCheckbox)
+
+        let profileNote = createNoteLabel(
+            text: "Terminal ve IDE'lerde küçük harf ve noktasız komut satırı stili; WhatsApp/Slack'te doğal sohbet; Mail/Docs'ta tam resmi imla kuralları uygular.",
+            y: 122
+        )
+        container.addSubview(profileNote)
+
+        // Ayırıcı
+        container.addSubview(createSeparator(y: 148))
+
+        // 3. Ses Temaları & Ses Seviyesi (Sound Themes)
+        let soundThemeLabel = createSectionLabel(text: "Ses Teması & Efekt", y: 160)
+        container.addSubview(soundThemeLabel)
+
+        soundThemePopUp = NSPopUpButton(frame: NSRect(x: 175, y: 156, width: 220, height: 26), pullsDown: false)
+        soundThemePopUp.addItem(withTitle: "Modern (Dijital Chirp)")
+        soundThemePopUp.addItem(withTitle: "Zarif / Subtle (Yumuşak Akustik)")
+        soundThemePopUp.addItem(withTitle: "Taktil (Mekanik Klik Sesi)")
+        soundThemePopUp.addItem(withTitle: "Melodik / Chimes (Majör Çanlar)")
+        soundThemePopUp.target = self
+        soundThemePopUp.action = #selector(soundThemeChanged(_:))
+        container.addSubview(soundThemePopUp)
+
+        testSoundButton = NSButton(frame: NSRect(x: 405, y: 155, width: 100, height: 28))
+        testSoundButton.title = "Sesi Dene"
+        testSoundButton.bezelStyle = .rounded
+        testSoundButton.target = self
+        testSoundButton.action = #selector(testSoundButtonClicked)
+        container.addSubview(testSoundButton)
+
+        let volLabel = NSTextField(labelWithString: "Ses Düzeyi:")
+        volLabel.frame = NSRect(x: 175, y: 190, width: 80, height: 20)
+        volLabel.font = NSFont.systemFont(ofSize: 11)
+        container.addSubview(volLabel)
+
+        soundVolumeSlider = NSSlider(value: 0.8, minValue: 0.0, maxValue: 1.0, target: self, action: #selector(soundVolumeSliderChanged(_:)))
+        soundVolumeSlider.frame = NSRect(x: 255, y: 188, width: 200, height: 22)
+        container.addSubview(soundVolumeSlider)
+
+        soundVolumeLabel = NSTextField(labelWithString: "Ses: %80")
+        soundVolumeLabel.frame = NSRect(x: 465, y: 190, width: 80, height: 20)
+        soundVolumeLabel.font = NSFont.systemFont(ofSize: 11)
+        soundVolumeLabel.textColor = .secondaryLabelColor
+        container.addSubview(soundVolumeLabel)
+
+        // Ayırıcı
+        container.addSubview(createSeparator(y: 218))
+
+        // 4. Sesli Kısayollar ve Metin Genişletici (Voice Snippets)
+        let snippetsLabel = createSectionLabel(text: "Sesli Kısayollar", y: 230)
+        container.addSubview(snippetsLabel)
+
+        let snippetsDesc = NSTextField(labelWithString: "Her satıra 'Tetikleyici = Genişletilmiş Metin' formatında yazın:")
+        snippetsDesc.frame = NSRect(x: 175, y: 228, width: 330, height: 18)
+        snippetsDesc.font = NSFont.systemFont(ofSize: 11)
+        snippetsDesc.textColor = .secondaryLabelColor
+        container.addSubview(snippetsDesc)
+
+        let insertSampleBtn = NSButton(frame: NSRect(x: 510, y: 224, width: 105, height: 24))
+        insertSampleBtn.title = "+ Örnek Ekle"
+        insertSampleBtn.bezelStyle = .rounded
+        insertSampleBtn.font = NSFont.systemFont(ofSize: 11)
+        insertSampleBtn.target = self
+        insertSampleBtn.action = #selector(insertSampleSnippetsClicked)
+        container.addSubview(insertSampleBtn)
+
+        voiceSnippetsScrollView = NSScrollView(frame: NSRect(x: 175, y: 252, width: 440, height: 95))
+        voiceSnippetsScrollView.hasVerticalScroller = true
+        voiceSnippetsScrollView.borderType = .bezelBorder
+        voiceSnippetsScrollView.autohidesScrollers = true
+
+        voiceSnippetsTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: 420, height: 95))
+        voiceSnippetsTextView.minSize = NSSize(width: 0.0, height: 95)
+        voiceSnippetsTextView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        voiceSnippetsTextView.isVerticallyResizable = true
+        voiceSnippetsTextView.isHorizontallyResizable = false
+        voiceSnippetsTextView.autoresizingMask = [.width]
+        voiceSnippetsTextView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        voiceSnippetsTextView.delegate = self
+        voiceSnippetsScrollView.documentView = voiceSnippetsTextView
+        container.addSubview(voiceSnippetsScrollView)
+
+        let snippetsExample = NSTextField(wrappingLabelWithString: "💡 Örnek: 'kısayol mail' dediğinizde 'ornek@sirket.com' yapıştırılır. Cümle içinde ('dosyayı kısayol mail adresime yolla') veya tek başına kullanılabilir.")
+        snippetsExample.frame = NSRect(x: 175, y: 352, width: 440, height: 40)
+        snippetsExample.font = NSFont.systemFont(ofSize: 11)
+        snippetsExample.textColor = .secondaryLabelColor
+        container.addSubview(snippetsExample)
+
+        return container
+    }
+
+    @objc private func insertSampleSnippetsClicked() {
+        let sample = "kısayol iban = TR33 0006 1005 1234 5678 90\nkısayol adres = Atatürk Bulvarı No: 42 Ankara"
+        let current = voiceSnippetsTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        if current.isEmpty {
+            voiceSnippetsTextView.string = "kısayol mail = ornek@sirket.com\n" + sample
+        } else if !current.contains("kısayol iban") {
+            voiceSnippetsTextView.string = current + "\n" + sample
+        }
+        autoSave()
+    }
+
+    @objc private func autoSubmitKeyChanged(_ sender: NSPopUpButton) {
+        autoSave()
+    }
+
+    @objc private func soundThemeChanged(_ sender: NSPopUpButton) {
+        autoSave()
+    }
+
+    @objc private func soundVolumeSliderChanged(_ sender: NSSlider) {
+        soundVolumeLabel.stringValue = "Ses: \(Int(sender.doubleValue * 100))%"
+        autoSave()
+    }
+
+    @objc private func testSoundButtonClicked() {
+        let themeIdx = soundThemePopUp.indexOfSelectedItem
+        let theme: String
+        switch themeIdx {
+        case 1: theme = "subtle"
+        case 2: theme = "tactile"
+        case 3: theme = "chimes"
+        default: theme = "modern"
+        }
+        let vol = soundVolumeSlider.doubleValue
+        SoundManager.shared.testSound(theme: theme, volume: vol)
     }
 
     // =========================================================================
@@ -1230,10 +1462,58 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         removeFillerWordsCheckbox.state = cfg.remove_filler_words ? .on : .off
         saveHistoryCheckbox.state = cfg.save_history ? .on : .off
         playSoundsCheckbox.state = cfg.play_sounds ? .on : .off
+        micBoostCheckbox.state = cfg.enable_microphone_boost ? .on : .off
         muteSystemAudioCheckbox.state = (cfg.pause_media_playback || cfg.mute_system_audio) ? .on : .off
         launchAtLoginCheckbox.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
         showDockIconCheckbox.state = cfg.show_dock_icon ? .on : .off
         onlyInTextFieldsCheckbox.state = cfg.only_in_text_fields ? .on : .off
+
+        // Arka Plan Ses Yönetimi
+        switch cfg.background_audio_mode.lowercased() {
+        case "ducking":
+            backgroundAudioPopUp.selectItem(at: 0)
+        case "pause":
+            backgroundAudioPopUp.selectItem(at: 1)
+        default:
+            backgroundAudioPopUp.selectItem(at: 2)
+        }
+
+        // Gelişmiş: Auto-Submit
+        autoSubmitCheckbox.state = cfg.enable_auto_submit ? .on : .off
+        switch cfg.auto_submit_key.lowercased() {
+        case "cmd_return", "cmd+return":
+            autoSubmitKeyPopUp.selectItem(at: 1)
+        case "shift_return", "shift+return":
+            autoSubmitKeyPopUp.selectItem(at: 2)
+        case "tab":
+            autoSubmitKeyPopUp.selectItem(at: 3)
+        default:
+            autoSubmitKeyPopUp.selectItem(at: 0)
+        }
+
+        // Gelişmiş: App Profiles
+        appProfilesCheckbox.state = cfg.enable_app_profiles ? .on : .off
+
+        // Gelişmiş: Sound Theme & Volume
+        switch cfg.sound_theme.lowercased() {
+        case "subtle":
+            soundThemePopUp.selectItem(at: 1)
+        case "tactile":
+            soundThemePopUp.selectItem(at: 2)
+        case "chimes":
+            soundThemePopUp.selectItem(at: 3)
+        default:
+            soundThemePopUp.selectItem(at: 0)
+        }
+        soundVolumeSlider.doubleValue = cfg.sound_volume
+        soundVolumeLabel.stringValue = "Ses: \(Int(cfg.sound_volume * 100))%"
+
+        // Gelişmiş: Voice Snippets
+        if cfg.voice_snippets.isEmpty {
+            voiceSnippetsTextView.string = "kısayol mail = ornek@sirket.com"
+        } else {
+            voiceSnippetsTextView.string = AppConfig.formatVoiceSnippets(cfg.voice_snippets)
+        }
 
         updateSystemPromptVisibility()
 
@@ -1610,10 +1890,41 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let onlyInTextFieldsOn = onlyInTextFieldsCheckbox.state == .on
 
         let playSounds = playSoundsCheckbox.state == .on
-        let muteAudio = muteSystemAudioCheckbox.state == .on
+        let micBoostOn = micBoostCheckbox.state == .on
         let launchLogin = launchAtLoginCheckbox.state == .on
         let showDock = showDockIconCheckbox.state == .on
         let triggerKey = selectedTriggerKeyCode
+
+        let bgAudioIdx = backgroundAudioPopUp.indexOfSelectedItem
+        let bgAudioMode: String
+        switch bgAudioIdx {
+        case 0: bgAudioMode = "ducking"
+        case 1: bgAudioMode = "pause"
+        default: bgAudioMode = "none"
+        }
+
+        // Gelişmiş Ayarlar
+        let autoSubmitOn = autoSubmitCheckbox.state == .on
+        let autoSubmitKey: String
+        switch autoSubmitKeyPopUp.indexOfSelectedItem {
+        case 1: autoSubmitKey = "cmd_return"
+        case 2: autoSubmitKey = "shift_return"
+        case 3: autoSubmitKey = "tab"
+        default: autoSubmitKey = "return"
+        }
+
+        let appProfilesOn = appProfilesCheckbox.state == .on
+
+        let soundTheme: String
+        switch soundThemePopUp.indexOfSelectedItem {
+        case 1: soundTheme = "subtle"
+        case 2: soundTheme = "tactile"
+        case 3: soundTheme = "chimes"
+        default: soundTheme = "modern"
+        }
+
+        let soundVolume = soundVolumeSlider.doubleValue
+        let snippets = AppConfig.parseVoiceSnippets(from: voiceSnippetsTextView.string)
 
         LaunchAtLoginManager.shared.setEnabled(launchLogin)
 
@@ -1634,10 +1945,18 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.save_history = saveHistOn
             cfg.play_sounds = playSounds
             cfg.restore_clipboard = false
-            cfg.pause_media_playback = muteAudio
-            cfg.mute_system_audio = muteAudio
+            cfg.background_audio_mode = bgAudioMode
+            cfg.enable_microphone_boost = micBoostOn
+            cfg.pause_media_playback = (bgAudioMode == "pause")
+            cfg.mute_system_audio = (bgAudioMode == "ducking" || bgAudioMode == "pause")
             cfg.show_dock_icon = showDock
             cfg.only_in_text_fields = onlyInTextFieldsOn
+            cfg.enable_auto_submit = autoSubmitOn
+            cfg.auto_submit_key = autoSubmitKey
+            cfg.enable_app_profiles = appProfilesOn
+            cfg.sound_theme = soundTheme
+            cfg.sound_volume = soundVolume
+            cfg.voice_snippets = snippets
         }
 
         AppDelegate.updateDockVisibility(showDock)

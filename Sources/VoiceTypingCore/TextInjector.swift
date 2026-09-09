@@ -85,13 +85,53 @@ public class TextInjector {
         eventUp.post(tap: tapLocation)
     }
 
+    /// Belirtilen sanal tuş kodunu ve tuş bayraklarını simüle eder (örn: Return, Tab, Cmd+Return)
+    public func simulateKeyPress(virtualKey: CGKeyCode, flags: CGEventFlags = []) {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        guard let eventDown = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true),
+              let eventUp = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false) else {
+            return
+        }
+
+        if !flags.isEmpty {
+            eventDown.flags = flags
+            eventUp.flags = flags
+        }
+
+        let tapLocation: CGEventTapLocation = AXIsProcessTrusted() ? .cghidEventTap : .cgSessionEventTap
+        eventDown.post(tap: tapLocation)
+        Thread.sleep(forTimeInterval: 0.020)
+        eventUp.post(tap: tapLocation)
+    }
+
+    /// Otomatik gönderim (Auto-Submit) için istenen tuşu tetikler
+    public func triggerAutoSubmit(key: String) {
+        let k = key.lowercased().trimmingCharacters(in: .whitespaces)
+        switch k {
+        case "cmd_return", "cmd+return", "command_return":
+            simulateKeyPress(virtualKey: 36, flags: .maskCommand)
+            print("[TextInjector] ⚡ Auto-Submit tetiklendi: Cmd + Return (⌘⏎)")
+        case "shift_return", "shift+return":
+            simulateKeyPress(virtualKey: 36, flags: .maskShift)
+            print("[TextInjector] ⚡ Auto-Submit tetiklendi: Shift + Return (⇧⏎)")
+        case "tab":
+            simulateKeyPress(virtualKey: 48, flags: [])
+            print("[TextInjector] ⚡ Auto-Submit tetiklendi: Tab (⇥)")
+        default: // "return", "enter"
+            simulateKeyPress(virtualKey: 36, flags: [])
+            print("[TextInjector] ⚡ Auto-Submit tetiklendi: Return (⏎)")
+        }
+    }
+
     /// Dikte edilen metni panoya yazar ve aktif veya arka plandaki hedef pencereye yapıştırır.
     @discardableResult
     public func paste(
         text: String,
         targetContext: TargetContext? = nil,
         restoreClipboard: Bool = false,
-        pasteDelayMs: Int = 20
+        pasteDelayMs: Int = 20,
+        autoSubmit: Bool = false,
+        autoSubmitKey: String = "return"
     ) -> Bool {
         guard !text.isEmpty else { return false }
 
@@ -103,6 +143,11 @@ public class TextInjector {
                 print("[TextInjector] 🔄 Hedef (\(target.appName) [PID: \(target.pid)]) arka planda kalmış. Öne çağrılıp odak kurtarılıyor...")
                 TargetInputManager.shared.restoreTargetFocus(to: target)
             }
+        }
+
+        // Güvenli Giriş Teşhisi (Secure Event Input Check)
+        if SecureInputDiagnostics.isSecureInputActive() {
+            print("[TextInjector] ⚠️ Güvenli Giriş (Secure Event Input) devrede. Sistem parola alanında olabilir, sentetik Cmd+V kısıtlanabilir.")
         }
 
         let pb = NSPasteboard.general
@@ -123,12 +168,26 @@ public class TextInjector {
 
             self.simulateCmdV()
 
+            // Otomatik Gönderim (Auto-Submit / Enter)
+            if autoSubmit {
+                Thread.sleep(forTimeInterval: 0.080) // Hedef uygulamanın yapıştırmayı tamamlaması için kısa bekleme
+                self.triggerAutoSubmit(key: autoSubmitKey)
+            }
+
             // Eğer panoyu geri yükleme istenmişse, hedef uygulamanın Cmd+V'yi
             // eksiksiz okuyabilmesi için güvenli süre (500ms) beklenir ve ardından eski pano geri yüklenir.
             if restoreClipboard && !snapshot.isEmpty {
                 Thread.sleep(forTimeInterval: 0.50)
                 DispatchQueue.main.async {
-                    self.restoreClipboardSnapshot(snapshot)
+                    // Pano Çarpışma Koruması (Collision Guard):
+                    // Kullanıcı o 500ms içinde başka bir metin kopyaladıysa, panoyu körü körüne
+                    // eski haline getirip kullanıcının yeni kopyasını ezmeyiz!
+                    let currentText = NSPasteboard.general.string(forType: .string)
+                    if currentText == text {
+                        self.restoreClipboardSnapshot(snapshot)
+                    } else {
+                        print("[TextInjector] 🛡️ Pano içeriği değiştiği için eski pano geri yüklemesi iptal edildi (kullanıcının yeni kopyalaması korundu).")
+                    }
                 }
             }
         }
@@ -148,8 +207,11 @@ public class TextInjector {
             text: text,
             targetContext: targetContext,
             restoreClipboard: config.restore_clipboard,
-            pasteDelayMs: pasteDelayMs
+            pasteDelayMs: pasteDelayMs,
+            autoSubmit: config.enable_auto_submit,
+            autoSubmitKey: config.auto_submit_key
         )
     }
 }
+
 

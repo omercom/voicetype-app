@@ -101,6 +101,8 @@ public struct AppConfig: Codable {
     public var min_record_duration: Double
     public var mute_system_audio: Bool
     public var pause_media_playback: Bool
+    public var background_audio_mode: String // "ducking" (varsayılan), "pause", "none"
+    public var enable_microphone_boost: Bool // AGC + Tanh Limiter
     public var show_dock_icon: Bool
     public var haptic_feedback: Bool
     public var remove_filler_words: Bool
@@ -109,6 +111,12 @@ public struct AppConfig: Codable {
     public var save_history: Bool
     public var gemini_system_prompt: String
     public var only_in_text_fields: Bool
+    public var enable_auto_submit: Bool
+    public var auto_submit_key: String // "return", "cmd_return", "shift_return", "tab"
+    public var enable_app_profiles: Bool
+    public var voice_snippets: [String: String]
+    public var sound_theme: String // "modern", "subtle", "tactile", "chimes"
+    public var sound_volume: Double // 0.0 - 1.0
 
     public static let defaultGeminiSystemPrompt = "Sen profesyonel bir ses deşifre asistanısın. Kullanıcının konuşmasını dinle ve doğrudan yazıya dök. Asla selamlama, özet, onaylama ('Tabii ki', 'Anladım' gibi) veya fazladan yorum ekleme; sadece konuşulan metni temiz, doğru imla ve akıcı bir dille yaz."
 
@@ -127,6 +135,8 @@ public struct AppConfig: Codable {
         min_record_duration: 0.20,
         mute_system_audio: true,
         pause_media_playback: true,
+        background_audio_mode: "ducking",
+        enable_microphone_boost: true,
         show_dock_icon: false,
         haptic_feedback: true,
         remove_filler_words: true,
@@ -134,15 +144,24 @@ public struct AppConfig: Codable {
         dictation_mode: "direct",
         save_history: true,
         gemini_system_prompt: AppConfig.defaultGeminiSystemPrompt,
-        only_in_text_fields: true
+        only_in_text_fields: true,
+        enable_auto_submit: false,
+        auto_submit_key: "return",
+        enable_app_profiles: true,
+        voice_snippets: ["kısayol mail": "ornek@sirket.com"],
+        sound_theme: "modern",
+        sound_volume: 0.8
     )
 
     enum CodingKeys: String, CodingKey {
         case provider, groq_api_key, gemini_api_key, groq_model, gemini_model
         case language, trigger_key, trigger_mode, play_sounds, restore_clipboard
-        case paste_delay_ms, min_record_duration, mute_system_audio, pause_media_playback, show_dock_icon
+        case paste_delay_ms, min_record_duration, mute_system_audio, pause_media_playback
+        case background_audio_mode, enable_microphone_boost, show_dock_icon
         case haptic_feedback, remove_filler_words, custom_vocabulary, dictation_mode, save_history
         case gemini_system_prompt, only_in_text_fields
+        case enable_auto_submit, auto_submit_key, enable_app_profiles, voice_snippets
+        case sound_theme, sound_volume
     }
 
     public init(
@@ -160,6 +179,8 @@ public struct AppConfig: Codable {
         min_record_duration: Double,
         mute_system_audio: Bool = true,
         pause_media_playback: Bool = true,
+        background_audio_mode: String = "ducking",
+        enable_microphone_boost: Bool = true,
         show_dock_icon: Bool = false,
         haptic_feedback: Bool = true,
         remove_filler_words: Bool = true,
@@ -167,7 +188,13 @@ public struct AppConfig: Codable {
         dictation_mode: String = "direct",
         save_history: Bool = true,
         gemini_system_prompt: String = AppConfig.defaultGeminiSystemPrompt,
-        only_in_text_fields: Bool = true
+        only_in_text_fields: Bool = true,
+        enable_auto_submit: Bool = false,
+        auto_submit_key: String = "return",
+        enable_app_profiles: Bool = true,
+        voice_snippets: [String: String] = [:],
+        sound_theme: String = "modern",
+        sound_volume: Double = 0.8
     ) {
         self.provider = provider
         self.groq_api_key = groq_api_key
@@ -183,6 +210,8 @@ public struct AppConfig: Codable {
         self.min_record_duration = min_record_duration
         self.mute_system_audio = mute_system_audio
         self.pause_media_playback = pause_media_playback
+        self.background_audio_mode = background_audio_mode
+        self.enable_microphone_boost = enable_microphone_boost
         self.show_dock_icon = show_dock_icon
         self.haptic_feedback = haptic_feedback
         self.remove_filler_words = remove_filler_words
@@ -191,6 +220,12 @@ public struct AppConfig: Codable {
         self.save_history = save_history
         self.gemini_system_prompt = gemini_system_prompt
         self.only_in_text_fields = only_in_text_fields
+        self.enable_auto_submit = enable_auto_submit
+        self.auto_submit_key = auto_submit_key
+        self.enable_app_profiles = enable_app_profiles
+        self.voice_snippets = voice_snippets
+        self.sound_theme = sound_theme
+        self.sound_volume = sound_volume
     }
 
     public init(from decoder: Decoder) throws {
@@ -209,6 +244,8 @@ public struct AppConfig: Codable {
         min_record_duration = try container.decodeIfPresent(Double.self, forKey: .min_record_duration) ?? 0.20
         mute_system_audio = try container.decodeIfPresent(Bool.self, forKey: .mute_system_audio) ?? true
         pause_media_playback = try container.decodeIfPresent(Bool.self, forKey: .pause_media_playback) ?? true
+        background_audio_mode = try container.decodeIfPresent(String.self, forKey: .background_audio_mode) ?? "ducking"
+        enable_microphone_boost = try container.decodeIfPresent(Bool.self, forKey: .enable_microphone_boost) ?? true
         show_dock_icon = try container.decodeIfPresent(Bool.self, forKey: .show_dock_icon) ?? false
         haptic_feedback = try container.decodeIfPresent(Bool.self, forKey: .haptic_feedback) ?? true
         remove_filler_words = try container.decodeIfPresent(Bool.self, forKey: .remove_filler_words) ?? true
@@ -217,6 +254,34 @@ public struct AppConfig: Codable {
         save_history = try container.decodeIfPresent(Bool.self, forKey: .save_history) ?? true
         gemini_system_prompt = try container.decodeIfPresent(String.self, forKey: .gemini_system_prompt) ?? AppConfig.defaultGeminiSystemPrompt
         only_in_text_fields = try container.decodeIfPresent(Bool.self, forKey: .only_in_text_fields) ?? true
+        enable_auto_submit = try container.decodeIfPresent(Bool.self, forKey: .enable_auto_submit) ?? false
+        auto_submit_key = try container.decodeIfPresent(String.self, forKey: .auto_submit_key) ?? "return"
+        enable_app_profiles = try container.decodeIfPresent(Bool.self, forKey: .enable_app_profiles) ?? true
+        voice_snippets = try container.decodeIfPresent([String: String].self, forKey: .voice_snippets) ?? [:]
+        sound_theme = try container.decodeIfPresent(String.self, forKey: .sound_theme) ?? "modern"
+        sound_volume = try container.decodeIfPresent(Double.self, forKey: .sound_volume) ?? 0.8
+    }
+
+    public static func parseVoiceSnippets(from text: String) -> [String: String] {
+        var map: [String: String] = [:]
+        let lines = text.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") || trimmed.hasPrefix("//") { continue }
+            let parts = trimmed.components(separatedBy: "=")
+            if parts.count >= 2 {
+                let key = parts[0].trimmingCharacters(in: .whitespaces)
+                let val = parts.dropFirst().joined(separator: "=").trimmingCharacters(in: .whitespaces)
+                if !key.isEmpty && !val.isEmpty {
+                    map[key] = val
+                }
+            }
+        }
+        return map
+    }
+
+    public static func formatVoiceSnippets(_ map: [String: String]) -> String {
+        return map.map { "\($0.key) = \($0.value)" }.sorted().joined(separator: "\n")
     }
 }
 

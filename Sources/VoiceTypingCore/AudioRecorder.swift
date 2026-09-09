@@ -1,5 +1,7 @@
 import Foundation
 import AVFoundation
+import CoreAudio
+import AppKit
 
 public class AudioRecorder: NSObject {
     public static let shared = AudioRecorder()
@@ -18,9 +20,84 @@ public class AudioRecorder: NSObject {
 
     public private(set) var isRecording: Bool = false
 
+    // MARK: - Idle-Hold (Ilık Motor Bekletme) & Donanım Dinleyicisi
+
+    private var idleHoldTimer: DispatchSourceTimer?
+    private let idleHoldDuration: TimeInterval = 25.0
+
+    private var defaultInputDevicePropertyAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultInputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    private var deviceListenerBlock: AudioObjectPropertyListenerBlock?
+
     override private init() {
         super.init()
+        setupHardwareListeners()
     }
+
+    deinit {
+        removeHardwareListeners()
+        cleanTeardown()
+    }
+
+    // MARK: - Donanım Değişimi & Uyku Dinleyicileri (Active Mic Recovery)
+
+    private func setupHardwareListeners() {
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.handleDefaultDeviceChanged()
+        }
+        self.deviceListenerBlock = block
+
+        let status = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &defaultInputDevicePropertyAddress,
+            DispatchQueue.main,
+            block
+        )
+        if status != noErr {
+            print("[AudioRecorder] ⚠️ CoreAudio default input device dinleyicisi eklenemedi: \(status)")
+        }
+
+        // Sistem uykuya geçerken donanımı temizle
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            print("[AudioRecorder] 💤 Sistem uykuya geçiyor, ses motoru kapatılıyor.")
+            self?.cleanTeardown()
+        }
+    }
+
+    private func removeHardwareListeners() {
+        if let block = deviceListenerBlock {
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject),
+                &defaultInputDevicePropertyAddress,
+                DispatchQueue.main,
+                block
+            )
+            deviceListenerBlock = nil
+        }
+    }
+
+    private func handleDefaultDeviceChanged() {
+        print("[AudioRecorder] 🔄 Sistem varsayılan mikrofonu değişti (AirPods/Bluetooth/Dahili).")
+        lock.lock()
+        let recording = isRecording
+        lock.unlock()
+
+        if !recording {
+            // Boşta veya ılık moddaysa motoru kapat, bir sonraki kayıtta yeni mikrofona anında bağlanacak
+            cleanTeardown()
+        } else {
+            print("[AudioRecorder] ⚠️ Aktif kayıt esnasında mikrofon değişti, kayıt korunuyor.")
+        }
+    }
+
+    // MARK: - Kayıt Başlatma & Sıfır Gecikmeli Uyanma (Instant Warm Start)
 
     public func start(onAudioChunk: ((Data) -> Void)? = nil) -> Bool {
         lock.lock()
@@ -30,6 +107,28 @@ public class AudioRecorder: NSObject {
             return false
         }
 
+        cancelIdleHoldTimerLocked()
+
+        // 0. CLAMSHELL KONTROLÜ (MacBook Kapağı Kapalı mı?)
+        if IOKitClamshellStateProvider.shared.isLidClosed() {
+            print("[AudioRecorder] ⚠️ MacBook kapağı kapalı (Clamshell modu). Harici mikrofon yoksa Apple Silicon/T2 donanımı dahili mikrofonu susturmuş olabilir.")
+        }
+
+        // 1. ILIK MOTOR KONTROLÜ (Warm Engine Check):
+        // Motor zaten çalışıyorsa 0.1ms içinde anında kaydı başlat, cold-start gecikmesini sıfırla!
+        if let engine = audioEngine, engine.isRunning, audioConverter != nil {
+            self.chunkCallback = onAudioChunk
+            self.accumulatedPCM = Data()
+            self.bufferedPCMData = Data()
+            self.currentPower = -160.0
+            self.startTime = CFAbsoluteTimeGetCurrent()
+            self.isRecording = true
+            MicrophoneBoostProcessor.shared.reset()
+            print("[AudioRecorder] ⚡ Ilık motor (Warm Engine) hazır! 0.1ms gecikme ile kayda başlandı.")
+            return true
+        }
+
+        // 2. SOĞUK BAŞLATMA (Cold Start):
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let hwFormat = inputNode.outputFormat(forBus: 0)
@@ -51,39 +150,21 @@ public class AudioRecorder: NSObject {
         self.bufferedPCMData = Data()
         self.currentPower = -160.0
         self.startTime = CFAbsoluteTimeGetCurrent()
-
-        let dstFmt = self.targetFormat
+        MicrophoneBoostProcessor.shared.reset()
 
         inputNode.installTap(onBus: 0, bufferSize: 2048, format: hwFormat) { [weak self] buffer, time in
-            guard let self = self else { return }
+            guard let self = self, self.isRecording else { return }
 
-            // 1. Ses seviyesi (metering) hesabı (dB)
-            var calculatedPower: Float = -160.0
-            if let floatData = buffer.floatChannelData {
-                let frameCount = Int(buffer.frameLength)
-                if frameCount > 0 {
-                    var sum: Float = 0.0
-                    let channel = floatData[0]
-                    for i in 0..<frameCount {
-                        let sample = channel[i]
-                        sum += sample * sample
-                    }
-                    let rms = sqrt(sum / Float(frameCount))
-                    let db = 20.0 * log10(max(rms, 0.00001))
-                    calculatedPower = max(-160.0, min(0.0, db))
-                }
-            }
+            // Canlı güç seviyesini hesapla
+            let calculatedPower = self.calculatePower(buffer: buffer)
 
-            // 2. 16kHz 16-bit PCM dönüşümü
-            let ratio = dstFmt.sampleRate / buffer.format.sampleRate
-            let targetCapacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 512)
-            guard let outBuffer = AVAudioPCMBuffer(pcmFormat: dstFmt, frameCapacity: targetCapacity) else { return }
+            let outBuffer = AVAudioPCMBuffer(pcmFormat: self.targetFormat, frameCapacity: 4096)!
+            var error: NSError?
+            var haveData = true
 
-            var error: NSError? = nil
-            var hasSupplied = false
             let inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus in
-                if !hasSupplied {
-                    hasSupplied = true
+                if haveData {
+                    haveData = false
                     outStatus.pointee = .haveData
                     return buffer
                 } else {
@@ -96,7 +177,11 @@ public class AudioRecorder: NSObject {
             if (status == .haveData || status == .inputRanDry) && outBuffer.frameLength > 0,
                let channelData = outBuffer.int16ChannelData {
                 let byteCount = Int(outBuffer.frameLength) * MemoryLayout<Int16>.size
-                let chunk = Data(bytes: channelData[0], count: byteCount)
+                let rawChunk = Data(bytes: channelData[0], count: byteCount)
+
+                // Mikrofon Akıllı Kazanç ve Yumuşak Sınırlayıcı (AGC Boost Processor)
+                let boostEnabled = ConfigManager.shared.config.enable_microphone_boost
+                let chunk = boostEnabled ? MicrophoneBoostProcessor.shared.processPCM16Data(rawChunk, enabled: true) : rawChunk
 
                 var readyChunks: [Data] = []
                 var localCallback: ((Data) -> Void)? = nil
@@ -147,9 +232,11 @@ public class AudioRecorder: NSObject {
         return currentPower
     }
 
+    // MARK: - Kayıt Durdurma (Ilık Modu Devreye Alma)
+
     public func stop() -> (data: Data?, duration: Double) {
         lock.lock()
-        guard isRecording, let engine = audioEngine else {
+        guard isRecording, audioEngine != nil else {
             lock.unlock()
             return (nil, 0.0)
         }
@@ -164,17 +251,15 @@ public class AudioRecorder: NSObject {
         accumulatedPCM = Data()
         bufferedPCMData = Data()
         currentPower = -160.0
+
+        // Motoru hemen kapatmak yerine 25 saniye ılık tut (Warm Engine)
+        scheduleIdleHoldTimerLocked()
         lock.unlock()
 
         // Varsa kalan son PCM parçasını da callback'e ilet
         if let cb = remainingCallback, !remainingChunk.isEmpty {
             cb(remainingChunk)
         }
-
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
-        self.audioEngine = nil
-        self.audioConverter = nil
 
         let wavData = AudioRecorder.createWavData(pcmData: fullPCM, sampleRate: 16000, channels: 1, bitDepth: 16)
 
@@ -186,10 +271,94 @@ public class AudioRecorder: NSObject {
         return (wavData, duration)
     }
 
+    public func cancel() {
+        lock.lock()
+        guard isRecording else {
+            lock.unlock()
+            return
+        }
+
+        isRecording = false
+        chunkCallback = nil
+        accumulatedPCM = Data()
+        bufferedPCMData = Data()
+        currentPower = -160.0
+
+        // İptal durumunda da motoru bir sonraki basış için ılık beklet
+        scheduleIdleHoldTimerLocked()
+        lock.unlock()
+    }
+
+    // MARK: - Idle-Hold Zamanlayıcısı ve Tam Temizlik
+
+    private func scheduleIdleHoldTimerLocked() {
+        cancelIdleHoldTimerLocked()
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + idleHoldDuration)
+        timer.setEventHandler { [weak self] in
+            self?.handleIdleTimeout()
+        }
+        self.idleHoldTimer = timer
+        timer.resume()
+    }
+
+    private func cancelIdleHoldTimerLocked() {
+        idleHoldTimer?.cancel()
+        idleHoldTimer = nil
+    }
+
+    private func handleIdleTimeout() {
+        lock.lock()
+        guard !isRecording else {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        cleanTeardown()
+    }
+
+    /// Ses motorunu tamamen kapatır, donanım tap'ini söker ve kaynakları serbest bırakır.
+    public func cleanTeardown() {
+        lock.lock()
+        cancelIdleHoldTimerLocked()
+        isRecording = false
+        let engine = audioEngine
+        audioEngine = nil
+        audioConverter = nil
+        chunkCallback = nil
+        accumulatedPCM = Data()
+        bufferedPCMData = Data()
+        currentPower = -160.0
+        lock.unlock()
+
+        if let eng = engine {
+            eng.stop()
+            eng.inputNode.removeTap(onBus: 0)
+            print("[AudioRecorder] 💤 Ses motoru uyku moduna alındı ve donanım serbest bırakıldı.")
+        }
+    }
+
+    private func calculatePower(buffer: AVAudioPCMBuffer) -> Float {
+        guard let floatData = buffer.floatChannelData else { return -160.0 }
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else { return -160.0 }
+
+        var sum: Float = 0.0
+        let channel = floatData[0]
+        for i in 0..<frameCount {
+            let sample = channel[i]
+            sum += sample * sample
+        }
+        let rms = sqrt(sum / Float(frameCount))
+        let db = 20.0 * log10(max(rms, 0.00001))
+        return max(-160.0, min(0.0, db))
+    }
+
+    // MARK: - WAV ve Ses Yardımcıları
+
     /// 16kHz 16-bit PCM WAV verisindeki örneklerin tepe genliğini kontrol eder.
     /// Tüm ses boyunca en yüksek genlik minAmplitude'tan düşükse dijital sessizliktir.
     public static func isAudioSilent(data: Data, minAmplitude: Int16 = 35) -> Bool {
-        // En az WAV başlığı (44 bayt) ve birkaç örnek içermelidir
         guard data.count > 44 else { return true }
         return data.withUnsafeBytes { rawBuffer -> Bool in
             guard let base = rawBuffer.baseAddress else { return true }
@@ -244,26 +413,5 @@ public class AudioRecorder: NSObject {
         data.append(Data(bytes: &totalDataLenLE, count: 4))
         data.append(pcmData)
         return data
-    }
-
-    public func cancel() {
-        lock.lock()
-        guard isRecording else {
-            lock.unlock()
-            return
-        }
-
-        isRecording = false
-        chunkCallback = nil
-        accumulatedPCM = Data()
-        bufferedPCMData = Data()
-        currentPower = -160.0
-        let engine = audioEngine
-        lock.unlock()
-
-        engine?.stop()
-        engine?.inputNode.removeTap(onBus: 0)
-        self.audioEngine = nil
-        self.audioConverter = nil
     }
 }

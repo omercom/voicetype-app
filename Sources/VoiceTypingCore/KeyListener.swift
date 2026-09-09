@@ -74,12 +74,18 @@ public class KeyListener {
         }
     }
 
+    public func updateTriggerKeyConfiguration() {
+        GlobeKeySuppressor.shared.suppressIfNeeded(triggerKey: Int(targetKeyCode))
+    }
+
     public func start() {
         lock.lock()
         defer { lock.unlock() }
 
         guard !isRunning else { return }
         isRunning = true
+
+        GlobeKeySuppressor.shared.suppressIfNeeded(triggerKey: Int(targetKeyCode))
 
         thread = Thread { [weak self] in
             self?.runEventTapLoop()
@@ -92,6 +98,7 @@ public class KeyListener {
     public func stop() {
         lock.lock()
         isRunning = false
+        GlobeKeySuppressor.shared.restoreOriginal()
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
             eventTap = nil
