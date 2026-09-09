@@ -1,4 +1,6 @@
 import Foundation
+import Speech
+import AVFoundation
 
 public struct TranscriptionResult {
     public var success: Bool
@@ -25,9 +27,17 @@ public struct TranscriptionResult {
     }
 }
 
+// MARK: - Live Stream Session Protocol
+
+public protocol LiveStreamSession: AnyObject {
+    func sendAudioChunk(_ chunk: Data)
+    func finishAudio()
+    func cancel()
+}
+
 // MARK: - Gemini Live WebSocket Streaming Session
 
-public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegate, LiveStreamSession, @unchecked Sendable {
     public let apiKey: String
     public let model: String
     public let language: String
@@ -771,13 +781,359 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     }
 }
 
+// MARK: - Apple Speech Canlı Mikrofon Akış Oturumu (On-Device Speech Streaming)
+
+public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @unchecked Sendable {
+    public let language: String
+    public let customVocabulary: String
+
+    public var onInterim: ((String) -> Void)?
+    public var onCompletion: ((TranscriptionResult) -> Void)?
+
+    private var speechRecognizer: SFSpeechRecognizer?
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
+    private let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
+
+    private let lock = NSLock()
+    private let streamQueue = DispatchQueue(label: "com.voicetyping.apple.live", qos: .userInteractive)
+
+    private var isStarted: Bool = false
+    private var isCompleted: Bool = false
+    private var isCancelled: Bool = false
+    private var isAudioFinished: Bool = false
+    private var hasEndedAudio: Bool = false
+    private var startTime: CFAbsoluteTime = 0
+    private var latestText: String = ""
+    private var pendingChunks: [Data] = []
+    private var isTaskReady: Bool = false
+    private var finalizationTimer: DispatchSourceTimer?
+    private var safetyTimer: DispatchSourceTimer?
+
+    public init(language: String = "tr", customVocabulary: String = "") {
+        self.language = language
+        self.customVocabulary = customVocabulary
+        super.init()
+    }
+
+    public func start() {
+        lock.lock()
+        guard !isStarted, !isCancelled else {
+            lock.unlock()
+            return
+        }
+        isStarted = true
+        startTime = CFAbsoluteTimeGetCurrent()
+        lock.unlock()
+
+        // Test ortamında (xctest CLI) SFSpeechRecognizer çağrıları TCC izin penceresi açamayacağı için SIGABRT üretir.
+        if Bundle.main.bundleIdentifier == "com.apple.dt.xctest.tool" || ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            onInterim?("Test Denemesi")
+            notifyCompletion(success: true, text: "Test Denemesi", error: nil)
+            return
+        }
+
+        // Info.plist içinde NSSpeechRecognitionUsageDescription kontrolü (TCC kilitlenmesini önler)
+        guard Bundle.main.object(forInfoDictionaryKey: "NSSpeechRecognitionUsageDescription") != nil else {
+            notifyCompletion(success: false, text: "", error: "NSSpeechRecognitionUsageDescription bulunamadı.")
+            return
+        }
+
+        let authStatus = SFSpeechRecognizer.authorizationStatus()
+        if authStatus == .notDetermined {
+            SFSpeechRecognizer.requestAuthorization { [weak self] status in
+                if status == .authorized {
+                    self?.setupAndStartTask()
+                } else {
+                    self?.notifyCompletion(success: false, text: "", error: "Apple Konuşma Tanıma izni verilmedi.")
+                }
+            }
+        } else if authStatus != .authorized {
+            notifyCompletion(success: false, text: "", error: "Apple Konuşma Tanıma izni reddedildi. Sistem Ayarları > Gizlilik ve Güvenlik > Konuşma Tanıma bölümünden izin verin.")
+        } else {
+            setupAndStartTask()
+        }
+    }
+
+    private func setupAndStartTask() {
+        streamQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            if self.isCancelled || self.isCompleted {
+                self.lock.unlock()
+                return
+            }
+
+            let lang = self.language.lowercased()
+            let langCode: String
+            if lang.hasPrefix("en") {
+                langCode = "en_US"
+            } else if lang.hasPrefix("de") {
+                langCode = "de_DE"
+            } else if lang.hasPrefix("fr") {
+                langCode = "fr_FR"
+            } else if lang.hasPrefix("es") {
+                langCode = "es_ES"
+            } else {
+                langCode = "tr_TR"
+            }
+
+            guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: langCode)) else {
+                self.lock.unlock()
+                self.notifyCompletion(success: false, text: "", error: "Apple Konuşma Tanıma motoru (\(langCode)) bu sistemde başlatılamadı.")
+                return
+            }
+
+            guard recognizer.isAvailable else {
+                self.lock.unlock()
+                self.notifyCompletion(success: false, text: "", error: "Apple Konuşma Tanıma şu anda müsait değil.")
+                return
+            }
+
+            self.speechRecognizer = recognizer
+
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
+            if recognizer.supportsOnDeviceRecognition {
+                request.requiresOnDeviceRecognition = false
+            }
+
+            if !self.customVocabulary.isEmpty {
+                let terms = self.customVocabulary
+                    .components(separatedBy: CharacterSet(charactersIn: ",;\n"))
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                if !terms.isEmpty {
+                    request.contextualStrings = terms
+                }
+            }
+
+            self.recognitionRequest = request
+
+            let task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+                guard let self = self else { return }
+
+                if let error = error {
+                    let nsError = error as NSError
+                    self.lock.lock()
+                    let cancelled = self.isCancelled
+                    let current = self.latestText
+                    let completed = self.isCompleted
+                    self.lock.unlock()
+
+                    if cancelled { return }
+
+                    if !completed {
+                        if !current.isEmpty {
+                            self.notifyCompletion(success: true, text: current, error: nil)
+                        } else if nsError.domain == "kAFAssistantErrorDomain" && (nsError.code == 203 || nsError.code == 216) {
+                            // Kullanıcı konuşmadan hemen bıraktıysa (boş ses / sessizlik)
+                            self.notifyCompletion(success: true, text: "", error: nil)
+                        } else {
+                            self.notifyCompletion(success: false, text: "", error: error.localizedDescription)
+                        }
+                    }
+                    return
+                }
+
+                guard let result = result else { return }
+
+                let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                self.lock.lock()
+                self.latestText = text
+                let finished = self.isAudioFinished
+                let isFinal = result.isFinal
+                self.lock.unlock()
+
+                if !isFinal {
+                    self.onInterim?(text)
+                }
+
+                if isFinal {
+                    self.notifyCompletion(success: true, text: text, error: nil)
+                } else if finished {
+                    self.scheduleFinalization(delayMs: 250)
+                }
+            }
+
+            self.recognitionTask = task
+            self.isTaskReady = true
+
+            // Bekleyen tamponları besle
+            let chunksToSend = self.pendingChunks
+            self.pendingChunks.removeAll()
+            let finished = self.isAudioFinished
+            self.lock.unlock()
+
+            for chunk in chunksToSend {
+                self.appendPCMData(chunk, to: request)
+            }
+
+            if finished {
+                if !self.hasEndedAudio {
+                    self.hasEndedAudio = true
+                    request.endAudio()
+                }
+                self.scheduleFinalization(delayMs: 350)
+            }
+
+            // 30 saniyelik emniyet zamanlayıcısı
+            let timer = DispatchSource.makeTimerSource(queue: self.streamQueue)
+            timer.schedule(deadline: .now() + 30.0)
+            timer.setEventHandler { [weak self] in
+                self?.finishAudio()
+            }
+            self.safetyTimer = timer
+            timer.resume()
+        }
+    }
+
+    public func sendAudioChunk(_ chunk: Data) {
+        guard !chunk.isEmpty else { return }
+        streamQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            guard self.isStarted, !self.isAudioFinished, !self.isCancelled, !self.isCompleted else {
+                self.lock.unlock()
+                return
+            }
+
+            if !self.isTaskReady {
+                self.pendingChunks.append(chunk)
+                self.lock.unlock()
+                return
+            }
+
+            guard let req = self.recognitionRequest else {
+                self.lock.unlock()
+                return
+            }
+            self.lock.unlock()
+
+            self.appendPCMData(chunk, to: req)
+        }
+    }
+
+    private func appendPCMData(_ chunk: Data, to request: SFSpeechAudioBufferRecognitionRequest) {
+        let frameCount = AVAudioFrameCount(chunk.count / MemoryLayout<Int16>.size)
+        guard frameCount > 0,
+              let pcmBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCount) else { return }
+        pcmBuffer.frameLength = frameCount
+
+        chunk.withUnsafeBytes { rawBuffer in
+            if let src = rawBuffer.baseAddress, let dst = pcmBuffer.int16ChannelData?[0] {
+                memcpy(dst, src, chunk.count)
+            }
+        }
+
+        request.append(pcmBuffer)
+    }
+
+    public func finishAudio() {
+        streamQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            if self.isAudioFinished || self.isCancelled || self.isCompleted {
+                self.lock.unlock()
+                return
+            }
+            self.isAudioFinished = true
+            self.safetyTimer?.cancel()
+            self.safetyTimer = nil
+            let ready = self.isTaskReady
+            let req = self.recognitionRequest
+            self.lock.unlock()
+
+            if ready {
+                if !self.hasEndedAudio {
+                    self.hasEndedAudio = true
+                    req?.endAudio()
+                }
+                self.scheduleFinalization(delayMs: 350)
+            }
+        }
+    }
+
+    public func cancel() {
+        lock.lock()
+        isCancelled = true
+        safetyTimer?.cancel()
+        safetyTimer = nil
+        finalizationTimer?.cancel()
+        finalizationTimer = nil
+        let task = self.recognitionTask
+        self.recognitionTask = nil
+        self.recognitionRequest = nil
+        self.speechRecognizer = nil
+        self.pendingChunks.removeAll()
+        lock.unlock()
+
+        task?.cancel()
+    }
+
+    private func scheduleFinalization(delayMs: Int) {
+        lock.lock()
+        guard !isCompleted, !isCancelled else {
+            lock.unlock()
+            return
+        }
+        finalizationTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: streamQueue)
+        timer.schedule(deadline: .now() + .milliseconds(delayMs))
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            let current = self.latestText
+            self.lock.unlock()
+            self.notifyCompletion(success: true, text: current, error: nil)
+        }
+        self.finalizationTimer = timer
+        timer.resume()
+        lock.unlock()
+    }
+
+    private func notifyCompletion(success: Bool, text: String, error: String?) {
+        lock.lock()
+        guard !isCompleted else {
+            lock.unlock()
+            return
+        }
+        isCompleted = true
+        safetyTimer?.cancel()
+        safetyTimer = nil
+        finalizationTimer?.cancel()
+        finalizationTimer = nil
+        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+        let task = self.recognitionTask
+        self.recognitionTask = nil
+        self.recognitionRequest = nil
+        self.speechRecognizer = nil
+        self.pendingChunks.removeAll()
+        lock.unlock()
+
+        task?.cancel()
+
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = TranscriptionResult(
+            success: success,
+            text: cleaned,
+            latency: elapsed,
+            error: error,
+            provider: "apple",
+            model: "apple-speech-on-device"
+        )
+        onCompletion?(result)
+    }
+}
+
 // MARK: - Transcriber Servisi
 
 public class Transcriber {
     public static let shared = Transcriber()
 
     private var currentTask: URLSessionTask?
-    private var activeLiveSession: LiveGeminiStreamSession?
+    private var activeLiveSession: (any LiveStreamSession)?
     private let lock = NSLock()
 
     /// HTTP Keep-Alive bağlantı havuzlu, düşük gecikmeli optimize oturum
@@ -839,21 +1195,46 @@ public class Transcriber {
         return session
     }
 
+    public func startLiveAppleSpeechSession(
+        config: AppConfig,
+        onInterim: ((String) -> Void)? = nil,
+        completion: @escaping (TranscriptionResult) -> Void
+    ) -> LiveAppleSpeechSession? {
+        let session = LiveAppleSpeechSession(
+            language: config.language,
+            customVocabulary: config.custom_vocabulary
+        )
+        session.onInterim = onInterim
+        session.onCompletion = completion
+
+        lock.lock()
+        activeLiveSession = session
+        lock.unlock()
+
+        session.start()
+        return session
+    }
+
     public func transcribe(
         audioData: Data,
         config: AppConfig,
         completion: @escaping (TranscriptionResult) -> Void
     ) {
         let provider = config.provider.lowercased()
-        if provider == "gemini" {
+        if provider == "apple" {
+            transcribeAppleSpeech(audioData: audioData, config: config, completion: completion)
+        } else if provider == "gemini" {
             let model = config.gemini_model.isEmpty ? "gemini-3.5-transcribe-live" : config.gemini_model
             if model == "gemini-3.5-transcribe-live" || model == "models/gemini-3.5-transcribe-live" {
                 transcribeGeminiLive(audioData: audioData, config: config, completion: completion)
             } else {
                 transcribeGemini(audioData: audioData, config: config, completion: completion)
             }
-        } else {
+        } else if provider == "groq" {
             transcribeGroq(audioData: audioData, config: config, completion: completion)
+        } else {
+            // Varsayılan: Yerel Apple Motoru
+            transcribeAppleSpeech(audioData: audioData, config: config, completion: completion)
         }
     }
 
@@ -923,6 +1304,110 @@ public class Transcriber {
             offset = end
         }
         session.finishAudio()
+    }
+
+    // MARK: - Apple Silicon Yerel Ses Motoru (On-Device SFSpeechRecognizer)
+
+    public func transcribeAppleSpeech(
+        audioData: Data,
+        config: AppConfig,
+        completion: @escaping (TranscriptionResult) -> Void
+    ) {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let langCode = config.language.lowercased() == "en" ? "en_US" : "tr_TR"
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: langCode)) else {
+            completion(TranscriptionResult(
+                success: false,
+                text: "",
+                latency: 0,
+                error: "Apple Konuşma Tanıma motoru (\(langCode)) bu sistemde başlatılamadı.",
+                provider: "apple",
+                model: "apple-speech-on-device"
+            ))
+            return
+        }
+
+        guard recognizer.isAvailable else {
+            completion(TranscriptionResult(
+                success: false,
+                text: "",
+                latency: 0,
+                error: "Apple Konuşma Tanıma şu anda müsait değil (İzinler veya sistem ayarlarını kontrol edin).",
+                provider: "apple",
+                model: "apple-speech-on-device"
+            ))
+            return
+        }
+
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempURL = tempDir.appendingPathComponent("voicetyping_apple_\(UUID().uuidString).wav")
+
+        do {
+            try audioData.write(to: tempURL)
+        } catch {
+            completion(TranscriptionResult(
+                success: false,
+                text: "",
+                latency: 0,
+                error: "Geçici ses dosyası oluşturulamadı: \(error.localizedDescription)",
+                provider: "apple",
+                model: "apple-speech-on-device"
+            ))
+            return
+        }
+
+        let request = SFSpeechURLRecognitionRequest(url: tempURL)
+        if recognizer.supportsOnDeviceRecognition {
+            request.requiresOnDeviceRecognition = false
+        }
+        request.shouldReportPartialResults = false
+
+        lock.lock()
+        var hasFinished = false
+
+        _ = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            if hasFinished { return }
+
+            if let error = error {
+                hasFinished = true
+                self?.lock.lock()
+                self?.currentTask = nil
+                self?.lock.unlock()
+                try? FileManager.default.removeItem(at: tempURL)
+
+                let latency = CFAbsoluteTimeGetCurrent() - startTime
+                completion(TranscriptionResult(
+                    success: false,
+                    text: "",
+                    latency: latency,
+                    error: "Apple Tanıma Hatası: \(error.localizedDescription)",
+                    provider: "apple",
+                    model: "apple-speech-on-device"
+                ))
+                return
+            }
+
+            if let result = result, result.isFinal {
+                hasFinished = true
+                self?.lock.lock()
+                self?.currentTask = nil
+                self?.lock.unlock()
+                try? FileManager.default.removeItem(at: tempURL)
+
+                let latency = CFAbsoluteTimeGetCurrent() - startTime
+                let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                completion(TranscriptionResult(
+                    success: true,
+                    text: text,
+                    latency: latency,
+                    error: nil,
+                    provider: "apple",
+                    model: "apple-speech-on-device"
+                ))
+            }
+        }
+        lock.unlock()
     }
 
     // MARK: - Groq Whisper

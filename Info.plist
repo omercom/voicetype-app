@@ -24,5 +24,7 @@
     <string>AppIcon</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>VoiceTyping sesinizi deşifre edip yazıya dökmek için mikrofona erişim gerektirir.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>VoiceTyping sesinizi yerel Apple motoruyla deşifre etmek için konuşma tanıma izni gerektirir.</string>
 </dict>
 </plist>
