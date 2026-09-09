@@ -44,6 +44,10 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertFalse(mic.description.isEmpty)
         XCTAssertFalse(mic.badge.isEmpty)
 
+        let speech = PermissionManager.shared.getSpeechRecognitionStatus()
+        XCTAssertFalse(speech.description.isEmpty)
+        XCTAssertFalse(speech.badge.isEmpty)
+
         let acc = PermissionManager.shared.getAccessibilityStatus()
         XCTAssertFalse(acc.description.isEmpty)
         XCTAssertFalse(acc.badge.isEmpty)
