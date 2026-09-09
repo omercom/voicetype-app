@@ -20,10 +20,7 @@ public class AudioRecorder: NSObject {
 
     public private(set) var isRecording: Bool = false
 
-    // MARK: - Idle-Hold (Ilık Motor Bekletme) & Donanım Dinleyicisi
-
-    private var idleHoldTimer: DispatchSourceTimer?
-    private let idleHoldDuration: TimeInterval = 25.0
+    // MARK: - Donanım Dinleyicisi (Default Input Device & Sleep)
 
     private var defaultInputDevicePropertyAddress = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDefaultInputDevice,
@@ -107,28 +104,12 @@ public class AudioRecorder: NSObject {
             return false
         }
 
-        cancelIdleHoldTimerLocked()
-
         // 0. CLAMSHELL KONTROLÜ (MacBook Kapağı Kapalı mı?)
         if IOKitClamshellStateProvider.shared.isLidClosed() {
             print("[AudioRecorder] ⚠️ MacBook kapağı kapalı (Clamshell modu). Harici mikrofon yoksa Apple Silicon/T2 donanımı dahili mikrofonu susturmuş olabilir.")
         }
 
-        // 1. ILIK MOTOR KONTROLÜ (Warm Engine Check):
-        // Motor zaten çalışıyorsa 0.1ms içinde anında kaydı başlat, cold-start gecikmesini sıfırla!
-        if let engine = audioEngine, engine.isRunning, audioConverter != nil {
-            self.chunkCallback = onAudioChunk
-            self.accumulatedPCM = Data()
-            self.bufferedPCMData = Data()
-            self.currentPower = -160.0
-            self.startTime = CFAbsoluteTimeGetCurrent()
-            self.isRecording = true
-            MicrophoneBoostProcessor.shared.reset()
-            print("[AudioRecorder] ⚡ Ilık motor (Warm Engine) hazır! 0.1ms gecikme ile kayda başlandı.")
-            return true
-        }
-
-        // 2. SOĞUK BAŞLATMA (Cold Start):
+        // Ses motorunu sıfırdan temiz başlat
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let hwFormat = inputNode.outputFormat(forBus: 0)
@@ -232,11 +213,11 @@ public class AudioRecorder: NSObject {
         return currentPower
     }
 
-    // MARK: - Kayıt Durdurma (Ilık Modu Devreye Alma)
+    // MARK: - Kayıt Durdurma ve Donanımı Anında Serbest Bırakma
 
     public func stop() -> (data: Data?, duration: Double) {
         lock.lock()
-        guard isRecording, audioEngine != nil else {
+        guard isRecording, let engine = audioEngine else {
             lock.unlock()
             return (nil, 0.0)
         }
@@ -252,9 +233,13 @@ public class AudioRecorder: NSObject {
         bufferedPCMData = Data()
         currentPower = -160.0
 
-        // Motoru hemen kapatmak yerine 25 saniye ılık tut (Warm Engine)
-        scheduleIdleHoldTimerLocked()
+        // Mikrofonu ve ses motorunu hemen kapat (macOS turuncu gizlilik ikonu anında söner)
+        self.audioEngine = nil
+        self.audioConverter = nil
         lock.unlock()
+
+        engine.stop()
+        engine.inputNode.removeTap(onBus: 0)
 
         // Varsa kalan son PCM parçasını da callback'e ilet
         if let cb = remainingCallback, !remainingChunk.isEmpty {
@@ -283,44 +268,20 @@ public class AudioRecorder: NSObject {
         accumulatedPCM = Data()
         bufferedPCMData = Data()
         currentPower = -160.0
-
-        // İptal durumunda da motoru bir sonraki basış için ılık beklet
-        scheduleIdleHoldTimerLocked()
+        let engine = audioEngine
+        self.audioEngine = nil
+        self.audioConverter = nil
         lock.unlock()
-    }
 
-    // MARK: - Idle-Hold Zamanlayıcısı ve Tam Temizlik
-
-    private func scheduleIdleHoldTimerLocked() {
-        cancelIdleHoldTimerLocked()
-        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-        timer.schedule(deadline: .now() + idleHoldDuration)
-        timer.setEventHandler { [weak self] in
-            self?.handleIdleTimeout()
+        if let eng = engine {
+            eng.stop()
+            eng.inputNode.removeTap(onBus: 0)
         }
-        self.idleHoldTimer = timer
-        timer.resume()
-    }
-
-    private func cancelIdleHoldTimerLocked() {
-        idleHoldTimer?.cancel()
-        idleHoldTimer = nil
-    }
-
-    private func handleIdleTimeout() {
-        lock.lock()
-        guard !isRecording else {
-            lock.unlock()
-            return
-        }
-        lock.unlock()
-        cleanTeardown()
     }
 
     /// Ses motorunu tamamen kapatır, donanım tap'ini söker ve kaynakları serbest bırakır.
     public func cleanTeardown() {
         lock.lock()
-        cancelIdleHoldTimerLocked()
         isRecording = false
         let engine = audioEngine
         audioEngine = nil
@@ -334,7 +295,7 @@ public class AudioRecorder: NSObject {
         if let eng = engine {
             eng.stop()
             eng.inputNode.removeTap(onBus: 0)
-            print("[AudioRecorder] 💤 Ses motoru uyku moduna alındı ve donanım serbest bırakıldı.")
+            print("[AudioRecorder] 💤 Ses motoru ve donanım serbest bırakıldı.")
         }
     }
 
