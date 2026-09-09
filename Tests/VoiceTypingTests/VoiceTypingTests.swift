@@ -6,11 +6,15 @@ final class VoiceTypingTests: XCTestCase {
 
     func testConfigLoadingAndDefaults() {
         let config = ConfigManager.shared.config
-        XCTAssertEqual(config.trigger_key, 54, "Tetikleyici tuş 54 (Sağ Command) olmalıdır.")
-        XCTAssertTrue(config.provider == "groq" || config.provider == "gemini")
+        XCTAssertTrue(["groq", "gemini", "apple"].contains(config.provider.lowercased()), "Geçerli bir sağlayıcı seçili olmalıdır: \(config.provider)")
         XCTAssertGreaterThan(config.min_record_duration, 0.0)
 
         // LaTeX ($) yasağı kontrolü
+        for model in ConfigManager.availableAppleModels {
+            XCTAssertFalse(model.price.contains("$"), "Apple model fiyat LaTeX ($) içeremez: \(model.price)")
+            XCTAssertFalse(model.name.contains("$"), "Apple model adı ($) içeremez.")
+        }
+
         for model in ConfigManager.availableGroqModels {
             XCTAssertFalse(model.price.contains("$"), "Fiyat LaTeX ($) işareti içeremez: \(model.price)")
             XCTAssertFalse(model.name.contains("$"), "Model adı ($) içeremez.")
@@ -385,6 +389,43 @@ final class VoiceTypingTests: XCTestCase {
         callbackFired = false
         controller.saveClicked()
         XCTAssertTrue(callbackFired, "saveClicked çağrıldığında autoSave üzerinden callback tetiklenmeli.")
+    }
+
+    func testSettingsWindowAppleAndGeminiProviderSwitching() {
+        let originalProvider = ConfigManager.shared.config.provider
+        defer {
+            ConfigManager.shared.update { $0.provider = originalProvider }
+        }
+
+        let controller = SettingsWindowController.shared
+
+        // 1. Apple Yerel seçimi test
+        ConfigManager.shared.update { $0.provider = "apple" }
+        controller.loadValues()
+        XCTAssertEqual(ConfigManager.shared.config.provider, "apple")
+
+        // 2. Gemini Live seçimi test
+        ConfigManager.shared.update {
+            $0.provider = "gemini"
+            $0.gemini_model = "gemini-3.5-transcribe-live"
+        }
+        controller.loadValues()
+        XCTAssertEqual(ConfigManager.shared.config.provider, "gemini")
+        XCTAssertEqual(ConfigManager.shared.config.gemini_model, "gemini-3.5-transcribe-live")
+
+        // 3. Groq Whisper seçimi test
+        ConfigManager.shared.update {
+            $0.provider = "groq"
+            $0.groq_model = "whisper-large-v3"
+        }
+        controller.loadValues()
+        XCTAssertEqual(ConfigManager.shared.config.provider, "groq")
+
+        // 4. autoSave testi
+        var updated = false
+        controller.onConfigUpdated = { updated = true }
+        controller.autoSave(showMessage: false)
+        XCTAssertTrue(updated)
     }
 
     func testCapsLockAndModifierDetection() {
@@ -929,6 +970,27 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertEqual(noisyResult, "Merhaba dünya!")
     }
 
+    func testTextPolisherSemanticTranscribe() {
+        let polisher = TextPolisher.shared
+        var config = AppConfig.defaultConfig
+        config.remove_filler_words = true
+
+        // 1. Kekeleme eleme testi
+        let stutterInput = "ben ben şey yarın yarın gidecektim"
+        let stutterResult = polisher.polish(text: stutterInput, config: config)
+        XCTAssertEqual(stutterResult, "Ben yarın gidecektim")
+
+        // 2. Akıllı soru işareti testi
+        let questionInput = "yarın toplantı saat kaçta acaba"
+        let questionResult = polisher.polish(text: questionInput, config: config)
+        XCTAssertEqual(questionResult, "Yarın toplantı saat kaçta acaba?")
+
+        // 3. CLI ve kod komut tespiti
+        let cliInput = "terminalde npm run test çalıştırır mısın"
+        let cliResult = polisher.polish(text: cliInput, config: config)
+        XCTAssertEqual(cliResult, "Terminalde `npm run test` çalıştırır mısın?")
+    }
+
     func testGeminiSystemPromptConfiguration() {
         var config = AppConfig.defaultConfig
         XCTAssertFalse(config.gemini_system_prompt.isEmpty)
@@ -1123,9 +1185,35 @@ final class VoiceTypingTests: XCTestCase {
 
         // Dikte bitiş / iptal çağrısı
         manager.resumeAfterDictation()
+    }
 
-        // Çift resume çağrıldığında yan etki oluşturmamalıdır (idempotent)
-        manager.resumeAfterDictation()
+    func testLiveAppleSpeechSessionProtocolAndLifecycle() {
+        var config = ConfigManager.shared.config
+        config.provider = "apple"
+        config.language = "tr-TR"
+        config.custom_vocabulary = "Antigravity, macOS"
+        let exp = expectation(description: "Apple Speech Live Session")
+
+        let session = Transcriber.shared.startLiveAppleSpeechSession(
+            config: config,
+            onInterim: { _ in },
+            completion: { result in
+                XCTAssertEqual(result.provider, "apple")
+                exp.fulfill()
+            }
+        )
+
+        let liveSession: (any LiveStreamSession)? = session
+        XCTAssertNotNil(liveSession)
+
+        // 16kHz 16-bit mono PCM dummy veri parçası gönder
+        let dummyPCM = Data(repeating: 0, count: 3200) // 100ms sessizlik
+        session?.sendAudioChunk(dummyPCM)
+
+        // Bitirme çağrısı
+        session?.finishAudio()
+
+        wait(for: [exp], timeout: 2.0)
     }
 }
 

@@ -113,7 +113,7 @@ public struct AppConfig: Codable {
     public static let defaultGeminiSystemPrompt = "Sen profesyonel bir ses deşifre asistanısın. Kullanıcının konuşmasını dinle ve doğrudan yazıya dök. Asla selamlama, özet, onaylama ('Tabii ki', 'Anladım' gibi) veya fazladan yorum ekleme; sadece konuşulan metni temiz, doğru imla ve akıcı bir dille yaz."
 
     public static let defaultConfig = AppConfig(
-        provider: "groq",
+        provider: "apple",
         groq_api_key: "",
         gemini_api_key: "",
         groq_model: "whisper-large-v3",
@@ -195,7 +195,7 @@ public struct AppConfig: Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "groq"
+        provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "apple"
         groq_api_key = try container.decodeIfPresent(String.self, forKey: .groq_api_key) ?? ""
         gemini_api_key = try container.decodeIfPresent(String.self, forKey: .gemini_api_key) ?? ""
         groq_model = try container.decodeIfPresent(String.self, forKey: .groq_model) ?? "whisper-large-v3"
@@ -225,6 +225,15 @@ public class ConfigManager {
 
     public private(set) var config: AppConfig
     public private(set) var configURL: URL
+
+    public static let availableAppleModels: [ModelOption] = [
+        ModelOption(
+            id: "apple-speech-on-device",
+            name: "Apple Speech (Canlı Akış / Sıfır Kota)",
+            price: "Ücretsiz (0 USD)",
+            speed: "Canlı Akış"
+        )
+    ]
 
     public static let availableGroqModels: [ModelOption] = [
         ModelOption(
@@ -314,6 +323,9 @@ public class ConfigManager {
         if finalConfig.groq_model == "whisper-large-v3-turbo" {
             finalConfig.groq_model = "whisper-large-v3"
         }
+        if finalConfig.provider.lowercased() == "openai" {
+            finalConfig.provider = "apple"
+        }
 
         self.configURL = primaryConfigURL
         self.config = finalConfig
@@ -334,6 +346,9 @@ public class ConfigManager {
                var decoded = try? JSONDecoder().decode(AppConfig.self, from: data) {
                 if decoded.groq_model == "whisper-large-v3-turbo" {
                     decoded.groq_model = "whisper-large-v3"
+                }
+                if decoded.provider.lowercased() == "openai" {
+                    decoded.provider = "apple"
                 }
                 self.config = decoded
                 break

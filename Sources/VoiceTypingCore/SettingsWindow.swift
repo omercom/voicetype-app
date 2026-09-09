@@ -68,6 +68,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // Tab 2: Yapay Zeka & Modeller
     private var providerSegmentedControl: NSSegmentedControl!
     private var providerPopUp: NSPopUpButton!
+    private var providerNoteLabel: NSTextField!
+    private var appleStatusLabel: NSTextField!
     private var groqKeyField: NSTextField!
     private var groqModelPopUp: NSPopUpButton!
     private var groqStatusLabel: NSTextField!
@@ -469,14 +471,21 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // TAB 2: Yapay Zeka & Modeller (Two-Column Layout)
     // =========================================================================
     private func buildTab2AIProvidersView() -> NSView {
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
 
-        // 1. Aktif Sağlayıcı
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 635, height: 660))
+        scrollView.documentView = container
+
+        // 1. Aktif Sağlayıcı (Active Provider)
         let provLabel = createSectionLabel(text: "Aktif Sağlayıcı", y: 16)
         container.addSubview(provLabel)
 
         providerSegmentedControl = NSSegmentedControl(
-            labels: ["Google Gemini Live (Önerilen)", "Groq Whisper"],
+            labels: ["🍎 Apple Speech (Canlı)", "✨ Gemini Live", "⚡ Groq Whisper"],
             trackingMode: .selectOne,
             target: self,
             action: #selector(providerSegmentedChanged(_:))
@@ -489,28 +498,44 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         // Gizli yedek popup
         providerPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 14, width: 440, height: 26), pullsDown: false)
-        providerPopUp.addItem(withTitle: "Groq Whisper (whisper-large-v3 - Yüksek Kalite)")
-        providerPopUp.addItem(withTitle: "Google Gemini (Doğal Dil & Bağlamsal)")
+        providerPopUp.addItem(withTitle: "Apple Speech (Canlı Akış / 0 Kota)")
+        providerPopUp.addItem(withTitle: "Google Gemini Live (Canlı Akış)")
+        providerPopUp.addItem(withTitle: "Groq Whisper (whisper-large-v3)")
         providerPopUp.isHidden = true
         container.addSubview(providerPopUp)
 
-        let provNote = createNoteLabel(text: "Düşük gecikme ve gerçek zamanlı konuşma akışı için Google Gemini Live önerilir.", y: 44)
-        container.addSubview(provNote)
+        providerNoteLabel = createNoteLabel(text: "🍎 Apple Speech: Canlı akış ile konuşurken anında ekranda görünür. Sıfır kota, sıfır API anahtarı ve Apple Silicon Neural Engine ile %100 yerel ve çevrimdışı dikte.", y: 46)
+        container.addSubview(providerNoteLabel)
 
-        container.addSubview(createSeparator(y: 72))
+        container.addSubview(createSeparator(y: 78))
 
-        // 2. Google Gemini
-        let geminiSection = createSectionLabel(text: "Google Gemini", y: 86)
+        // 2. 🍎 Apple Speech (Yerel / On-Device Speech)
+        let appleSection = createSectionLabel(text: "Apple Speech", y: 92)
+        container.addSubview(appleSection)
+
+        appleStatusLabel = NSTextField(labelWithString: "🟢 Apple Speech Canlı Akış (0 Kota / Sıfır API Key / Çevrimdışı)")
+        appleStatusLabel.frame = NSRect(x: 175, y: 90, width: 440, height: 22)
+        appleStatusLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
+        appleStatusLabel.textColor = .systemGreen
+        container.addSubview(appleStatusLabel)
+
+        let appleNote = createNoteLabel(text: "Apple Silicon Neural Engine üzerinde canlı mikrofon akışıyla çalışır. Konuştuğunuz kelimeler anında canlı olarak ekranda görünür. API anahtarı, internet veya kota gerektirmez.", y: 116)
+        container.addSubview(appleNote)
+
+        container.addSubview(createSeparator(y: 148))
+
+        // 3. Google Gemini Live
+        let geminiSection = createSectionLabel(text: "Google Gemini", y: 162)
         container.addSubview(geminiSection)
 
         geminiKeyField = createSingleLineInputField(
-            frame: NSRect(x: 175, y: 84, width: 440, height: 24),
+            frame: NSRect(x: 175, y: 160, width: 440, height: 24),
             placeholder: "AIzaSy..."
         )
         geminiKeyField.delegate = self
         container.addSubview(geminiKeyField)
 
-        geminiModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 116, width: 440, height: 26), pullsDown: false)
+        geminiModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 192, width: 440, height: 26), pullsDown: false)
         for m in ConfigManager.availableGeminiModels {
             geminiModelPopUp.addItem(withTitle: m.name)
         }
@@ -518,14 +543,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         geminiModelPopUp.action = #selector(geminiModelChanged(_:))
         container.addSubview(geminiModelPopUp)
 
-        let testGeminiBtn = NSButton(frame: NSRect(x: 175, y: 150, width: 145, height: 28))
+        let testGeminiBtn = NSButton(frame: NSRect(x: 175, y: 226, width: 145, height: 28))
         testGeminiBtn.title = "Bağlantıyı Test Et"
         testGeminiBtn.bezelStyle = .rounded
         testGeminiBtn.target = self
         testGeminiBtn.action = #selector(testGeminiConnectionClicked)
         container.addSubview(testGeminiBtn)
 
-        let getGeminiKeyBtn = NSButton(frame: NSRect(x: 326, y: 150, width: 140, height: 28))
+        let getGeminiKeyBtn = NSButton(frame: NSRect(x: 326, y: 226, width: 140, height: 28))
         getGeminiKeyBtn.title = "API Anahtarı Al ↗"
         getGeminiKeyBtn.bezelStyle = .rounded
         getGeminiKeyBtn.target = self
@@ -533,29 +558,29 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(getGeminiKeyBtn)
 
         geminiStatusLabel = NSTextField(wrappingLabelWithString: "")
-        geminiStatusLabel.frame = NSRect(x: 175, y: 182, width: 440, height: 32)
+        geminiStatusLabel.frame = NSRect(x: 175, y: 258, width: 440, height: 32)
         geminiStatusLabel.font = NSFont.systemFont(ofSize: 11)
         geminiStatusLabel.textColor = .secondaryLabelColor
         geminiStatusLabel.maximumNumberOfLines = 2
         container.addSubview(geminiStatusLabel)
 
-        let geminiNote = createNoteLabel(text: "WebSocket canlı akışı sayesinde konuşurken kelimeler doğrudan canlı işlenir.", y: 218)
+        let geminiNote = createNoteLabel(text: "WebSocket canlı akışı sayesinde konuşurken kelimeler doğrudan canlı işlenir.", y: 294)
         container.addSubview(geminiNote)
 
-        container.addSubview(createSeparator(y: 242))
+        container.addSubview(createSeparator(y: 324))
 
-        // 3. Groq Whisper
-        let groqSection = createSectionLabel(text: "Groq Whisper", y: 256)
+        // 4. Groq Whisper
+        let groqSection = createSectionLabel(text: "Groq Whisper", y: 338)
         container.addSubview(groqSection)
 
         groqKeyField = createSingleLineInputField(
-            frame: NSRect(x: 175, y: 254, width: 440, height: 24),
+            frame: NSRect(x: 175, y: 336, width: 440, height: 24),
             placeholder: "gsk_..."
         )
         groqKeyField.delegate = self
         container.addSubview(groqKeyField)
 
-        groqModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 286, width: 440, height: 26), pullsDown: false)
+        groqModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 368, width: 440, height: 26), pullsDown: false)
         for m in ConfigManager.availableGroqModels {
             groqModelPopUp.addItem(withTitle: m.name)
         }
@@ -563,14 +588,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         groqModelPopUp.action = #selector(groqModelChanged(_:))
         container.addSubview(groqModelPopUp)
 
-        let testGroqBtn = NSButton(frame: NSRect(x: 175, y: 320, width: 145, height: 28))
+        let testGroqBtn = NSButton(frame: NSRect(x: 175, y: 402, width: 145, height: 28))
         testGroqBtn.title = "Bağlantıyı Test Et"
         testGroqBtn.bezelStyle = .rounded
         testGroqBtn.target = self
         testGroqBtn.action = #selector(testGroqConnectionClicked)
         container.addSubview(testGroqBtn)
 
-        let getGroqKeyBtn = NSButton(frame: NSRect(x: 326, y: 320, width: 140, height: 28))
+        let getGroqKeyBtn = NSButton(frame: NSRect(x: 326, y: 402, width: 140, height: 28))
         getGroqKeyBtn.title = "API Anahtarı Al ↗"
         getGroqKeyBtn.bezelStyle = .rounded
         getGroqKeyBtn.target = self
@@ -578,22 +603,22 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(getGroqKeyBtn)
 
         groqStatusLabel = NSTextField(wrappingLabelWithString: "")
-        groqStatusLabel.frame = NSRect(x: 175, y: 352, width: 440, height: 32)
+        groqStatusLabel.frame = NSRect(x: 175, y: 434, width: 440, height: 32)
         groqStatusLabel.font = NSFont.systemFont(ofSize: 11)
         groqStatusLabel.textColor = .secondaryLabelColor
         groqStatusLabel.maximumNumberOfLines = 2
         container.addSubview(groqStatusLabel)
 
-        let groqNote = createNoteLabel(text: "Whisper Large modelini Groq LPU bulut donanımında ~0.3 saniyede tamamlar.", y: 388)
+        let groqNote = createNoteLabel(text: "Whisper Large modelini Groq LPU bulut donanımında ~0.3 saniyede tamamlar.", y: 470)
         container.addSubview(groqNote)
 
-        container.addSubview(createSeparator(y: 410))
+        container.addSubview(createSeparator(y: 500))
 
-        // 4. Gemini Sistem İstemi (System Instruction / Cevap & Yazım Tarzı)
-        promptSectionLabel = createSectionLabel(text: "Sistem İstemi", y: 422)
+        // 5. Gemini Sistem İstemi (System Instruction / Cevap & Yazım Tarzı)
+        promptSectionLabel = createSectionLabel(text: "Sistem İstemi", y: 514)
         container.addSubview(promptSectionLabel)
 
-        geminiPromptPresetPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 420, width: 440, height: 26), pullsDown: false)
+        geminiPromptPresetPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 512, width: 440, height: 26), pullsDown: false)
         for preset in promptPresets {
             geminiPromptPresetPopUp.addItem(withTitle: preset.name)
         }
@@ -601,7 +626,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         geminiPromptPresetPopUp.action = #selector(promptPresetChanged(_:))
         container.addSubview(geminiPromptPresetPopUp)
 
-        geminiPromptScrollView = NSScrollView(frame: NSRect(x: 175, y: 450, width: 440, height: 54))
+        geminiPromptScrollView = NSScrollView(frame: NSRect(x: 175, y: 542, width: 440, height: 54))
         geminiPromptScrollView.hasVerticalScroller = true
         geminiPromptScrollView.hasHorizontalScroller = false
         geminiPromptScrollView.autohidesScrollers = true
@@ -622,21 +647,32 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         geminiPromptScrollView.documentView = geminiPromptTextView
         container.addSubview(geminiPromptScrollView)
 
-        promptNoteLabel = createNoteLabel(text: "Gemini bu sistem talimatına (systemInstruction) göre çıktıyı biçimlendirir ve üslubu belirler.", y: 508)
+        promptNoteLabel = createNoteLabel(text: "Gemini bu sistem talimatına (systemInstruction) göre çıktıyı biçimlendirir ve üslubu belirler.", y: 602)
         container.addSubview(promptNoteLabel)
 
         promptUnsupportedLabel = NSTextField(wrappingLabelWithString: "ℹ️ Seçili model saf ses deşifre (ASR) modelidir; konuşulanları doğrudan birebir metne döker. Sistem istemi, üslup ve anında çeviri özellikleri yalnızca Gemini Flash modellerinde (örn: Gemini 3.6 Flash) desteklenir.")
-        promptUnsupportedLabel.frame = NSRect(x: 175, y: 422, width: 440, height: 42)
+        promptUnsupportedLabel.frame = NSRect(x: 175, y: 514, width: 440, height: 42)
         promptUnsupportedLabel.font = NSFont.systemFont(ofSize: 11)
         promptUnsupportedLabel.textColor = .secondaryLabelColor
         promptUnsupportedLabel.isHidden = true
         container.addSubview(promptUnsupportedLabel)
 
-        return container
+        return scrollView
+    }
+
+    private func updateProviderNote(for provider: String) {
+        switch provider {
+        case "apple":
+            providerNoteLabel.stringValue = "🍎 Apple Speech: Canlı akış ile konuşurken anında ekranda görünür. Sıfır kota, sıfır API anahtarı ve Apple Silicon Neural Engine ile %100 yerel ve çevrimdışı dikte."
+        case "gemini":
+            providerNoteLabel.stringValue = "✨ Google Gemini Live: Canlı WebSocket akışıyla anında dikte ve akıllı bağlam."
+        default:
+            providerNoteLabel.stringValue = "⚡ Groq Whisper: Whisper Large modelini LPU bulut donanımında ~0.3 saniyede tamamlar."
+        }
     }
 
     private func updateSystemPromptVisibility() {
-        let isGemini = (providerSegmentedControl.selectedSegment == 0)
+        let isGemini = (providerSegmentedControl.selectedSegment == 1)
         let geminiIdx = max(0, geminiModelPopUp.indexOfSelectedItem)
         let modelId = (geminiIdx < ConfigManager.availableGeminiModels.count)
             ? ConfigManager.availableGeminiModels[geminiIdx].id
@@ -675,10 +711,21 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     @objc private func providerSegmentedChanged(_ sender: NSSegmentedControl) {
-        // sender index 0 -> Gemini, index 1 -> Groq
-        // providerPopUp index 0 -> Groq, index 1 -> Gemini
-        let popUpIndex = (sender.selectedSegment == 0) ? 1 : 0
-        providerPopUp.selectItem(at: popUpIndex)
+        let provider: String
+        let popUpIdx: Int
+        switch sender.selectedSegment {
+        case 0:
+            provider = "apple"
+            popUpIdx = 0
+        case 1:
+            provider = "gemini"
+            popUpIdx = 1
+        default:
+            provider = "groq"
+            popUpIdx = 2
+        }
+        providerPopUp.selectItem(at: popUpIdx)
+        updateProviderNote(for: provider)
         updateSystemPromptVisibility()
         autoSave()
     }
@@ -1064,13 +1111,18 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let cfg = ConfigManager.shared.config
 
         // Provider
-        if cfg.provider.lowercased() == "gemini" {
-            providerPopUp.selectItem(at: 1)
-            providerSegmentedControl.selectedSegment = 0
-        } else {
+        switch cfg.provider.lowercased() {
+        case "apple":
             providerPopUp.selectItem(at: 0)
+            providerSegmentedControl.selectedSegment = 0
+        case "gemini":
+            providerPopUp.selectItem(at: 1)
             providerSegmentedControl.selectedSegment = 1
+        default:
+            providerPopUp.selectItem(at: 2)
+            providerSegmentedControl.selectedSegment = 2
         }
+        updateProviderNote(for: cfg.provider.lowercased())
 
         // Groq
         groqKeyField.stringValue = cfg.groq_api_key
@@ -1342,7 +1394,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             self.testStatusLabel.textColor = .systemBlue
 
             var testConfig = ConfigManager.shared.config
-            let selectedProvider = self.providerPopUp.indexOfSelectedItem == 1 ? "gemini" : "groq"
+            let selectedProvider: String
+            switch self.providerSegmentedControl.selectedSegment {
+            case 0: selectedProvider = "apple"
+            case 1: selectedProvider = "gemini"
+            default: selectedProvider = "groq"
+            }
             testConfig.provider = selectedProvider
             testConfig.groq_api_key = self.groqKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             testConfig.gemini_api_key = self.geminiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1448,7 +1505,13 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     @objc public func autoSave(showMessage: Bool = true) {
-        let selectedProvider = providerPopUp.indexOfSelectedItem == 1 ? "gemini" : "groq"
+        let selectedProvider: String
+        switch providerSegmentedControl.selectedSegment {
+        case 0: selectedProvider = "apple"
+        case 1: selectedProvider = "gemini"
+        default: selectedProvider = "groq"
+        }
+
         let groqKey = groqKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let geminiKey = geminiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 

@@ -5,6 +5,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var statusMenuItem: NSMenuItem?
     private var toggleRecordMenuItem: NSMenuItem?
+    private var appleMenuItem: NSMenuItem!
     private var groqMenuItem: NSMenuItem!
     private var geminiMenuItem: NSMenuItem!
     private var holdModeMenuItem: NSMenuItem!
@@ -29,7 +30,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var isFinishingRecord: Bool = false
     private var activeTargetContext: TargetContext?
     private var postRollWorkItem: DispatchWorkItem?
-    private var currentLiveSession: LiveGeminiStreamSession?
+    private var currentLiveSession: (any LiveStreamSession)?
     private var lastRecordedAudioData: Data?
     private var revertStatusTimer: Timer?
     private var isExplicitQuit: Bool = false
@@ -174,11 +175,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 5. Sağlayıcı Submenu
         let providerMenu = NSMenu()
-        geminiMenuItem = NSMenuItem(title: "Google Gemini Live (Canlı Akış)", action: #selector(selectGeminiProvider), keyEquivalent: "")
+        appleMenuItem = NSMenuItem(title: "🍎 Apple Speech (0 Kota / API Keysiz)", action: #selector(selectAppleProvider), keyEquivalent: "")
+        appleMenuItem.target = self
+        providerMenu.addItem(appleMenuItem)
+
+        geminiMenuItem = NSMenuItem(title: "✨ Google Gemini Live (Canlı Akış)", action: #selector(selectGeminiProvider), keyEquivalent: "")
         geminiMenuItem.target = self
         providerMenu.addItem(geminiMenuItem)
 
-        groqMenuItem = NSMenuItem(title: "Groq Whisper (whisper-large-v3)", action: #selector(selectGroqProvider), keyEquivalent: "")
+        groqMenuItem = NSMenuItem(title: "⚡ Groq Whisper (whisper-large-v3)", action: #selector(selectGroqProvider), keyEquivalent: "")
         groqMenuItem.target = self
         providerMenu.addItem(groqMenuItem)
 
@@ -241,8 +246,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshMenuStates() {
         let cfg = ConfigManager.shared.config
-        groqMenuItem.state = (cfg.provider.lowercased() == "groq") ? .on : .off
+        appleMenuItem.state = (cfg.provider.lowercased() == "apple") ? .on : .off
         geminiMenuItem.state = (cfg.provider.lowercased() == "gemini") ? .on : .off
+        groqMenuItem.state = (cfg.provider.lowercased() == "groq") ? .on : .off
 
         holdModeMenuItem.state = (cfg.trigger_mode.lowercased() == "hold") ? .on : .off
         smartModeMenuItem.state = (cfg.trigger_mode.lowercased() == "smart") ? .on : .off
@@ -390,13 +396,29 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        let isApple = (config.provider.lowercased() == "apple")
         let geminiModel = config.gemini_model.lowercased()
         let isGeminiLive = (config.provider.lowercased() == "gemini") &&
                            (geminiModel.isEmpty || geminiModel.contains("gemini-3.5-transcribe-live")) &&
                            !config.gemini_api_key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         var started = false
-        if isGeminiLive {
+        if isApple {
+            print("[AppDelegate] Sağlayıcı: Apple Speech (Yerel Canlı Akış) başlatılıyor...")
+            let session = Transcriber.shared.startLiveAppleSpeechSession(
+                config: config,
+                onInterim: { interimText in
+                    RecordingHUD.shared.updateInterimText(interimText)
+                },
+                completion: { [weak self] result in
+                    self?.handleTranscriptionResult(result: result, config: config)
+                }
+            )
+            self.currentLiveSession = session
+            started = AudioRecorder.shared.start { [weak self] chunk in
+                self?.currentLiveSession?.sendAudioChunk(chunk)
+            }
+        } else if isGeminiLive {
             print("[AppDelegate] Sağlayıcı: Google Gemini Live (gemini-3.5-transcribe-live) canlı akış oturumu başlatılıyor...")
             let session = Transcriber.shared.startLiveGeminiSession(
                 config: config,
@@ -412,7 +434,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.currentLiveSession?.sendAudioChunk(chunk)
             }
         } else {
-            print("[AppDelegate] Sağlayıcı: \(config.provider) (\(config.provider == "gemini" ? config.gemini_model : config.groq_model)) ses kaydı başlatılıyor...")
+            let modelInfo: String = (config.provider.lowercased() == "gemini") ? config.gemini_model : config.groq_model
+            print("[AppDelegate] Sağlayıcı: \(config.provider) (\(modelInfo)) ses kaydı başlatılıyor...")
             self.currentLiveSession = nil
             started = AudioRecorder.shared.start()
         }
@@ -564,15 +587,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 let err = result.error ?? ""
                 let isQuota = err.contains("quota") || err.contains("exceeded") || err.contains("429")
                 if !isQuota, let fallbackAudio = self.lastRecordedAudioData {
-                    // WebSocket ağ/bağlantı kopması durumunda REST fallback ile kurtar
                     self.lastRecordedAudioData = nil
                     self.currentLiveSession = nil
-                    print("[GeminiLive] WebSocket bağlantısı kesildi, REST API ile kurtarılıyor...")
-                    self.setStatus(title: "⏳ Yeniden deneniyor...", menuText: "Durum: REST ile deneniyor...")
-                    Transcriber.shared.transcribeGemini(audioData: fallbackAudio, config: config) { [weak self] restResult in
-                        self?.handleTranscriptionResult(result: restResult, config: config)
+                    if config.provider.lowercased() == "apple" {
+                        print("[AppleSpeech] Canlı akış tamamlanamadı, yerel dosya motoru ile kurtarılıyor...")
+                        Transcriber.shared.transcribeAppleSpeech(audioData: fallbackAudio, config: config) { [weak self] appleResult in
+                            self?.handleTranscriptionResult(result: appleResult, config: config)
+                        }
+                        return
+                    } else if config.provider.lowercased() == "gemini" {
+                        print("[GeminiLive] WebSocket bağlantısı kesildi, REST API ile kurtarılıyor...")
+                        self.setStatus(title: "⏳ Yeniden deneniyor...", menuText: "Durum: REST ile deneniyor...")
+                        Transcriber.shared.transcribeGemini(audioData: fallbackAudio, config: config) { [weak self] restResult in
+                            self?.handleTranscriptionResult(result: restResult, config: config)
+                        }
+                        return
                     }
-                    return
                 }
 
                 self.isTranscribing = false
@@ -613,14 +643,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsWindowController.shared.showWindow(nil)
     }
 
+    @objc private func selectAppleProvider() {
+        ConfigManager.shared.update { $0.provider = "apple" }
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+    }
+
     @objc private func selectGroqProvider() {
         ConfigManager.shared.update { $0.provider = "groq" }
         refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
     }
 
     @objc private func selectGeminiProvider() {
         ConfigManager.shared.update { $0.provider = "gemini" }
         refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
     }
 
     @objc private func selectHoldMode() {

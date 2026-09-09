@@ -45,6 +45,16 @@ public final class TextPolisher {
         try! NSRegularExpression(pattern: #"(?i)\s*(son olarak|ayrıca|bunun yanında|bununla birlikte|ek olarak)[:\s]*"#)
     ]
 
+    private static let questionParticlesRegex = try! NSRegularExpression(
+        pattern: #"(?i)\b(mı|mi|mu|mü|mısın|misin|musun|müsün|mıyız|miyiz|kaçta|nasıl|nedir|nerede|nereden|kim|kimin|hangisi|ne zaman|niçin|neden|acaba)\b"#
+    )
+    private static let codeCommandPatterns: [NSRegularExpression] = [
+        try! NSRegularExpression(pattern: #"(?i)\b(npm\s+(?:run\s+\w+|install|test|build|start|dev))\b"#),
+        try! NSRegularExpression(pattern: #"(?i)\b(git\s+(?:commit|push|pull|checkout|status|diff|stash|rebase|merge))\b"#),
+        try! NSRegularExpression(pattern: #"(?i)\b(docker(?:-compose)?\s+(?:up|down|build|run|ps|exec))\b"#),
+        try! NSRegularExpression(pattern: #"(?i)\b(cargo\s+(?:build|run|test|check))\b"#)
+    ]
+
     private init() {}
 
     /// Metni aktif ayarlara ve dikte moduna göre temizler ve biçimlendirir
@@ -52,9 +62,10 @@ public final class TextPolisher {
         var processed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !processed.isEmpty else { return "" }
 
-        // 1. Dolgu Kelimeleri Temizleme (Filler Word Removal)
+        // 1. Dolgu Kelimeleri ve Kekeleme Temizleme (Filler & Stutter Removal)
         if config.remove_filler_words {
             processed = removeFillerWords(from: processed)
+            processed = removeStutterRepetitions(from: processed)
         }
 
         // 2. Özel Sözlük & Terim Eşleme (Custom Vocabulary)
@@ -62,13 +73,48 @@ public final class TextPolisher {
             processed = applyCustomVocabulary(text: processed, vocabularyString: config.custom_vocabulary)
         }
 
-        // 3. Temel boşluk ve noktalama temizliği (Kullanıcının sözlerine ve cümle yapısına doğrudan dokunmaz)
+        // 3. Kod ve CLI Komutları Algılama
+        for regex in Self.codeCommandPatterns {
+            processed = replaceRegex(regex, in: processed, with: "`$1`")
+        }
+
+        // 4. Temel boşluk ve noktalama temizliği
         processed = cleanWhitespaceAndPunctuation(text: processed)
+
+        // 5. Akıllı Soru Tespiti (Cümle soru ise ve sonunda noktalama yoksa ? ekle)
+        let range = NSRange(location: 0, length: (processed as NSString).length)
+        if Self.questionParticlesRegex.firstMatch(in: processed, options: [], range: range) != nil {
+            if let last = processed.last, !".?!".contains(last) {
+                processed.append("?")
+            }
+        }
 
         return processed.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: - Dolgu Kelimeleri Temizleme
+    // MARK: - Dolgu Kelimeleri ve Kekeleme Temizleme
+
+    public func removeStutterRepetitions(from input: String) -> String {
+        let tokens = input.components(separatedBy: " ")
+        guard tokens.count > 1 else { return input }
+        var cleaned: [String] = []
+        var prevNormalized = ""
+        for token in tokens {
+            let normalized = token.trimmingCharacters(in: CharacterSet(charactersIn: ".,!?:;\"'()[]{}")).lowercased(with: Locale(identifier: "tr_TR"))
+            if !normalized.isEmpty && normalized == prevNormalized && normalized.count > 1 {
+                continue // Mükerrer kekeleme kelimesini atla
+            }
+            cleaned.append(token)
+            if !normalized.isEmpty {
+                prevNormalized = normalized
+            }
+        }
+        return cleaned.joined(separator: " ")
+    }
+
+    private static let standaloneFillersRegex = try! NSRegularExpression(
+        pattern: #"(?i)\b([şŞsS]ey|[şŞsS]eyler|yani|well|like|you know|falan|filan|hani)\b"#
+    )
 
     public func removeFillerWords(from input: String) -> String {
         var result = input
@@ -82,10 +128,13 @@ public final class TextPolisher {
         // 3. Virgül veya duraksama ile çevrelenmiş ara dolgu kelimeleri (örn: ", şey,", ", yani,")
         result = replaceRegex(Self.midFillersRegex, in: result, with: ", ")
 
-        // 4. Noktalama ve boşluk temizliği
+        // 4. Metin içinde bağımsız duran dolgu kelimeleri
+        result = replaceRegex(Self.standaloneFillersRegex, in: result, with: "")
+
+        // 5. Noktalama ve boşluk temizliği
         result = cleanWhitespaceAndPunctuation(text: result)
 
-        // 5. İlk harfi büyük yap (özellikle cümle başındaki dolgu temizlendiyse)
+        // 6. İlk harfi büyük yap (özellikle cümle başındaki dolgu temizlendiyse)
         result = capitalizeFirstLetter(result)
 
         return result

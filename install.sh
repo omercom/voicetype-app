@@ -103,6 +103,10 @@ if os.path.exists(project_env):
         pass
 
 if data:
+    data.pop("openai_api_key", None)
+    data.pop("openai_model", None)
+    if data.get("provider") == "openai":
+        data["provider"] = "apple"
     with open(user_cfg, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     with open(legacy_cfg, "w", encoding="utf-8") as f:
