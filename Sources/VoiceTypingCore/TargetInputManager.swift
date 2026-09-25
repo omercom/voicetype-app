@@ -11,6 +11,9 @@ public struct TargetContext: Equatable {
     public let element: AXUIElement
     public let window: AXUIElement?
     public let role: String
+    /// Tarayıcı/Electron web alanının adresi (şema+host+yol). Kayıt sırasında
+    /// sekme veya sohbet kanalı değişirse yapıştırmadan önce bununla fark edilir.
+    public let pageURL: String?
 
     public init(
         pid: pid_t,
@@ -19,7 +22,8 @@ public struct TargetContext: Equatable {
         runningApp: NSRunningApplication?,
         element: AXUIElement,
         window: AXUIElement?,
-        role: String
+        role: String,
+        pageURL: String? = nil
     ) {
         self.pid = pid
         self.bundleIdentifier = bundleIdentifier
@@ -28,6 +32,7 @@ public struct TargetContext: Equatable {
         self.element = element
         self.window = window
         self.role = role
+        self.pageURL = pageURL
     }
 
     public static func == (lhs: TargetContext, rhs: TargetContext) -> Bool {
@@ -283,8 +288,70 @@ public class TargetInputManager {
             runningApp: frontApp,
             element: candidateElement ?? targetWindow ?? appRef,
             window: targetWindow,
-            role: detectedRole
+            role: detectedRole,
+            pageURL: candidateElement.flatMap { pageURL(near: $0) }
         )
+    }
+
+    // MARK: - Hedef doğrulama (yapıştırmadan önce)
+
+    public enum TargetCheck: Equatable {
+        case same
+        case changed(reason: String)
+    }
+
+    /// Sistem genelinde klavye odağındaki öğe (canlı AX sorgusu).
+    public func focusedElement() -> AXUIElement? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &ref) == .success else {
+            return nil
+        }
+        return axElement(from: ref)
+    }
+
+    /// Öğenin içinde bulunduğu web alanının adresi. Sorgu parametreleri ve `#`
+    /// parçası atılır: yazarken değişebilirler ve yanlış alarm üretirler; farklı
+    /// sekme/kanal ise neredeyse her zaman farklı host veya yol demektir.
+    public func pageURL(near element: AXUIElement, maxDepth: Int = 20) -> String? {
+        var current: AXUIElement? = element
+        for _ in 0..<maxDepth {
+            guard let node = current else { break }
+            var roleRef: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(node, kAXRoleAttribute as CFString, &roleRef)
+            if (roleRef as? String) == "AXWebArea" {
+                var urlRef: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(node, kAXURLAttribute as CFString, &urlRef) == .success else { return nil }
+                let raw = (urlRef as? URL)?.absoluteString ?? (urlRef as? String)
+                return raw.flatMap(Self.normalizedPageURL)
+            }
+            var parentRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(node, kAXParentAttribute as CFString, &parentRef) == .success,
+                  let parent = axElement(from: parentRef), !CFEqual(parent, node) else { break }
+            current = parent
+        }
+        return nil
+    }
+
+    static func normalizedPageURL(_ raw: String) -> String? {
+        guard let components = URLComponents(string: raw), let host = components.host else { return nil }
+        let path = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        return "\(components.scheme ?? "")://\(host)\(path)"
+    }
+
+    /// Kaydın başladığı hedef hâlâ odakta mı? Kesin bir değişiklik kanıtı
+    /// yoksa `.same` döner; böylece AX bilgisi vermeyen uygulamalarda eski
+    /// davranış korunur ve yanlış alarm üretilmez.
+    public func verify(_ target: TargetContext) -> TargetCheck {
+        guard let focused = focusedElement() else { return .same }
+        var pid: pid_t = 0
+        if AXUIElementGetPid(focused, &pid) == .success, pid != target.pid {
+            return .changed(reason: "Başka uygulama odakta")
+        }
+        if CFEqual(focused, target.element) { return .same }
+        if let expected = target.pageURL, let current = pageURL(near: focused), current != expected {
+            return .changed(reason: "Sekme değişti")
+        }
+        return .same
     }
 
     /// Arka planda kalmış veya odağı kaybolmuş hedef uygulamayı ve pencereyi öne getirir,
