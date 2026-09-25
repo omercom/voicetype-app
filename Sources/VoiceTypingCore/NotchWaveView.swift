@@ -20,11 +20,12 @@ final class NotchWaveView: NSView {
     private let glow = CAGradientLayer()
     private var glowOpacity: CGFloat = 0
 
-    /// Siri benzeri, koyu zeminde okunaklı palet: turkuaz → mor → pembe.
+    /// Çentiğin siyahıyla bütünleşen tek renkli palet: uçlarda gümüş, ortada
+    /// beyaz. Renkli (pembe/mor) tonlar siyah adada yabancı duruyordu.
     static let palette: [NSColor] = [
-        NSColor(calibratedRed: 0.35, green: 0.85, blue: 1.00, alpha: 1),
-        NSColor(calibratedRed: 0.66, green: 0.45, blue: 1.00, alpha: 1),
-        NSColor(calibratedRed: 1.00, green: 0.38, blue: 0.62, alpha: 1),
+        NSColor(calibratedWhite: 0.62, alpha: 1),
+        NSColor(calibratedWhite: 1.00, alpha: 1),
+        NSColor(calibratedWhite: 0.62, alpha: 1),
     ]
     private var phase: CGFloat = 0
     private var lastTick: TimeInterval?
@@ -39,8 +40,8 @@ final class NotchWaveView: NSView {
         glow.startPoint = CGPoint(x: 0.5, y: 0.5)
         glow.endPoint = CGPoint(x: 1, y: 1)
         glow.colors = [
-            Self.palette[1].withAlphaComponent(0.75).cgColor,
-            Self.palette[2].withAlphaComponent(0.22).cgColor,
+            NSColor(calibratedWhite: 1, alpha: 0.16).cgColor,
+            NSColor(calibratedWhite: 1, alpha: 0.05).cgColor,
             NSColor.clear.cgColor,
         ]
         glow.locations = [0, 0.45, 1]
@@ -64,7 +65,7 @@ final class NotchWaveView: NSView {
         primaryColor.colors = Self.palette.map(\.cgColor)
         primaryColor.frame = CGRect(origin: .zero, size: Self.size)
         primaryColor.mask = primary
-        primaryColor.shadowColor = Self.palette[1].cgColor
+        primaryColor.shadowColor = NSColor.white.cgColor
         primaryColor.shadowOpacity = 0.6
         primaryColor.shadowRadius = 3
         primaryColor.shadowOffset = .zero
