@@ -5,11 +5,16 @@ public final class TextPolisher {
 
     // MARK: - Önceden Derlenmiş Statik Regexler (Sıfır Çalışma Zamanı Derleme Gecikmesi)
 
+    // Tek harfli "I" (İngilizce zamir), "him", "er" ("er geç") ve "ohm" gibi
+    // gerçek kelimeleri silmemek için belirsiz sesler büyük/küçük harf duyarlı
+    // ve Türkçeye özgü harflerle sınırlandırılır.
     private static let hesitationRegex = try! NSRegularExpression(
-        pattern: #"(?i)\b([ıIİi]{1,}|e{2,}|h[ıiİI]m{1,}|[öÖoO]hm+|m{3,}|uh+|um+|er+|ah+|hmm+)\b"#
+        pattern: #"\b((?-i:ı+|i{2,})|(?i:e{2,}|h[ıİ]m+|öhm+|m{3,}|uh+|um+|err+|ah+|hmm+))\b"#
     )
+    // İngilizce dolgular yalnızca arkasından noktalama gelirse atılır:
+    // "Like this one" veya "Well done" cümlenin kendisidir.
     private static let startFillersRegex = try! NSRegularExpression(
-        pattern: #"(?i)^\s*([şŞsS]ey|yani|well|like|you know)\s*[,:\-]?\s*"#
+        pattern: #"(?i)^\s*(?:(?:[şŞsS]ey|yani)\b\s*[,:\-]?|(?:well|like|you know)\s*[,:\-])\s*"#
     )
     private static let midFillersRegex = try! NSRegularExpression(
         pattern: #"(?i)(,\s*)([şŞsS]ey|yani|you know)(\s*,|\s+)"#
@@ -46,7 +51,22 @@ public final class TextPolisher {
     ]
 
     private static let questionParticlesRegex = try! NSRegularExpression(
-        pattern: #"(?i)\b(mı|mi|mu|mü|mısın|misin|musun|müsün|mıyız|miyiz|kaçta|nasıl|nedir|nerede|nereden|kim|kimin|hangisi|ne zaman|niçin|neden|acaba)\b"#
+        pattern: #"(?i)\b(m[ıiuü](?:y[ıiuü]m|s[ıiuü]n|y[ıiuü]z|s[ıiuü]n[ıiuü]z|d[ıiuü]r|yd[ıiuü]|ym[ıiuü][sş])?|acaba)\b"#
+    )
+    private static let questionWordsRegex = try! NSRegularExpression(
+        pattern: #"(?i)\b(kaçta|kaç|nasıl|nedir|nerede|nereden|nereye|kim|kimin|kime|hangisi|hangi|ne zaman|niçin|neden|niye)\b"#
+    )
+    /// "Neden geldiğini biliyorum", "Nasıl yapılacağını anlattım" gibi yan
+    /// cümleler soru kelimesi içerir ama soru değildir; sıfat-fiil ekleri bunu ayırt eder.
+    private static let embeddedClauseRegex = try! NSRegularExpression(
+        pattern: #"(?i)\b\w+(?:[dt][ıiuü]ğ|[ae]c[ae]ğ)\w*\b"#
+    )
+    /// "gideceğim", "yapacağız" çekimli gelecek zamandır, yan cümle değildir.
+    private static let finiteFutureRegex = try! NSRegularExpression(
+        pattern: #"(?i)^\w+[ae]c[ae]ğ[ıi][mz]$"#
+    )
+    private static let lastSentenceRegex = try! NSRegularExpression(
+        pattern: #"[^.!?\n]*$"#
     )
     private static let codeCommandPatterns: [NSRegularExpression] = [
         try! NSRegularExpression(pattern: #"(?i)\b(npm\s+(?:run\s+\w+|install|test|build|start|dev))\b"#),
@@ -104,12 +124,9 @@ public final class TextPolisher {
         // 5. Temel boşluk ve noktalama temizliği
         processed = cleanWhitespaceAndPunctuation(text: processed)
 
-        // 6. Akıllı Soru Tespiti (Cümle soru ise ve sonunda noktalama yoksa ? ekle)
-        let range = NSRange(location: 0, length: (processed as NSString).length)
-        if Self.questionParticlesRegex.firstMatch(in: processed, options: [], range: range) != nil {
-            if let last = processed.last, !".?!".contains(last) {
-                processed.append("?")
-            }
+        // 6. Akıllı Soru Tespiti (Son cümle soru ise ve sonunda noktalama yoksa ? ekle)
+        if let last = processed.last, !".?!".contains(last), Self.isQuestion(Self.lastSentence(of: processed)) {
+            processed.append("?")
         }
 
         // 7. Dikte Modu Katmanı (Dictation Mode: Direct / Formal / Bullet)
@@ -128,6 +145,31 @@ public final class TextPolisher {
         }
 
         return processed.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func lastSentence(of text: String) -> String {
+        let range = NSRange(location: 0, length: (text as NSString).length)
+        guard let match = lastSentenceRegex.firstMatch(in: text, options: [], range: range) else { return text }
+        return (text as NSString).substring(with: match.range)
+    }
+
+    /// Soru eki (mı/mi/mu/mü ve çekimleri) her zaman soru sayılır. Soru kelimesi
+    /// ise ancak cümle bir yan cümle ("...geldiğini biliyorum") değilse soru sayılır.
+    static func isQuestion(_ sentence: String) -> Bool {
+        let range = NSRange(location: 0, length: (sentence as NSString).length)
+        if questionParticlesRegex.firstMatch(in: sentence, options: [], range: range) != nil {
+            return true
+        }
+        guard questionWordsRegex.firstMatch(in: sentence, options: [], range: range) != nil else {
+            return false
+        }
+        let ns = sentence as NSString
+        let hasEmbeddedClause = embeddedClauseRegex.matches(in: sentence, options: [], range: range).contains { match in
+            let word = ns.substring(with: match.range)
+            let wordRange = NSRange(location: 0, length: (word as NSString).length)
+            return finiteFutureRegex.firstMatch(in: word, options: [], range: wordRange) == nil
+        }
+        return !hasEmbeddedClause
     }
 
     /// Geriye dönük uyumluluk için targetContext almayan overload
@@ -203,6 +245,23 @@ public final class TextPolisher {
 
     // MARK: - Dolgu Kelimeleri ve Kekeleme Temizleme
 
+    /// Türkçede ikilemeler dilbilgisel ve anlamlıdır ("tek tek", "yavaş yavaş",
+    /// "koşa koşa"); kekeleme sanılıp teke indirilirse cümlenin anlamı değişir.
+    private static let reduplicationWords: Set<String> = [
+        "çok", "yavaş", "tek", "ayrı", "sık", "zaman", "ara", "kat", "bol", "uzun",
+        "kısa", "güzel", "iyi", "azar", "damla", "yer", "sıra", "adım", "parça",
+        "bir", "başka", "derin", "büyük", "küçük", "yeni", "eski", "sabah", "akşam",
+        "gün", "hafta", "ay", "yıl", "kapı", "ev", "köşe", "baştan", "tam", "hızlı",
+        "very", "so", "no", "bye", "really", "again", "more", "that", "had", "is"
+    ]
+
+    private static func isReduplication(_ normalized: String) -> Bool {
+        if reduplicationWords.contains(normalized) { return true }
+        // Zarf-fiil ikilemeleri: "koşa koşa", "güle güle", "bile bile", "düşüne düşüne"
+        if normalized.count >= 4, let last = normalized.last, last == "a" || last == "e" { return true }
+        return false
+    }
+
     public func removeStutterRepetitions(from input: String) -> String {
         let tokens = input.components(separatedBy: " ")
         guard tokens.count > 1 else { return input }
@@ -212,7 +271,7 @@ public final class TextPolisher {
             let normalized = token.trimmingCharacters(in: CharacterSet(charactersIn: ".,!?:;\"'()[]{}")).lowercased(with: Locale(identifier: "tr_TR"))
             if !normalized.isEmpty && normalized == prevNormalized && normalized.count > 1 {
                 // Türkçe CLI diktesinde "tire tire" (--) meşru bayrak belirtecidir; kekeleme değildir
-                if normalized == "tire" {
+                if normalized == "tire" || Self.isReduplication(normalized) {
                     cleaned.append(token)
                     prevNormalized = ""
                     continue
@@ -227,8 +286,11 @@ public final class TextPolisher {
         return cleaned.joined(separator: " ")
     }
 
+    // Yalnızca anlam taşımayan dolgular. "şey" belirleyiciden sonra bir isimdir
+    // ("bir şey", "her şey", "bu şey") ve korunur; "hani", "like", "well",
+    // "you know" ve "şeyler" gerçek cümlelerde anlam taşıdığı için listede yoktur.
     private static let standaloneFillersRegex = try! NSRegularExpression(
-        pattern: #"(?i)\b([şŞsS]ey|[şŞsS]eyler|yani|well|like|you know|falan|filan|hani)\b"#
+        pattern: #"(?i)(?<!\b(?:bir|her|hiçbir|herhangi bir|o|bu|şu|başka|aynı|birkaç|ne|bazı|öyle|böyle|şöyle|tek|son|ilk|iyi|kötü|güzel|önemli|garip|tuhaf)\s)\b([şŞsS]ey|yani)\b(?!['’])"#
     )
 
     public func removeFillerWords(from input: String) -> String {

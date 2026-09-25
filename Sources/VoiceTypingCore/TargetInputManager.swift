@@ -289,40 +289,55 @@ public class TargetInputManager {
 
     /// Arka planda kalmış veya odağı kaybolmuş hedef uygulamayı ve pencereyi öne getirir,
     /// odağı ilk konuşulan yazı alanına kilitler.
+    /// Klavye odağına sahip uygulamanın PID'i, doğrudan AX üzerinden canlı sorgulanır.
+    /// `NSWorkspace.frontmostApplication` ana run loop'ta bildirimle güncellenir; ana
+    /// thread bir bekleme döngüsünde bloke iken hiç değişmez ve döngü hep zaman aşımına düşer.
+    private func focusedApplicationPID() -> pid_t? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var appRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &appRef) == .success,
+              let app = axElement(from: appRef) else {
+            return nil
+        }
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(app, &pid) == .success else { return nil }
+        return pid
+    }
+
+    private func waitUntilFocused(pid: pid_t, timeout: CFAbsoluteTime) -> Bool {
+        let deadline = CFAbsoluteTimeGetCurrent() + timeout
+        while focusedApplicationPID() != pid {
+            if CFAbsoluteTimeGetCurrent() > deadline { return false }
+            usleep(10_000)
+        }
+        return true
+    }
+
     @discardableResult
     public func restoreTargetFocus(to target: TargetContext) -> Bool {
-        // 1. AppleScript ile System Events üzerinden hedef işlemi öne çekmeyi dene.
-        // macOS'un izinleri veya hedef uygulamanın davranışı nedeniyle bu adım başarısız olabilir; Cocoa ve AX yolları aşağıda yedeklenir.
-        let script = "tell application \"System Events\" to set frontmost of (first process whose unix id is \(target.pid)) to true"
-        var scriptError: NSDictionary?
-        NSAppleScript(source: script)?.executeAndReturnError(&scriptError)
-
-        // 2. Cocoa seviyesinde de aktive et
-        if let app = target.runningApp {
-            app.activate(options: [.activateAllWindows])
-        } else if let app = NSRunningApplication(processIdentifier: target.pid) {
-            app.activate(options: [.activateAllWindows])
-        }
-
-        // 3. Hedef pencereyi öne kaldır (kAXRaiseAction)
+        // 1. Cocoa seviyesinde aktive et ve hedef pencereyi öne kaldır.
+        let app = target.runningApp ?? NSRunningApplication(processIdentifier: target.pid)
+        app?.activate(options: [.activateAllWindows])
         if let window = target.window {
             AXUIElementPerformAction(window, kAXRaiseAction as CFString)
         }
 
-        // 4. Doğrulama Döngüsü: macOS WindowServer hedef uygulamayı en öne alana kadar bekle (maksimum 400ms)
-        let deadline = CFAbsoluteTimeGetCurrent() + 0.40
-        while NSWorkspace.shared.frontmostApplication?.processIdentifier != target.pid {
-            if CFAbsoluteTimeGetCurrent() > deadline { break }
-            usleep(15_000) // 15ms
+        // 2. Odağın gerçekten geçtiğini canlı AX sorgusuyla doğrula. Cocoa yolu
+        // yetmezse (bazı Electron/Java uygulamaları) System Events yedeğine geç;
+        // AppleScript yavaştır ve Otomasyon izni ister, bu yüzden yalnızca yedektir.
+        var focused = waitUntilFocused(pid: target.pid, timeout: 0.25)
+        if !focused {
+            let script = "tell application \"System Events\" to set frontmost of (first process whose unix id is \(target.pid)) to true"
+            var scriptError: NSDictionary?
+            NSAppleScript(source: script)?.executeAndReturnError(&scriptError)
+            focused = waitUntilFocused(pid: target.pid, timeout: 0.25)
         }
 
-        // 5. Hedef pencerenin ve imlecin oturması için mikro bekleme (35ms)
-        usleep(35_000)
-
-        // 6. Hedef UI öğesine odak ver
+        // 3. Hedef UI öğesine odak ver ve pencerenin/imlecin oturması için kısa bekle.
         let appRef = AXUIElementCreateApplication(target.pid)
         AXUIElementSetAttributeValue(appRef, kAXFocusedUIElementAttribute as CFString, target.element)
+        usleep(40_000)
 
-        return true
+        return focused
     }
 }

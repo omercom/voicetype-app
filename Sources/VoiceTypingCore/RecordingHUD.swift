@@ -464,6 +464,7 @@ public class RecordingHUD: NSObject {
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
+        spinner.appearance = NSAppearance(named: .darkAqua)
         contentView.addSubview(spinner)
 
         // 5a. Başarı Onay İşareti (✓)
@@ -608,6 +609,7 @@ public class RecordingHUD: NSObject {
         self.visualEffectView.isHidden = false
         self.darkTintView.isHidden = false
         self.panel.backgroundColor = .clear
+        self.panel.hasShadow = true
         // Kapsül modunda çentiğe özel ekolayzır ve ada formu gizlenir.
         self.notchMeterContainer.isHidden = true
         self.notchShapeView.isHidden = true
@@ -678,130 +680,198 @@ public class RecordingHUD: NSObject {
         }
     }
 
-    /// Çentik modunda kapsülü ekranın tepesine yapıştırır.
-    ///
-    /// Tasarım (kullanıcı geri bildirimi): ada genişliği **SABİTTİR** —
-    /// metin uzasa da ada genişlemez. Bunun yerine metin alt satırlara sarar
-    /// ve gerekirse yazı okunabilirlik tabanına kadar küçülür. Ada yalnızca
-    /// DİKEYDE büyür (satır sayısı arttıkça).
+    // MARK: - Çentik (Dynamic Island) düzeni
+    //
+    // ┌──── kamera ────┐        Ada, kameradan biraz geniş kompakt bir formdur;
+    // │ [▮▮▮] metin…   │        boş kanat bırakılmaz. Alt satırda simge yuvası
+    // └────────────────┘        (ekolayzır / spinner / ✓ / ! ) ve tek satır metin
+    //                           yan yana durur. Boyut tüm durumlarda sabittir:
+    //                           metin geldikçe ada zıplamaz, yalnızca açılırken
+    //                           çentikten büyür ve kapanırken çentiğe geri çekilir.
+
+    private enum NotchMetrics {
+        static let sideInset: CGFloat = 16
+        static let rowHeight: CGFloat = 24
+        static let bottomInset: CGFloat = 10
+        static let iconSlot: CGFloat = 20
+        static let iconTextGap: CGFloat = 8
+        static let fontSize: CGFloat = 14
+        static let minimumWidth: CGFloat = 300
+        static let maximumWidth: CGFloat = 360
+        static let wingAllowance: CGFloat = 100
+        static let openDuration: TimeInterval = 0.32
+        static let closeDuration: TimeInterval = 0.22
+    }
+
+    private var isNotchClosing = false
+
+    private func notchIslandFrame(anchor: NotchAnchor) -> CGRect {
+        let width = min(
+            anchor.screenWidth - 32,
+            min(NotchMetrics.maximumWidth, max(NotchMetrics.minimumWidth, anchor.cameraWidth + NotchMetrics.wingAllowance))
+        )
+        let height = anchor.headerHeight + NotchMetrics.rowHeight + NotchMetrics.bottomInset
+        return CGRect(
+            x: round(anchor.centerX - width / 2),
+            y: anchor.top - height,
+            width: width,
+            height: height
+        )
+    }
+
+    /// Adanın kapalı hali: tam kamera çentiği kadar siyah alan. Siyah çentikle
+    /// birleştiği için açılış/kapanış kesintisiz görünür.
+    private func notchCollapsedFrame(anchor: NotchAnchor, island: CGRect) -> CGRect {
+        let width = anchor.cameraWidth > 0 ? anchor.cameraWidth : island.width * 0.5
+        return CGRect(
+            x: round(anchor.centerX - width / 2),
+            y: anchor.top - anchor.headerHeight,
+            width: width,
+            height: anchor.headerHeight
+        )
+    }
+
     private func updateNotchPosition(screen: NSScreen, animated: Bool) {
         let anchor = Self.anchor(for: screen)
-        let rawText = statusLabel.stringValue
-        let text = rawText.isEmpty ? "Dinliyor..." : rawText
+        let island = notchIslandFrame(anchor: anchor)
 
-        func measure(_ s: String, _ size: CGFloat) -> CGFloat {
-            ceil((s as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size, weight: .medium)]).width)
+        // Form `notchShapeView` tarafından çizilir. Pencere gölgesi kapalı:
+        // saydam pencerede gölge siyah formun çevresine gri bir kontur çizer
+        // ve pencere her boyutlandığında yeniden hesaplanıp titriyordu.
+        visualEffectView.isHidden = true
+        darkTintView.isHidden = true
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = false
+        notchShapeView.isHidden = false
+        notchShapeView.fillColor = NSColor(calibratedWhite: 0.0, alpha: 1.0)
+        panel.contentView?.wantsLayer = true
+        panel.contentView?.layer?.cornerRadius = 0
+        panel.contentView?.layer?.masksToBounds = false
+
+        // Görünürken yeni bir durum gelirse (ör. kapanış sırasında yeni kayıt)
+        // süren açılış/kapanışı iptal edip adayı doğrudan tam boyuta getir.
+        let isOpening = frameTransition.isActive && !isNotchClosing
+        if !isOpening {
+            frameTransition.cancel()
+            isNotchClosing = false
+            if panel.frame != island {
+                panel.setFrame(island, display: true)
+            }
         }
-        func lineHeightFor(_ size: CGFloat) -> CGFloat {
-            let f = NSFont.systemFont(ofSize: size, weight: .medium)
-            return ceil(f.ascender - f.descender + f.leading)
+        layoutNotchContent(island: island.size)
+        if !isOpening {
+            setNotchContentAlpha(1)
+        }
+    }
+
+    private func layoutNotchContent(island: CGSize) {
+        let slotY = NotchMetrics.bottomInset + (NotchMetrics.rowHeight - NotchMetrics.iconSlot) / 2
+        let slot = NSRect(x: NotchMetrics.sideInset, y: slotY, width: NotchMetrics.iconSlot, height: NotchMetrics.iconSlot)
+
+        // Pill moduna ait öğeler çentikte hiç görünmez.
+        pulsingDot.isHidden = true
+        microphoneFeedbackBadge.isHidden = true
+        waveformContainer.isHidden = true
+
+        notchMeterContainer.setFrameOrigin(slot.origin)
+        spinner.frame = slot.insetBy(dx: 2, dy: 2)
+        for icon in [checkmarkLabel, errorIconLabel, noticeIconLabel] {
+            icon?.frame = NSRect(x: slot.minX, y: slot.minY + 1, width: slot.width, height: 18)
         }
 
-        // ADA GENİŞLİĞİ SABİT: metinden bağımsız, sadece ekran + çentik.
-        let targetWidth = NotchTypography.panelWidth(
-            cameraWidth: anchor.cameraWidth,
-            screenWidth: anchor.screenWidth
+        let isRecording = currentState == .recording
+        let isBusy = currentState == .transcribing || currentState == .preparing
+        notchMeterContainer.isHidden = !isRecording
+        spinner.isHidden = !isBusy
+        if isBusy { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+        if case .success = currentState { checkmarkLabel.isHidden = false } else { checkmarkLabel.isHidden = true }
+        if case .error = currentState { errorIconLabel.isHidden = false } else { errorIconLabel.isHidden = true }
+        if case .notice = currentState { noticeIconLabel.isHidden = false } else { noticeIconLabel.isHidden = true }
+
+        let font = NSFont.systemFont(ofSize: NotchMetrics.fontSize, weight: .medium)
+        let textHeight = ceil(font.ascender - font.descender + font.leading)
+        let textX = slot.maxX + NotchMetrics.iconTextGap
+        statusLabel.maximumNumberOfLines = 1
+        statusLabel.cell?.wraps = false
+        statusLabel.cell?.isScrollable = false
+        statusLabel.usesSingleLineMode = true
+        statusLabel.lineBreakMode = .byTruncatingHead
+        statusLabel.font = font
+        statusLabel.alignment = .left
+        statusLabel.textColor = NSColor(calibratedWhite: 0.96, alpha: 1.0)
+        statusLabel.frame = NSRect(
+            x: textX,
+            y: NotchMetrics.bottomInset + (NotchMetrics.rowHeight - textHeight) / 2,
+            width: max(0, island.width - textX - NotchMetrics.sideInset),
+            height: textHeight
         )
+    }
 
-        // Yazı: metin satırlara sığana kadar küçült, okunabilirlik tabanında dur.
-        let availableTextWidth = max(10.0, targetWidth - 2 * NotchTypography.horizontalPadding)
-        let fittedSize = NotchTypography.fittedFontSize(
-            text: text,
-            availableWidth: availableTextWidth,
-            baseFontSize: NotchTypography.baseFontSize,
-            measure: measure
-        )
-        let font = NSFont.systemFont(ofSize: fittedSize, weight: .medium)
+    private func setNotchContentAlpha(_ alpha: CGFloat) {
+        for view in [statusLabel, notchMeterContainer, spinner, checkmarkLabel, errorIconLabel, noticeIconLabel] as [NSView?] {
+            view?.alphaValue = alpha
+        }
+    }
 
-        // Kaç satır gerektiği: ada yüksekliği buna göre artar.
-        let lines = max(1, NotchTypography.lineCount(
-            text: text,
-            availableWidth: availableTextWidth,
-            fontSize: fittedSize,
-            measure: measure
-        ))
-        let textHeight = NotchTypography.contentHeight(
-            lineCount: lines,
-            fontSize: fittedSize,
-            lineHeightFor: lineHeightFor
-        )
-        // Alt köşelerin (14pt) yuvarlaması metni kırpmasın diye ek pay.
-        let contentHeight = textHeight + NotchTypography.bottomPadding
+    /// Ada kapalı çentik boyutundan tam boyuta büyür; içerik sonda belirir.
+    private func animateNotchOpen() {
+        guard let screen = targetScreen() else { return }
+        let anchor = Self.anchor(for: screen)
+        let island = notchIslandFrame(anchor: anchor)
+        let collapsed = notchCollapsedFrame(anchor: anchor, island: island)
+        panel.alphaValue = 1
+        guard !reduceMotion else {
+            panel.setFrame(island, display: true)
+            return
+        }
+        panel.setFrame(collapsed, display: true)
+        setNotchContentAlpha(0)
+        frameTransition.start(duration: NotchMetrics.openDuration, update: { [weak self] progress in
+            guard let self else { return }
+            let p = CGFloat(Self.springOut(progress))
+            self.panel.setFrame(Self.interpolate(collapsed, island, p), display: true)
+            self.setNotchContentAlpha(max(0, min(1, (CGFloat(progress) - 0.45) / 0.55)))
+        }, completion: { [weak self] in
+            self?.panel.setFrame(island, display: true)
+            self?.setNotchContentAlpha(1)
+        })
+    }
 
-        // Toplam Ada yüksekliği: Kamera + Metin + Padding
-        let totalPanelHeight = anchor.headerHeight + contentHeight + anchor.pixelPadding + 4.0
-
-        let target = CGRect(
-            x: round(anchor.centerX - targetWidth / 2.0),
-            y: anchor.top - totalPanelHeight,
-            width: targetWidth,
-            height: totalPanelHeight
-        )
-
-        // Arka plan: panel saydam, form `notchShapeView` tarafından çizilir.
-        // Böylece üst kulaklar konkav, alt köşeler konveks olur ve ada
-        // "çentikten dışa genişliyormuş" gibi görünür.
-        self.visualEffectView.isHidden = true
-        self.darkTintView.isHidden = true
-        self.panel.backgroundColor = .clear
-        self.panel.isOpaque = false
-        self.notchShapeView.isHidden = false
-        self.notchShapeView.fillColor = NSColor(calibratedWhite: 0.0, alpha: 1.0)
-        self.panel.contentView?.wantsLayer = true
-        self.panel.contentView?.layer?.cornerRadius = 0
-        self.panel.contentView?.layer?.masksToBounds = false
-
+    private func animateNotchClose(completion: (() -> Void)?) {
+        guard let screen = targetScreen(), !reduceMotion, panel.isVisible else {
+            panel.orderOut(nil)
+            completion?()
+            return
+        }
+        let anchor = Self.anchor(for: screen)
         let start = panel.frame
-        let duration = animated && panel.isVisible && !reduceMotion ? 0.18 : 0
-        frameTransition.start(duration: duration) { [weak self] progress in
+        let collapsed = notchCollapsedFrame(anchor: anchor, island: notchIslandFrame(anchor: anchor))
+        isNotchClosing = true
+        frameTransition.start(duration: NotchMetrics.closeDuration, update: { [weak self] progress in
             guard let self else { return }
             let p = CGFloat(progress)
-            let frame = CGRect(
-                x: start.origin.x + (target.origin.x - start.origin.x) * p,
-                y: start.origin.y + (target.origin.y - start.origin.y) * p,
-                width: start.width + (target.width - start.width) * p,
-                height: start.height + (target.height - start.height) * p
-            )
-            self.panel.setFrame(frame, display: true)
+            self.setNotchContentAlpha(max(0, 1 - p * 2.5))
+            self.panel.setFrame(Self.interpolate(start, collapsed, p), display: true)
+        }, completion: { [weak self] in
+            self?.isNotchClosing = false
+            self?.panel.orderOut(nil)
+            completion?()
+        })
+    }
 
-            // Referans tasarımda gereksiz ikonlar/rozetler gizlenir
-            self.pulsingDot.isHidden = true
-            self.microphoneFeedbackBadge.isHidden = true
-            self.checkmarkLabel.isHidden = true
-            self.errorIconLabel.isHidden = true
-            self.noticeIconLabel.isHidden = true
-            self.spinner.isHidden = true
-            self.waveformContainer.isHidden = true
+    /// Hafif aşmalı yay eğrisi (Dynamic Island açılışı gibi).
+    private static func springOut(_ t: Double) -> Double {
+        let c1 = 1.2, c3 = c1 + 1
+        let x = t - 1
+        return 1 + c3 * x * x * x + c1 * x * x
+    }
 
-            // Sağ kanatta (kamera hizasında) canlı ses dalgası:
-            // sy = h - header_height/2 (referans `_draw`).
-            let meterH = self.notchMeterContainer.frame.height
-            let meterW = self.notchMeterContainer.frame.width
-            let wingWidth = (frame.width - anchor.cameraWidth) / 2.0
-            let inset = max(8.0, min(36.0, (wingWidth - 20.0) / 2.0))
-            self.notchMeterContainer.isHidden = self.currentState != .recording
-            self.notchMeterContainer.setFrameOrigin(NSPoint(
-                x: frame.width - inset - meterW,
-                y: frame.height - anchor.headerHeight / 2.0 - meterH / 2.0
-            ))
-
-            // Metin alanı: kamera yuvasının altında, ortalanmış, KELİME SARARAK.
-            // `maximumNumberOfLines = 0` → gerektiği kadar satır; kırpma yok.
-            self.statusLabel.maximumNumberOfLines = 0
-            self.statusLabel.cell?.wraps = true
-            self.statusLabel.cell?.isScrollable = false
-            self.statusLabel.lineBreakMode = .byWordWrapping
-            self.statusLabel.usesSingleLineMode = false
-            self.statusLabel.frame = NSRect(
-                x: NotchTypography.horizontalPadding,
-                y: anchor.pixelPadding + NotchTypography.bottomPadding,
-                width: availableTextWidth,
-                height: textHeight
-            )
-            self.statusLabel.font = font
-            self.statusLabel.textColor = NSColor(calibratedWhite: 0.98, alpha: 1.0)
-            self.statusLabel.alignment = .center
-        }
+    private static func interpolate(_ a: CGRect, _ b: CGRect, _ p: CGFloat) -> CGRect {
+        CGRect(x: round(a.minX + (b.minX - a.minX) * p),
+               y: round(a.minY + (b.minY - a.minY) * p),
+               width: round(a.width + (b.width - a.width) * p),
+               height: round(a.height + (b.height - a.height) * p))
     }
 
     /// Durum mesajları normal kısa HUD metninden uzun olabilir. Sabit genişlikte
@@ -862,6 +932,19 @@ public class RecordingHUD: NSObject {
         panel.displayIfNeeded()
         if flushImmediately {
             CATransaction.flush()
+        }
+
+        if placement == .notch {
+            if let screen = targetScreen() {
+                layoutNotchContent(island: notchIslandFrame(anchor: Self.anchor(for: screen)).size)
+            }
+            visibilityTransition.cancel()
+            if wasVisible {
+                panel.alphaValue = 1
+            } else {
+                animateNotchOpen()
+            }
+            return
         }
 
         let startAlpha = panel.alphaValue
@@ -1109,6 +1192,11 @@ public class RecordingHUD: NSObject {
             self.currentState = .idle
             self.endLowInputWarningSession()
 
+            if self.placement == .notch {
+                self.visibilityTransition.cancel()
+                self.animateNotchClose(completion: completion)
+                return
+            }
             self.frameTransition.cancel()
             let startAlpha = self.panel.alphaValue
             self.visibilityTransition.start(
@@ -1434,7 +1522,7 @@ public class RecordingHUD: NSObject {
         let notchLevel = notchSmoothedLevel
 
         let barColor = (NotchAudioMeter.isActive(level: notchLevel)
-                        ? NSColor.systemGreen : NSColor.systemGray).cgColor
+                        ? NSColor.white : NSColor(calibratedWhite: 0.45, alpha: 1)).cgColor
         for (i, bar) in notchWaveformBars.enumerated() {
             let weight = NotchAudioMeter.barWeights[i % NotchAudioMeter.barWeights.count]
             let h = NotchAudioMeter.barHeight(level: notchLevel, weight: weight)

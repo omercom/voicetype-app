@@ -767,6 +767,11 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
     )
     private var safetyTimer: DispatchSourceTimer?
     private let authorizationAlreadyValidated: Bool
+    /// Her tanıma görevine verilen kimlik; yeniden başlatmadan sonra eski görevden
+    /// gelen geç geri çağrılar yok sayılır.
+    private var taskGeneration: UInt64 = 0
+    private var restartCount = 0
+    private static let maximumRestarts = 40
 
     public init(
         language: String = "tr",
@@ -849,82 +854,7 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
             }
 
             self.speechRecognizer = recognizer
-
-            let request = SFSpeechAudioBufferRecognitionRequest()
-            request.shouldReportPartialResults = true
-            request.taskHint = .dictation
-            // Apple'ın yerel modeli mevcutsa ağ yolunu seçme; bu düşük gecikmeli
-            // canlı akışın cihazda kalmasını sağlar. Desteklenmiyorsa false,
-            // güvenli WAV fallback'in normal Apple Speech yolunu kullanmasına izin verir.
-            request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
-
-            // Özel sözlük terimleri Apple'ın bağlamsal ipucu listesine eklenir;
-            // bu sayede model isimleri ve jargonu baştan doğru yönde tanır.
-            let terms = CustomVocabularyParser.terms(from: self.customVocabulary)
-            if !terms.isEmpty {
-                request.contextualStrings = terms
-            }
-
-            self.recognitionRequest = request
-
-            let task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-                guard let self = self else { return }
-
-                if let error = error {
-                    let nsError = error as NSError
-                    self.lock.lock()
-                    let cancelled = self.isCancelled
-                    let current = self.transcriptAccumulator.text
-                    let completed = self.isCompleted
-                    self.lock.unlock()
-
-                    if cancelled || completed { return }
-
-                    if current.isEmpty && Transcriber.isNoSpeechError(nsError) {
-                        // Kullanıcı konuşmadan bıraktıysa (boş ses / sessizlik)
-                        self.notifyCompletion(success: true, text: "", error: nil)
-                    } else {
-                        print("[AppleSpeech] Canlı tanıma hatası: \(nsError)")
-                        // Do not let the caller classify a failed partial as silence
-                        // from the localized message and skip WAV recovery.
-                        self.notifyCompletion(success: false, text: "", error: "Apple canlı tanıma hatası (\(nsError.domain)/\(nsError.code)).")
-                    }
-                    return
-                }
-
-                guard let result = result else { return }
-
-                let transcription = result.bestTranscription
-                let text = transcription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
-                let segments = transcription.segments.map {
-                    TimedTranscriptSegment(startTime: $0.timestamp, duration: $0.duration, text: $0.substring)
-                }
-
-                let receivedAt = ProcessInfo.processInfo.systemUptime
-                self.lock.lock()
-                guard !self.isCancelled, !self.isCompleted else {
-                    self.lock.unlock()
-                    return
-                }
-                let mergedText = AppleSpeechTranscriptProcessor.apply(
-                    accumulator: &self.transcriptAccumulator,
-                    text: text,
-                    segments: segments,
-                    isFinal: result.isFinal,
-                    receivedAt: receivedAt
-                )
-                let isFinal = result.isFinal
-                let callback = self.onInterim
-                self.lock.unlock()
-
-                if !isFinal {
-                    callback?(mergedText)
-                }
-
-                self.notifyCompletion(success: true, text: mergedText, error: nil, isFinal: isFinal)
-            }
-
-            self.recognitionTask = task
+            let request = self.makeRecognitionTask(recognizer: recognizer)
             self.isTaskReady = true
 
             // Bekleyen tamponları besle
@@ -939,24 +869,153 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
 
             if finished {
                 self.endAudioAndWaitForFinal(request)
-                return
             }
+            // Kayıt süresine üst sınır konmaz: oturumu yalnızca kullanıcı tuşu
+            // bırakınca AppDelegate bitirir. Eski 30 sn zamanlayıcısı uzun
+            // diktelerde sesi kesip önizlemeyi donduruyordu.
+        }
+    }
 
+    /// Yeni bir istek + tanıma görevi oluşturur. `lock` tutulurken çağrılmalıdır.
+    private func makeRecognitionTask(recognizer: SFSpeechRecognizer) -> SFSpeechAudioBufferRecognitionRequest {
+        taskGeneration &+= 1
+        let generation = taskGeneration
+
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.taskHint = .dictation
+        // Apple'ın yerel modeli mevcutsa ağ yolunu seçme; bu düşük gecikmeli
+        // canlı akışın cihazda kalmasını sağlar. Desteklenmiyorsa false,
+        // güvenli WAV fallback'in normal Apple Speech yolunu kullanmasına izin verir.
+        request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
+
+        // Özel sözlük terimleri Apple'ın bağlamsal ipucu listesine eklenir;
+        // bu sayede model isimleri ve jargonu baştan doğru yönde tanır.
+        let terms = CustomVocabularyParser.terms(from: customVocabulary)
+        if !terms.isEmpty {
+            request.contextualStrings = terms
+        }
+
+        recognitionRequest = request
+        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            self?.handleRecognition(result: result, error: error, generation: generation)
+        }
+        return request
+    }
+
+    private func handleRecognition(result: SFSpeechRecognitionResult?, error: Error?, generation: UInt64) {
+        lock.lock()
+        guard generation == taskGeneration, !isCancelled, !isCompleted else {
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+
+        if let error = error {
+            let nsError = error as NSError
+            // Apple görevi kullanıcı konuşurken kendiliğinden kapatabilir (uzun
+            // sessizlik, iç süre sınırı). Kayıt sürüyorsa bu bir bitiş değildir:
+            // biriken metni koruyup yeni görevle devam et.
+            if restartIfStillRecording(reason: "hata \(nsError.domain)/\(nsError.code)") { return }
+
+            lock.lock()
+            let current = transcriptAccumulator.text
+            lock.unlock()
+
+            if current.isEmpty && Transcriber.isNoSpeechError(nsError) {
+                // Kullanıcı konuşmadan bıraktıysa (boş ses / sessizlik)
+                notifyCompletion(success: true, text: "", error: nil)
+            } else if !current.isEmpty && Transcriber.isNoSpeechError(nsError) {
+                // Önceki görevlerde toplanan metin varken son görev boş kaldı.
+                notifyCompletion(success: true, text: current, error: nil)
+            } else {
+                print("[AppleSpeech] Canlı tanıma hatası: \(nsError)")
+                // Do not let the caller classify a failed partial as silence
+                // from the localized message and skip WAV recovery.
+                notifyCompletion(success: false, text: "", error: "Apple canlı tanıma hatası (\(nsError.domain)/\(nsError.code)).")
+            }
+            return
+        }
+
+        guard let result = result else { return }
+
+        let transcription = result.bestTranscription
+        let text = transcription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let segments = transcription.segments.map {
+            TimedTranscriptSegment(startTime: $0.timestamp, duration: $0.duration, text: $0.substring)
+        }
+
+        let receivedAt = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        guard generation == taskGeneration, !isCancelled, !isCompleted else {
+            lock.unlock()
+            return
+        }
+        let mergedText = AppleSpeechTranscriptProcessor.apply(
+            accumulator: &transcriptAccumulator,
+            text: text,
+            segments: segments,
+            isFinal: result.isFinal,
+            receivedAt: receivedAt
+        )
+        let isFinal = result.isFinal
+        let callback = onInterim
+        lock.unlock()
+
+        if !isFinal {
+            callback?(mergedText)
+            return
+        }
+
+        if restartIfStillRecording(reason: "erken final") {
+            callback?(mergedText)
+            return
+        }
+        notifyCompletion(success: true, text: mergedText, error: nil, isFinal: true)
+    }
+
+    /// Kullanıcı hâlâ konuşuyorsa biten görevin yerine yenisini başlatır.
+    /// Aradaki ses tamponları kaybolmasın diye yeni görev hazır olana kadar
+    /// gelen parçalar kuyruğa alınır.
+    private func restartIfStillRecording(reason: String) -> Bool {
+        lock.lock()
+        guard !isAudioFinished, !isCancelled, !isCompleted,
+              restartCount < Self.maximumRestarts,
+              let recognizer = speechRecognizer else {
+            lock.unlock()
+            return false
+        }
+        restartCount += 1
+        isTaskReady = false
+        let count = restartCount
+        lock.unlock()
+
+        print("[AppleSpeech] 🔁 Tanıma görevi kayıt sürerken kapandı (\(reason)); metin korunarak yeniden başlatılıyor (#\(count)).")
+
+        streamQueue.async { [weak self] in
+            guard let self else { return }
             self.lock.lock()
             guard !self.isCancelled, !self.isCompleted else {
                 self.lock.unlock()
                 return
             }
-            // 30 saniyelik emniyet zamanlayıcısı
-            let timer = DispatchSource.makeTimerSource(queue: self.streamQueue)
-            timer.schedule(deadline: .now() + 30.0)
-            timer.setEventHandler { [weak self] in
-                self?.finishAudio()
-            }
-            self.safetyTimer = timer
-            timer.resume()
+            let oldTask = self.recognitionTask
+            let request = self.makeRecognitionTask(recognizer: recognizer)
+            self.isTaskReady = true
+            let chunks = self.pendingChunks
+            self.pendingChunks.removeAll()
+            let finished = self.isAudioFinished
             self.lock.unlock()
+
+            oldTask?.cancel()
+            for chunk in chunks {
+                self.appendPCMData(chunk, to: request)
+            }
+            if finished {
+                self.endAudioAndWaitForFinal(request)
+            }
         }
+        return true
     }
 
     public func sendAudioChunk(_ chunk: Data) {
@@ -1044,8 +1103,18 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
     private func endAudioAndWaitForFinal(_ request: SFSpeechAudioBufferRecognitionRequest) {
         lock.lock()
         let shouldEndAudio = finalization.finishAudio { [weak self] in
+            guard let self else { return }
+            // Final gecikse bile canlı akışta biriken metin eksiksizdir; uzun
+            // kaydı dosyadan baştan çözmek yerine onu kullan.
+            self.lock.lock()
+            let collected = self.transcriptAccumulator.text
+            self.lock.unlock()
+            if !collected.isEmpty {
+                self.notifyCompletion(success: true, text: collected, error: nil)
+                return
+            }
             let outcome = AppleSpeechFinalization.timeoutOutcome
-            self?.notifyCompletion(success: outcome.success, text: outcome.text, error: outcome.error)
+            self.notifyCompletion(success: outcome.success, text: outcome.text, error: outcome.error)
         }
         lock.unlock()
 
@@ -1376,7 +1445,7 @@ public class Transcriber {
         completion: @escaping (TranscriptionResult) -> Void
     ) {
         let startTime = CFAbsoluteTimeGetCurrent()
-        let langCode = config.language.lowercased() == "en" ? "en_US" : "tr_TR"
+        let langCode = appleSpeechLocaleIdentifier(for: config.language)
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: langCode)) else {
             completion(TranscriptionResult(
                 success: false,
@@ -1423,7 +1492,12 @@ public class Transcriber {
         // Apple'ın dosya tabanlı motoruyla yeniden dene; destek varsa bu da
         // on-device çalışır, yoksa sistemin güvenli fallback'ine bırakılır.
         request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
-        request.shouldReportPartialResults = false
+        // Yeni macOS sürümlerinde Apple, duraksamadan sonra transkripti sıfırlar
+        // ve final sonuç yalnızca SON cümleyi içerir. Ara sonuçları biriktirmeden
+        // yalnızca finali okumak uzun diktede baştaki cümlelerin kaybolmasına
+        // (sadece sonun yapıştırılmasına) yol açıyordu.
+        request.shouldReportPartialResults = true
+        var accumulator = StreamingTranscriptAccumulator()
 
         // Canlı akış yoluyla aynı özel sözlük ipuçlarını uygula. Bu yol
         // daha önce bağlamsal terimleri hiç göndermiyordu; aynı ayarın iki
@@ -1439,6 +1513,20 @@ public class Transcriber {
         _ = recognizer.recognitionTask(with: request) { [weak self] result, error in
             if hasFinished { return }
 
+            if let result = result {
+                let transcription = result.bestTranscription
+                let segments = transcription.segments.map {
+                    TimedTranscriptSegment(startTime: $0.timestamp, duration: $0.duration, text: $0.substring)
+                }
+                _ = AppleSpeechTranscriptProcessor.apply(
+                    accumulator: &accumulator,
+                    text: transcription.formattedString,
+                    segments: segments,
+                    isFinal: result.isFinal,
+                    receivedAt: ProcessInfo.processInfo.systemUptime
+                )
+            }
+
             if let error = error {
                 hasFinished = true
                 self?.lock.lock()
@@ -1448,10 +1536,11 @@ public class Transcriber {
 
                 let latency = CFAbsoluteTimeGetCurrent() - startTime
                 let nsError = error as NSError
-                if Transcriber.isNoSpeechError(nsError) {
+                let collected = accumulator.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if Transcriber.isNoSpeechError(nsError) || !collected.isEmpty {
                     completion(TranscriptionResult(
                         success: true,
-                        text: "",
+                        text: collected,
                         latency: latency,
                         error: nil,
                         provider: "apple",
@@ -1478,7 +1567,7 @@ public class Transcriber {
                 try? FileManager.default.removeItem(at: tempURL)
 
                 let latency = CFAbsoluteTimeGetCurrent() - startTime
-                let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+                let text = accumulator.text.trimmingCharacters(in: .whitespacesAndNewlines)
 
                 completion(TranscriptionResult(
                     success: true,
@@ -1501,6 +1590,23 @@ public class Transcriber {
         request.httpMethod = "GET"
         request.timeoutInterval = 10.0
         assemblySession.dataTask(with: request) { _, _, _ in }.resume()
+    }
+
+    /// Groq ve Gemini REST için DNS/TCP/TLS el sıkışmasını kullanıcı konuşurken
+    /// tamamlar; deşifre isteği `httpSession` havuzundaki sıcak bağlantıyı kullanır.
+    /// Yanıtın içeriği önemsizdir (401/404 da bağlantıyı açar).
+    public func warmHTTPConnection(provider: String) {
+        let host: String
+        switch provider {
+        case "groq": host = "https://api.groq.com/openai/v1/models"
+        case "gemini": host = "https://generativelanguage.googleapis.com/v1beta/models"
+        default: return
+        }
+        guard let url = URL(string: host) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5.0
+        httpSession.dataTask(with: request) { _, _, _ in }.resume()
     }
 
     public func transcribeAssemblyAI(
@@ -1722,7 +1828,7 @@ public class Transcriber {
                     // kontrolsüz tekrarlar yanıt metni üzerinde temizlenir.
                     let collapsed = RepetitionGuard.collapse(cleaned)
                     if collapsed.collapsedGroups > 0 {
-                        print("[Groq] 🔁 \\(collapsed.collapsedGroups) tekrar grubu temizlendi (decode guard).")
+                        print("[Groq] 🔁 \(collapsed.collapsedGroups) tekrar grubu temizlendi (decode guard).")
                         cleaned = collapsed.text
                     }
                     // Sözlük yankısı: model sessizlikte sözlüğü "duymuş gibi"

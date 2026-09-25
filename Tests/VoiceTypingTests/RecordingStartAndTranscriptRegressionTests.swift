@@ -184,3 +184,30 @@ final class RecordingStartAndTranscriptRegressionTests: XCTestCase {
         XCTAssertEqual(accumulator.text, "Merhaba dünya devam ediyor")
     }
 }
+
+final class AppleSpeechLongDictationTests: XCTestCase {
+    /// Apple, duraksamadan sonra transkripti sıfırlar ve yeni görev/final yalnızca
+    /// son cümleyi içerir. Biriktirici baştaki cümleleri kaybetmemelidir.
+    func testAccumulatorKeepsEarlierSentencesAcrossAppleResets() {
+        var acc = StreamingTranscriptAccumulator()
+        var t: TimeInterval = 100
+        func partial(_ text: String, _ start: TimeInterval, final: Bool = false) -> String {
+            t += 0.2
+            let seg = TimedTranscriptSegment(startTime: start, duration: 0.5, text: text)
+            return AppleSpeechTranscriptProcessor.apply(
+                accumulator: &acc, text: text, segments: [seg], isFinal: final, receivedAt: t
+            )
+        }
+        _ = partial("Bugün hava", 0)
+        _ = partial("Bugün hava çok güzel", 0, final: true)
+        t += 2.0 // uzun duraksama, Apple yeni görev başlatır
+        _ = partial("Yarın", 0)
+        _ = partial("Yarın okula gideceğim", 0)
+        t += 2.0
+        let result = partial("Akşam da sinemaya gideriz", 0, final: true)
+
+        XCTAssertTrue(result.hasPrefix("Bugün hava çok güzel"), result)
+        XCTAssertTrue(result.contains("Yarın okula gideceğim"), result)
+        XCTAssertTrue(result.hasSuffix("Akşam da sinemaya gideriz"), result)
+    }
+}

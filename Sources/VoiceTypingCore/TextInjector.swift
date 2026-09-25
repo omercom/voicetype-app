@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CoreGraphics
+import Carbon
 
 /// macOS uygulamalarına pano ve sentetik klavye olayı üzerinden metin gönderen yönetici.
 /// Hedef uygulamanın kendi metin alanı ve güvenlik politikası, gerçek yapıştırma
@@ -63,10 +64,48 @@ public class TextInjector {
         return pb.writeObjects(snapshot)
     }
 
+    /// Aktif (ASCII yazabilen) klavye düzeninde "v" karakterini üreten fiziksel tuş.
+    /// Sanal tuş kodu fiziksel konumdur: Türkçe-F düzeninde ANSI V konumu "c"
+    /// yazar, dolayısıyla sabit 0x09 kodu Cmd+V yerine Cmd+C gönderir. Dvorak ve
+    /// benzeri düzenler de aynı sorundan etkilenir. TIS API'leri ana thread ister.
+    public static func keyCodeForCharacter(_ character: String, fallback: CGKeyCode) -> CGKeyCode {
+        guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let layoutPtr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+            return fallback
+        }
+        let layoutData = Unmanaged<CFData>.fromOpaque(layoutPtr).takeUnretainedValue() as Data
+        let target = character.lowercased()
+
+        return layoutData.withUnsafeBytes { raw -> CGKeyCode in
+            guard let layout = raw.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return fallback }
+            for keyCode in 0..<128 {
+                var deadKeyState: UInt32 = 0
+                var chars = [UniChar](repeating: 0, count: 4)
+                var length = 0
+                let status = UCKeyTranslate(
+                    layout,
+                    UInt16(keyCode),
+                    UInt16(kUCKeyActionDown),
+                    0,
+                    UInt32(LMGetKbdType()),
+                    OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                    &deadKeyState,
+                    chars.count,
+                    &length,
+                    &chars
+                )
+                if status == noErr, length > 0,
+                   String(utf16CodeUnits: chars, count: length) == target {
+                    return CGKeyCode(keyCode)
+                }
+            }
+            return fallback
+        }
+    }
+
     /// macOS'ta donanım seviyesinde en güvenilir Cmd + V simülasyonu.
     /// Event tap üzerinden aktif pencereye tek ve temiz bir Cmd + V sinyali gönderir.
-    public func simulateCmdV() {
-        let vKeyCode: CGKeyCode = 0x09 // kVK_ANSI_V
+    public func simulateCmdV(vKeyCode: CGKeyCode = 0x09) {
         let source = CGEventSource(stateID: .combinedSessionState)
 
         guard let eventDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
@@ -156,6 +195,7 @@ public class TextInjector {
 
         let pb = NSPasteboard.general
         let snapshot = restoreClipboard ? captureClipboardSnapshot() : []
+        let vKeyCode = Self.keyCodeForCharacter("v", fallback: 0x09)
 
         // 2. Panoya hem standart UTF8 metni hem de transient etiketlerini yaz.
         // Pano yazımı başarısızsa sentetik Cmd+V göndermek kullanıcıya yanlış
@@ -175,7 +215,7 @@ public class TextInjector {
                 Thread.sleep(forTimeInterval: Double(pasteDelayMs) / 1000.0)
             }
 
-            self.simulateCmdV()
+            self.simulateCmdV(vKeyCode: vKeyCode)
 
             // Otomatik Gönderim (Auto-Submit / Enter)
             if autoSubmit {
