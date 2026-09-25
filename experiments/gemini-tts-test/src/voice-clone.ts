@@ -31,6 +31,9 @@ const SAMPLE_PATH = resolve(arg('sample', 'out/voices/gemini-3.8-flash-tts/Fola.
 const MODEL = arg('model', 'gemini-3.8-flash-tts');
 const TEXT = arg('text', 'Merhaba, bu ses klonlama denemesidir.');
 const OUT = resolve(arg('out', `out/cloned_${Date.now()}.wav`));
+// Dusuk sicaklik klonun perdesini tutarli yapar; varsayilanda ayni ornek
+// bir denemede 114 Hz, digerinde 213 Hz uretebiliyordu.
+const TEMPERATURE = process.argv.includes('--temperature') ? Number(arg('temperature', '1')) : undefined;
 
 if (!existsSync(SAMPLE_PATH)) {
   console.error(`[hata] Ses ornegi bulunamadi: ${SAMPLE_PATH}`);
@@ -61,6 +64,7 @@ try {
   const res = await ai.models.generateContent({
     model: MODEL,
     config: {
+      ...(TEMPERATURE !== undefined ? { temperature: TEMPERATURE } : {}),
       responseModalities: ['audio'],
       speechConfig: {
         voiceConfig: {
