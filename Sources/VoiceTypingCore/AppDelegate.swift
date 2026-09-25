@@ -1001,25 +1001,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                     // Akıllı Boşluk (Smart Spacing): Ardışık diktelerde kelimelerin birbirine yapışmasını önler
                     let textToInject = TextPolisher.applySmartSpacing(polishedText)
 
-                    let injectionSucceeded = TextInjector.shared.inject(
+                    let injectionStarted = TextInjector.shared.inject(
                         text: textToInject,
                         targetContext: target,
                         pasteDelayMs: config.paste_delay_ms
-                    )
+                    ) { [weak self] outcome in
+                        self?.presentInjectionOutcome(outcome, latency: result.latency)
+                    }
                     BackgroundAudioController.shared.handleDictationEnded(config: config)
 
-                    if injectionSucceeded {
-                        DictationRecoveryAudioStore.shared.clear()
-                        self.recoverAudioMenuItem?.isHidden = true
-                        SoundManager.shared.playSuccess()
-                        HapticManager.shared.playSuccess()
-                        RecordingHUD.shared.showSuccess(text: "Yapıştırma gönderildi")
-                        self.setStatus(
-                            title: "✅",
-                            menuText: "Durum: Yapıştırma gönderildi (\(String(format: "%.2f", result.latency))s)",
-                            revertAfter: 1.5
-                        )
-                    } else {
+                    if !injectionStarted {
                         let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: "Metin hedef alana yapıştırılamadı")
                         self.recoverAudioMenuItem?.isHidden = !recoveryAvailable
                         SoundManager.shared.playCancel()
@@ -1097,6 +1088,32 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 RecordingHUD.shared.showError(message: failureMessage, autoDismissDelay: 3.0)
                 self.setStatus(title: "⚠️ Hata", menuText: "Hata: \(visibleError)", revertAfter: 3.0)
             }
+        }
+    }
+
+    /// Yapıştırmanın gerçek sonucunu kullanıcıya gösterir. Metin hedefe
+    /// girmediyse panoda bekler; dikte geçmişe zaten kaydedilmiştir.
+    private func presentInjectionOutcome(_ outcome: TextInjector.InjectionOutcome, latency: Double) {
+        DictationRecoveryAudioStore.shared.clear()
+        recoverAudioMenuItem?.isHidden = true
+        switch outcome {
+        case .verified, .unverifiable:
+            SoundManager.shared.playSuccess()
+            HapticManager.shared.playSuccess()
+            RecordingHUD.shared.showSuccess(text: "Yapıştırıldı")
+            setStatus(title: "✅", menuText: "Durum: Yapıştırıldı (\(String(format: "%.2f", latency))s)", revertAfter: 1.5)
+        case let .targetChanged(reason):
+            SoundManager.shared.playCancel()
+            HapticManager.shared.playCancel()
+            let message = "\(reason) · Metin panoda (⌘V)"
+            RecordingHUD.shared.showNotice(message: message, autoDismissDelay: 2.6)
+            setStatus(title: "📋", menuText: message, revertAfter: 2.6)
+        case .notInserted:
+            SoundManager.shared.playCancel()
+            HapticManager.shared.playCancel()
+            let message = "Yapıştırılamadı · Metin panoda (⌘V)"
+            RecordingHUD.shared.showError(message: message, autoDismissDelay: 2.6)
+            setStatus(title: "📋", menuText: message, revertAfter: 2.6)
         }
     }
 

@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import CoreGraphics
 import Carbon
+import ApplicationServices
 
 /// macOS uygulamalarına pano ve sentetik klavye olayı üzerinden metin gönderen yönetici.
 /// Hedef uygulamanın kendi metin alanı ve güvenlik politikası, gerçek yapıştırma
@@ -166,7 +167,68 @@ public class TextInjector {
         }
     }
 
-    /// Dikte edilen metni panoya yazar ve aktif veya arka plandaki hedef pencereye yapıştırır.
+    /// Yapıştırmanın gerçek sonucu. `sent` true dönse bile metin hedefe
+    /// girmemiş olabilir; kesin sonuç bu değerle bildirilir.
+    public enum InjectionOutcome: Equatable {
+        /// Alan içeriği değişti: metin hedefe girdi.
+        case verified
+        /// Cmd+V gönderildi ama alan içeriği okunamıyor (bazı editörler/terminaller).
+        case unverifiable
+        /// Alan okunabiliyor ve değişmedi: yapıştırma olmadı. Metin panoda.
+        case notInserted
+        /// Kayıt sırasında sekme/uygulama değişti; yanlış yere yapıştırılmadı. Metin panoda.
+        case targetChanged(reason: String)
+    }
+
+    /// Odaktaki alanın karşılaştırılabilir içerik izi.
+    struct FieldSnapshot: Equatable {
+        let value: String?
+        let count: Int?
+        var isReadable: Bool { value != nil || count != nil }
+    }
+
+    static func snapshot(of element: AXUIElement?) -> FieldSnapshot {
+        guard let element else { return FieldSnapshot(value: nil, count: nil) }
+        var valueRef: CFTypeRef?
+        var value: String?
+        if AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef) == .success {
+            value = valueRef as? String
+        }
+        var countRef: CFTypeRef?
+        var count: Int?
+        if AXUIElementCopyAttributeValue(element, kAXNumberOfCharactersAttribute as CFString, &countRef) == .success {
+            count = (countRef as? NSNumber)?.intValue
+        }
+        return FieldSnapshot(value: value, count: count)
+    }
+
+    /// Sonucu tahmin etmek yerine alanın içeriği değişti mi diye bakar.
+    static func outcome(before: FieldSnapshot, after: FieldSnapshot) -> InjectionOutcome {
+        guard before.isReadable, after.isReadable else { return .unverifiable }
+        if let a = before.value, let b = after.value { return a == b ? .notInserted : .verified }
+        if let a = before.count, let b = after.count { return a == b ? .notInserted : .verified }
+        return .unverifiable
+    }
+
+    /// Metni kullanıcının elle yapıştırabileceği şekilde panoya koyar
+    /// (geçici etiket olmadan; pano yöneticileri de görür).
+    private func leaveOnClipboard(_ text: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+    }
+
+    /// Dikte edilen metni hedef alana yapıştırır.
+    ///
+    /// 1. Hedef arka plandaysa öne getirilir.
+    /// 2. **Doğrulama:** odaktaki alan kayıt başındaki hedef değilse (başka
+    ///    sekme/uygulama) körlemesine yapıştırılmaz; metin panoya bırakılır.
+    /// 3. Cmd+V gönderilir ve alan içeriği değişene kadar kısa süre izlenir.
+    /// 4. Değişmediyse otomatik gönderim ve pano geri yüklemesi yapılmaz;
+    ///    metin panoda kalır ve `completion(.notInserted)` bildirilir.
+    ///
+    /// Dönüş değeri yalnızca işlemin başlatılıp başlatılmadığıdır; kesin
+    /// sonuç `completion` ile ana thread'de gelir.
     @discardableResult
     public func paste(
         text: String,
@@ -174,17 +236,28 @@ public class TextInjector {
         restoreClipboard: Bool = false,
         pasteDelayMs: Int = 20,
         autoSubmit: Bool = false,
-        autoSubmitKey: String = "return"
+        autoSubmitKey: String = "return",
+        completion: ((InjectionOutcome) -> Void)? = nil
     ) -> Bool {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        let finish: (InjectionOutcome) -> Void = { outcome in
+            DispatchQueue.main.async { completion?(outcome) }
+        }
 
         // 1. Hedef Bağlam ve Arka Plandan Kurtarma (Smart Target Restoration)
-        // Eğer hedef uygulama arka plandaysa AppleScript ve WindowServer ile öne getirilir ve odaklanır.
         if let target = targetContext {
             let isFrontmost = (NSWorkspace.shared.frontmostApplication?.processIdentifier == target.pid)
             if !isFrontmost {
                 print("[TextInjector] 🔄 Hedef (\(target.appName) [PID: \(target.pid)]) arka planda kalmış. Öne çağrılıp odak kurtarılıyor...")
                 TargetInputManager.shared.restoreTargetFocus(to: target)
+            }
+
+            // 2. Hedef doğrulama: yanlış sekmeye/uygulamaya yapıştırma.
+            if case let .changed(reason) = TargetInputManager.shared.verify(target) {
+                print("[TextInjector] 🛑 Hedef değişti (\(reason)); yapıştırılmadı, metin panoya bırakıldı.")
+                leaveOnClipboard(text)
+                finish(.targetChanged(reason: reason))
+                return true
             }
         }
 
@@ -196,10 +269,10 @@ public class TextInjector {
         let pb = NSPasteboard.general
         let snapshot = restoreClipboard ? captureClipboardSnapshot() : []
         let vKeyCode = Self.keyCodeForCharacter("v", fallback: 0x09)
+        let field = TargetInputManager.shared.focusedElement()
+        let before = Self.snapshot(of: field)
 
-        // 2. Panoya hem standart UTF8 metni hem de transient etiketlerini yaz.
-        // Pano yazımı başarısızsa sentetik Cmd+V göndermek kullanıcıya yanlış
-        // bir başarı hissi verir; bu nedenle burada açıkça dururuz.
+        // Pano yazımı başarısızsa sentetik Cmd+V göndermek yanlış başarı hissi verir.
         pb.clearContents()
         guard pb.setString(text, forType: .string) else {
             print("[TextInjector] ❌ Metin panoya yazılamadı.")
@@ -217,20 +290,36 @@ public class TextInjector {
 
             self.simulateCmdV(vKeyCode: vKeyCode)
 
-            // Otomatik Gönderim (Auto-Submit / Enter)
+            // 3. Sonuç doğrulama: alan içeriği değişene kadar en fazla ~450 ms izle.
+            var outcome = InjectionOutcome.unverifiable
+            if before.isReadable {
+                outcome = .notInserted
+                for _ in 0..<9 {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    outcome = Self.outcome(before: before, after: Self.snapshot(of: field))
+                    if outcome != .notInserted { break }
+                }
+            }
+
+            if outcome == .notInserted {
+                // Metin hedefe girmedi: Enter gönderme, eski panoyu geri yükleme.
+                print("[TextInjector] ❌ Yapıştırma doğrulanamadı: alan değişmedi. Metin panoda bırakıldı.")
+                DispatchQueue.main.async { self.leaveOnClipboard(text) }
+                finish(.notInserted)
+                return
+            }
+
             if autoSubmit {
-                Thread.sleep(forTimeInterval: 0.080) // Hedef uygulamanın yapıştırmayı tamamlaması için kısa bekleme
+                Thread.sleep(forTimeInterval: 0.080)
                 self.triggerAutoSubmit(key: autoSubmitKey)
             }
 
-            // Eğer panoyu geri yükleme istenmişse, hedef uygulamanın Cmd+V'yi
-            // eksiksiz okuyabilmesi için güvenli süre (500ms) beklenir ve ardından eski pano geri yüklenir.
+            finish(outcome)
+
+            // Eski panoyu geri yükle; kullanıcı arada yeni bir şey kopyaladıysa ezme.
             if restoreClipboard {
                 Thread.sleep(forTimeInterval: 0.50)
                 DispatchQueue.main.async {
-                    // Pano Çarpışma Koruması (Collision Guard):
-                    // Kullanıcı o 500ms içinde başka bir metin kopyaladıysa, panoyu körü körüne
-                    // eski haline getirip kullanıcının yeni kopyasını ezmeyiz.
                     let currentText = NSPasteboard.general.string(forType: .string)
                     if currentText == text {
                         _ = self.restoreClipboardSnapshot(snapshot)
@@ -249,7 +338,8 @@ public class TextInjector {
     public func inject(
         text: String,
         targetContext: TargetContext? = nil,
-        pasteDelayMs: Int = 20
+        pasteDelayMs: Int = 20,
+        completion: ((InjectionOutcome) -> Void)? = nil
     ) -> Bool {
         let config = ConfigManager.shared.config
         return paste(
@@ -258,7 +348,8 @@ public class TextInjector {
             restoreClipboard: config.restore_clipboard,
             pasteDelayMs: pasteDelayMs,
             autoSubmit: config.enable_auto_submit,
-            autoSubmitKey: config.auto_submit_key
+            autoSubmitKey: config.auto_submit_key,
+            completion: completion
         )
     }
 }
