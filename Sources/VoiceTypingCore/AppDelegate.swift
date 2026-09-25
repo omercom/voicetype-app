@@ -66,6 +66,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var saveHistoryMenuItem: NSMenuItem!
     private var onlyInTextFieldsMenuItem: NSMenuItem!
     private var inputMethodMenuItem: NSMenuItem!
+    private var providerParentMenuItem: NSMenuItem!
 
     private var isTranscribing: Bool = false
     private var isFinishingRecord: Bool = false
@@ -295,24 +296,26 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 5. Sağlayıcı Submenu
         let providerMenu = NSMenu()
-        appleMenuItem = NSMenuItem(title: "🍎 Apple Speech (0 Kota / API Keysiz)", action: #selector(selectAppleProvider), keyEquivalent: "")
+        appleMenuItem = NSMenuItem(title: "Apple (cihaz içi, ücretsiz)", action: #selector(selectAppleProvider), keyEquivalent: "")
         appleMenuItem.target = self
         providerMenu.addItem(appleMenuItem)
 
-        geminiMenuItem = NSMenuItem(title: "✨ Google Gemini Live (Canlı Akış)", action: #selector(selectGeminiProvider), keyEquivalent: "")
+        geminiMenuItem = NSMenuItem(title: "Gemini (canlı önizleme)", action: #selector(selectGeminiProvider), keyEquivalent: "")
         geminiMenuItem.target = self
         providerMenu.addItem(geminiMenuItem)
 
-        groqMenuItem = NSMenuItem(title: "⚡ Groq Whisper (whisper-large-v3)", action: #selector(selectGroqProvider), keyEquivalent: "")
+        groqMenuItem = NSMenuItem(title: "Groq Whisper (en hızlı)", action: #selector(selectGroqProvider), keyEquivalent: "")
         groqMenuItem.target = self
         providerMenu.addItem(groqMenuItem)
 
-        assemblyAIMenuItem = NSMenuItem(title: "🎙 AssemblyAI Dictation API (Universal-3.5 Pro)", action: #selector(selectAssemblyAIProvider), keyEquivalent: "")
+        assemblyAIMenuItem = NSMenuItem(title: "AssemblyAI", action: #selector(selectAssemblyAIProvider), keyEquivalent: "")
         assemblyAIMenuItem.target = self
         providerMenu.addItem(assemblyAIMenuItem)
 
-        let providerParent = NSMenuItem(title: "Sağlayıcı", action: nil, keyEquivalent: "")
-        providerParent.submenu = providerMenu
+        // Ses tanıma motoru menüden tek tıkla değişir; başlık etkin olanı gösterir.
+        providerParentMenuItem = NSMenuItem(title: "Ses Tanıma", action: nil, keyEquivalent: "")
+        providerParentMenuItem.submenu = providerMenu
+        menu.addItem(providerParentMenuItem)
 
         // 5b. Son Dikteler (History) Submenu
         historyMenu = NSMenu()
@@ -321,7 +324,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(historyParentMenuItem)
         refreshHistoryMenu()
 
-        // Sade menü: yalnızca sık kullanılanlar. Tetikleyici tuş, mod, sağlayıcı
+        // Sade menü: yalnızca sık kullanılanlar. Tetikleyici tuş, mod
         // ve tüm tercihler Ayarlar penceresinde (öğeler durum takibi için
         // oluşturulur ama menüye eklenmez).
 
@@ -411,6 +414,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         geminiMenuItem.state = (activeProvider == "gemini") ? .on : .off
         groqMenuItem.state = (activeProvider == "groq") ? .on : .off
         assemblyAIMenuItem.state = (activeProvider == "assemblyai") ? .on : .off
+        let providerNames = ["apple": "Apple", "gemini": "Gemini", "groq": "Groq", "assemblyai": "AssemblyAI"]
+        providerParentMenuItem?.title = "Ses Tanıma: \(providerNames[activeProvider] ?? activeProvider)"
 
         holdModeMenuItem.state = (cfg.trigger_mode.lowercased() == "hold") ? .on : .off
         smartModeMenuItem.state = (cfg.trigger_mode.lowercased() == "smart") ? .on : .off
