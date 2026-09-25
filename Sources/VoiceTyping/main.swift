@@ -11,6 +11,13 @@ setbuf(__stderrp, nil)
 // Aynı anda iki VoiceTyping süreci çalışıp menü çubuğunda çift ikon oluşturmasın
 let configDir = NSString(string: "~/.voice_typing").expandingTildeInPath
 try? FileManager.default.createDirectory(atPath: configDir, withIntermediateDirectories: true)
+// Teşhis logu 5 MB'ı geçerse sıfırlanır; dikte metni içerdiği için yalnızca kullanıcıya açık.
+let logPath = (configDir as NSString).appendingPathComponent("app.log")
+if let size = (try? FileManager.default.attributesOfItem(atPath: logPath))?[.size] as? Int, size > 5_000_000 {
+    _ = ftruncate(fileno(__stdoutp), 0)
+}
+chmod(logPath, 0o600)
+
 let lockPath = (configDir as NSString).appendingPathComponent("app.lock")
 let lockFd = open(lockPath, O_CREAT | O_RDWR, mode_t(0o644))
 if lockFd != -1 {

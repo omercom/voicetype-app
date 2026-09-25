@@ -213,6 +213,11 @@ cat <<PLIST_EOF > "$LAUNCH_AGENT_PLIST"
     <integer>10</integer>
     <key>ProcessType</key>
     <string>Interactive</string>
+    <!-- Teşhis logu: yalnızca bu kullanıcının okuyabildiği ~/.voice_typing altında. -->
+    <key>StandardOutPath</key>
+    <string>$HOME/.voice_typing/app.log</string>
+    <key>StandardErrorPath</key>
+    <string>$HOME/.voice_typing/app.log</string>
 </dict>
 </plist>
 PLIST_EOF
