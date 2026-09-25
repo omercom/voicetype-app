@@ -67,3 +67,18 @@ final class DirectTypingRulesTests: XCTestCase {
         XCTAssertFalse(TextInjector.canTypeAsCharacters(""))
     }
 }
+
+final class DuplicateInjectionGuardTests: XCTestCase {
+    // Saf karar fonksiyonu test edilir; gerçek klavye olayı gönderilmez.
+    func testSameTextWithinWindowIsDuplicate() {
+        XCTAssertTrue(TextInjector.isDuplicate(text: "merhaba", at: 101.5, last: ("merhaba", 100.0)))
+    }
+
+    func testSameTextAfterWindowIsAllowed() {
+        XCTAssertFalse(TextInjector.isDuplicate(text: "merhaba", at: 102.5, last: ("merhaba", 100.0)))
+    }
+
+    func testDifferentTextIsAllowed() {
+        XCTAssertFalse(TextInjector.isDuplicate(text: "selam", at: 100.5, last: ("merhaba", 100.0)))
+    }
+}
