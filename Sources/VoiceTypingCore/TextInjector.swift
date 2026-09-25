@@ -237,6 +237,7 @@ public class TextInjector {
         pasteDelayMs: Int = 20,
         autoSubmit: Bool = false,
         autoSubmitKey: String = "return",
+        preferInputMethod: Bool = false,
         completion: ((InjectionOutcome) -> Void)? = nil
     ) -> Bool {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
@@ -266,11 +267,75 @@ public class TextInjector {
             print("[TextInjector] ⚠️ Güvenli Giriş (Secure Event Input) devrede. Sistem parola alanında olabilir, sentetik Cmd+V kısıtlanabilir.")
         }
 
+        let field = TargetInputManager.shared.focusedElement()
+        let before = Self.snapshot(of: field)
+
+        // 3a. Giriş yöntemi: pano ve sentetik tuş olmadan doğrudan alana yaz.
+        // Başarısız olursa aynı doğrulamalarla Cmd+V yoluna düşülür.
+        if preferInputMethod, InputMethodBridge.shared.isAvailable {
+            InputMethodBridge.shared.insert(text) { [weak self] delivered in
+                guard let self else { return }
+                if delivered {
+                    self.queue.async {
+                        let outcome = Self.waitForChange(field: field, before: before)
+                        if outcome == .notInserted {
+                            print("[TextInjector] ❌ Giriş yöntemi metni iletti ama alan değişmedi. Metin panoda.")
+                            DispatchQueue.main.async { self.leaveOnClipboard(text) }
+                            finish(.notInserted)
+                            return
+                        }
+                        print("[TextInjector] ⌨️ Metin giriş yöntemiyle yazıldı (\(outcome)).")
+                        if autoSubmit {
+                            Thread.sleep(forTimeInterval: 0.080)
+                            self.triggerAutoSubmit(key: autoSubmitKey)
+                        }
+                        finish(outcome)
+                    }
+                } else {
+                    print("[TextInjector] ↩️ Giriş yöntemi kullanılamadı; Cmd+V ile deneniyor.")
+                    _ = self.pasteViaClipboard(
+                        text: text, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
+                        autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
+                        field: field, before: before, finish: finish
+                    )
+                }
+            }
+            return true
+        }
+
+        // 3b. Pano + Cmd+V.
+        return pasteViaClipboard(
+            text: text, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
+            autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
+            field: field, before: before, finish: finish
+        )
+    }
+
+    /// Alan içeriği değişene kadar en fazla ~450 ms izler.
+    static func waitForChange(field: AXUIElement?, before: FieldSnapshot) -> InjectionOutcome {
+        guard before.isReadable else { return .unverifiable }
+        var result = InjectionOutcome.notInserted
+        for _ in 0..<9 {
+            Thread.sleep(forTimeInterval: 0.05)
+            result = outcome(before: before, after: snapshot(of: field))
+            if result != .notInserted { break }
+        }
+        return result
+    }
+
+    private func pasteViaClipboard(
+        text: String,
+        restoreClipboard: Bool,
+        pasteDelayMs: Int,
+        autoSubmit: Bool,
+        autoSubmitKey: String,
+        field: AXUIElement?,
+        before: FieldSnapshot,
+        finish: @escaping (InjectionOutcome) -> Void
+    ) -> Bool {
         let pb = NSPasteboard.general
         let snapshot = restoreClipboard ? captureClipboardSnapshot() : []
         let vKeyCode = Self.keyCodeForCharacter("v", fallback: 0x09)
-        let field = TargetInputManager.shared.focusedElement()
-        let before = Self.snapshot(of: field)
 
         // Pano yazımı başarısızsa sentetik Cmd+V göndermek yanlış başarı hissi verir.
         pb.clearContents()
@@ -290,16 +355,8 @@ public class TextInjector {
 
             self.simulateCmdV(vKeyCode: vKeyCode)
 
-            // 3. Sonuç doğrulama: alan içeriği değişene kadar en fazla ~450 ms izle.
-            var outcome = InjectionOutcome.unverifiable
-            if before.isReadable {
-                outcome = .notInserted
-                for _ in 0..<9 {
-                    Thread.sleep(forTimeInterval: 0.05)
-                    outcome = Self.outcome(before: before, after: Self.snapshot(of: field))
-                    if outcome != .notInserted { break }
-                }
-            }
+            // 4. Sonuç doğrulama: alan içeriği değişti mi?
+            let outcome = Self.waitForChange(field: field, before: before)
 
             if outcome == .notInserted {
                 // Metin hedefe girmedi: Enter gönderme, eski panoyu geri yükleme.
@@ -349,6 +406,7 @@ public class TextInjector {
             pasteDelayMs: pasteDelayMs,
             autoSubmit: config.enable_auto_submit,
             autoSubmitKey: config.auto_submit_key,
+            preferInputMethod: config.use_input_method,
             completion: completion
         )
     }

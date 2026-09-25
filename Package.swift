@@ -8,6 +8,7 @@ let package = Package(
     ],
     products: [
         .executable(name: "VoiceTyping", targets: ["VoiceTyping"]),
+        .executable(name: "VoiceTypingIME", targets: ["VoiceTypingIME"]),
         .library(name: "VoiceTypingCore", targets: ["VoiceTypingCore"])
     ],
     dependencies: [],
@@ -24,6 +25,13 @@ let package = Package(
             name: "VoiceTyping",
             dependencies: ["VoiceTypingCore"],
             path: "Sources/VoiceTyping"
+        ),
+        // Pano kullanmadan metin yazan görünmez giriş yöntemi (~/Library/Input Methods).
+        .executableTarget(
+            name: "VoiceTypingIME",
+            dependencies: [],
+            path: "Sources/VoiceTypingIME",
+            linkerSettings: [.linkedFramework("InputMethodKit")]
         ),
         .testTarget(
             name: "VoiceTypingTests",

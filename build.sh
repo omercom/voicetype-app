@@ -43,6 +43,23 @@ fi
 codesign --verify --deep --strict "$APP_BUNDLE"
 plutil -lint "$APP_BUNDLE/Contents/Info.plist"
 
+# Giriş Yöntemi paketi (pano kullanmadan metin yazar; ~/Library/Input Methods altına kurulur)
+IME_BUNDLE="VoiceTypingIME.app"
+rm -rf "$IME_BUNDLE"
+mkdir -p "$IME_BUNDLE/Contents/MacOS" "$IME_BUNDLE/Contents/Resources"
+cp "$BIN_DIR/VoiceTypingIME" "$IME_BUNDLE/Contents/MacOS/VoiceTypingIME"
+cp Resources/IME/Info.plist "$IME_BUNDLE/Contents/Info.plist"
+if [ -f "Sources/VoiceTypingCore/Resources/AppIcon.icns" ]; then
+    cp "Sources/VoiceTypingCore/Resources/AppIcon.icns" "$IME_BUNDLE/Contents/Resources/AppIcon.icns"
+fi
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+    codesign --force --deep -s "$SIGN_IDENTITY" "$IME_BUNDLE"
+else
+    codesign --force --deep --sign - "$IME_BUNDLE"
+fi
+codesign --verify --deep --strict "$IME_BUNDLE"
+plutil -lint "$IME_BUNDLE/Contents/Info.plist"
+
 # macOS LaunchServices önbelleğini yenile (LSUIElement / Dinamik Dock için)
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_BUNDLE" 2>/dev/null || true
 
