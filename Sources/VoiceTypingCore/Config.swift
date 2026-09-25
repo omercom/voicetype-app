@@ -114,8 +114,9 @@ public struct AppConfig: Codable {
     public var only_in_text_fields: Bool
     public var enable_auto_submit: Bool
     public var auto_submit_key: String // "return", "cmd_return", "shift_return", "tab"
-    /// Panoyu kullanmadan yazar: Mac uygulamalarında doğrudan alana, diğerlerinde
-    /// karakter olarak. Olmazsa Cmd+V'ye düşülür. Yalnızca Erişilebilirlik izni ister.
+    /// Metni klavye olayları olarak yazar (deneysel, varsayılan kapalı). Electron
+    /// terminallerinde (ör. Claude Code) metnin sonu tekrar yazılabildiği için
+    /// varsayılan yol pano + Cmd+V'dir; eski pano içeriği ardından geri yüklenir.
     public var type_text_directly: Bool
     public var enable_app_profiles: Bool
     public var voice_snippets: [String: String]
@@ -150,7 +151,7 @@ public struct AppConfig: Codable {
         trigger_key: 54,
         trigger_mode: "hold",
         play_sounds: true,
-        restore_clipboard: false,
+        restore_clipboard: true,
         paste_delay_ms: 20,
         min_record_duration: 0.20,
         mute_system_audio: true,
@@ -167,7 +168,7 @@ public struct AppConfig: Codable {
         only_in_text_fields: true,
         enable_auto_submit: false,
         auto_submit_key: "return",
-        type_text_directly: true,
+        type_text_directly: false,
         enable_app_profiles: true,
         voice_snippets: ["kısayol mail": "ornek@sirket.com"],
         sound_theme: "modern",
@@ -223,7 +224,7 @@ public struct AppConfig: Codable {
         only_in_text_fields: Bool = true,
         enable_auto_submit: Bool = false,
         auto_submit_key: String = "return",
-        type_text_directly: Bool = true,
+        type_text_directly: Bool = false,
         enable_app_profiles: Bool = true,
         voice_snippets: [String: String] = [:],
         sound_theme: String = "modern",
@@ -289,7 +290,7 @@ public struct AppConfig: Codable {
         trigger_key = try container.decodeIfPresent(Int.self, forKey: .trigger_key) ?? 54
         trigger_mode = try container.decodeIfPresent(String.self, forKey: .trigger_mode) ?? "hold"
         play_sounds = try container.decodeIfPresent(Bool.self, forKey: .play_sounds) ?? true
-        restore_clipboard = try container.decodeIfPresent(Bool.self, forKey: .restore_clipboard) ?? false
+        restore_clipboard = try container.decodeIfPresent(Bool.self, forKey: .restore_clipboard) ?? true
         paste_delay_ms = try container.decodeIfPresent(Int.self, forKey: .paste_delay_ms) ?? 20
         min_record_duration = try container.decodeIfPresent(Double.self, forKey: .min_record_duration) ?? 0.20
         mute_system_audio = try container.decodeIfPresent(Bool.self, forKey: .mute_system_audio) ?? true
@@ -306,7 +307,7 @@ public struct AppConfig: Codable {
         only_in_text_fields = try container.decodeIfPresent(Bool.self, forKey: .only_in_text_fields) ?? true
         enable_auto_submit = try container.decodeIfPresent(Bool.self, forKey: .enable_auto_submit) ?? false
         auto_submit_key = try container.decodeIfPresent(String.self, forKey: .auto_submit_key) ?? "return"
-        type_text_directly = try container.decodeIfPresent(Bool.self, forKey: .type_text_directly) ?? true
+        type_text_directly = try container.decodeIfPresent(Bool.self, forKey: .type_text_directly) ?? false
         enable_app_profiles = try container.decodeIfPresent(Bool.self, forKey: .enable_app_profiles) ?? true
         voice_snippets = try container.decodeIfPresent([String: String].self, forKey: .voice_snippets) ?? [:]
         sound_theme = try container.decodeIfPresent(String.self, forKey: .sound_theme) ?? "modern"

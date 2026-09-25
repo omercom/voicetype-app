@@ -409,10 +409,6 @@ public class TextInjector {
         autoSubmitKey: String,
         finish: @escaping (InjectionOutcome) -> Void
     ) -> Bool {
-        // Yalnızca Cmd+V yolunda alan içeriği okunur (doğrulama için);
-        // büyük belgelerde bu okuma pahalı olduğundan yazma yolunda yapılmaz.
-        let field = TargetInputManager.shared.focusedElement()
-        let before = Self.snapshot(of: field)
         let pb = NSPasteboard.general
         let snapshot = restoreClipboard ? captureClipboardSnapshot() : []
         let vKeyCode = Self.keyCodeForCharacter("v", fallback: 0x09)
@@ -433,18 +429,13 @@ public class TextInjector {
                 Thread.sleep(forTimeInterval: Double(pasteDelayMs) / 1000.0)
             }
 
+            // Cmd+V atomiktir: metin tek seferde girer, bölünemez ve çoğalamaz.
+            // Sonradan alan içeriğini okuyup doğrulamak yapılmaz: Electron'da
+            // içerik geç yansıdığı için yanlış "yapıştırılamadı" uyarısı üretiyor
+            // ve büyük belgelerde tüm içeriği okumak yavaş.
             self.simulateCmdV(vKeyCode: vKeyCode)
-
-            // 4. Sonuç doğrulama: alan içeriği değişti mi?
-            let outcome = Self.waitForChange(field: field, before: before)
-
-            if outcome == .notInserted {
-                // Metin hedefe girmedi: Enter gönderme, eski panoyu geri yükleme.
-                print("[TextInjector] ❌ Yapıştırma doğrulanamadı: alan değişmedi. Metin panoda bırakıldı.")
-                DispatchQueue.main.async { self.leaveOnClipboard(text) }
-                finish(.notInserted)
-                return
-            }
+            print("[TextInjector] 📋 Metin Cmd+V ile yapıştırıldı.")
+            let outcome = InjectionOutcome.unverifiable
 
             if autoSubmit {
                 Thread.sleep(forTimeInterval: 0.080)
