@@ -367,9 +367,11 @@ public class TextInjector {
                   let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { return }
             down.flags = []
             up.flags = []
+            // Metin yalnızca tuş-basma olayına eklenir. Tuş-bırakma olayına da
+            // eklenirse Chromium/Electron uygulamaları (Antigravity, VS Code,
+            // Slack…) son parçayı ikinci kez yazıyordu.
             chunk.withUnsafeBufferPointer { buffer in
                 down.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
-                up.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
             }
             down.post(tap: tap)
             up.post(tap: tap)
