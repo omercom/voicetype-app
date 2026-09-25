@@ -49,6 +49,15 @@ public final class InputMethodBridge {
         print("[IME] Hazır: \(isAvailable ? "evet" : "hayır")")
     }
 
+    /// Kullanılmıyorsa giriş kaynakları listesinden kaldırır (devre dışı
+    /// bırakmaya macOS izin verir; yalnızca etkinleştirme kullanıcıya aittir).
+    public func disableIfEnabled() {
+        precondition(Thread.isMainThread)
+        guard let source = inputSource(), isEnabled(source) else { return }
+        let status = TISDisableInputSource(source)
+        print("[IME] Giriş yöntemi devre dışı bırakıldı (durum: \(status)).")
+    }
+
     public var isAvailable: Bool {
         guard let source = inputSource() else { return false }
         return isEnabled(source)
