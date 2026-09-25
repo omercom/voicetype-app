@@ -1097,7 +1097,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             // Başarı sesi çalınmaz: tuş bırakılınca "mikrofon kapandı" sesi zaten
             // çalıyor; hızlanan akışta ikisi art arda "çift ses" gibi duyuluyordu.
             HapticManager.shared.playSuccess()
-            RecordingHUD.shared.showSuccess(text: "Yapıştırıldı")
+            // Başarı bildirimi gösterilmez: metnin ekrana gelmesi yeterli geri
+            // bildirimdir. Ada hemen çentiğe geri çekilir.
+            RecordingHUD.shared.dismiss(animated: true)
             setStatus(title: "✅", menuText: "Durum: Yapıştırıldı (\(String(format: "%.2f", latency))s)", revertAfter: 1.5)
         case let .targetChanged(reason):
             SoundManager.shared.playCancel()
