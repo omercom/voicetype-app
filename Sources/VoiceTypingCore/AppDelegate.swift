@@ -65,6 +65,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var fillerWordsMenuItem: NSMenuItem!
     private var saveHistoryMenuItem: NSMenuItem!
     private var onlyInTextFieldsMenuItem: NSMenuItem!
+    private var inputMethodMenuItem: NSMenuItem!
 
     private var isTranscribing: Bool = false
     private var isFinishingRecord: Bool = false
@@ -226,6 +227,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildMenu() {
         let menu = NSMenu()
+        // Menü her açıldığında durumlar tazelenir (ör. giriş yöntemi Sistem
+        // Ayarları'ndan yeni etkinleştirildiyse onay işareti hemen düzelir).
+        menu.delegate = self
 
         // Durum ve menüden hızlı kayıt kontrolü. Bu öğeler daha önce yalnızca
         // değişken olarak tutuluyordu; kullanıcı menüden kayıt başlatamıyordu.
@@ -355,6 +359,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         onlyInTextFieldsMenuItem.target = self
         menu.addItem(onlyInTextFieldsMenuItem)
 
+        inputMethodMenuItem = NSMenuItem(title: "Panoyu Kullanmadan Yaz (Giriş Yöntemi)", action: #selector(toggleInputMethod), keyEquivalent: "")
+        inputMethodMenuItem.target = self
+        menu.addItem(inputMethodMenuItem)
+
         launchAtLoginMenuItem = NSMenuItem(title: "Başlangıçta Otomatik Çalıştır", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLoginMenuItem.target = self
         menu.addItem(launchAtLoginMenuItem)
@@ -436,6 +444,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         muteAudioMenuItem.state = cfg.mute_system_audio ? .on : .off
         saveHistoryMenuItem?.state = cfg.save_history ? .on : .off
         onlyInTextFieldsMenuItem?.state = cfg.only_in_text_fields ? .on : .off
+        // Açık ama sistemde etkin değilse karışık durum (–) gösterilir.
+        if cfg.use_input_method {
+            inputMethodMenuItem?.state = InputMethodBridge.shared.isAvailable ? .on : .mixed
+        } else {
+            inputMethodMenuItem?.state = .off
+        }
+        inputMethodMenuItem?.toolTip = cfg.use_input_method && !InputMethodBridge.shared.isAvailable
+            ? "Açık ama macOS'ta etkin değil: Klavye → Giriş Kaynakları'na \"VoiceTyping Dikte\" ekleyin. Şimdilik Cmd+V kullanılıyor."
+            : "Metni pano ve Cmd+V yerine doğrudan alana yazar. Olmazsa Cmd+V'ye düşer."
         restoreClipboardMenuItem?.state = cfg.restore_clipboard ? .on : .off
         launchAtLoginMenuItem.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
 
@@ -1259,6 +1276,42 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsWindowController.shared.loadValues()
     }
 
+    @objc private func toggleInputMethod() {
+        let enable = !ConfigManager.shared.config.use_input_method
+        ConfigManager.shared.update { $0.use_input_method = enable }
+        if enable {
+            InputMethodBridge.shared.prepare()
+            if !InputMethodBridge.shared.isAvailable {
+                showInputMethodSetupHelp()
+            }
+        }
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+    }
+
+    /// macOS üçüncü parti giriş yöntemlerini uygulamanın kendisinin açmasına
+    /// izin vermez; kullanıcıyı tek seferlik ayara yönlendiririz.
+    private func showInputMethodSetupHelp() {
+        let alert = NSAlert()
+        alert.messageText = "Giriş yöntemini bir kez etkinleştirin"
+        alert.informativeText = """
+        macOS bu ayarı uygulamaların açmasına izin vermiyor.
+
+        1. Klavye → Giriş Kaynakları → Düzenle…
+        2. Sol alttaki “+” → Türkçe → “VoiceTyping Dikte” → Ekle
+        3. VoiceTyping'i yeniden başlatın
+
+        Etkinleşene kadar yapıştırma Cmd+V ile devam eder.
+        """
+        alert.addButton(withTitle: "Klavye Ayarlarını Aç")
+        alert.addButton(withTitle: "Sonra")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn,
+           let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     @objc private func toggleOnlyInTextFields() {
         let current = ConfigManager.shared.config.only_in_text_fields
         ConfigManager.shared.update { $0.only_in_text_fields = !current }
@@ -1425,5 +1478,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.setActivationPolicy(.accessory)
             }
         }
+    }
+}
+
+
+extension AppDelegate: NSMenuDelegate {
+    public func menuWillOpen(_ menu: NSMenu) {
+        refreshMenuStates()
     }
 }
