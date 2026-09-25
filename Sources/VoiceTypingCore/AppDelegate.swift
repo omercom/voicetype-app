@@ -627,6 +627,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             // DNS/TCP/TLS el sıkışmasını kullanıcı konuşurken tamamla; gerçek
             // transkripsiyon aynı URLSession bağlantı havuzunu yeniden kullanır.
             Transcriber.shared.warmAssemblyAIDictation()
+        } else if provider == "groq" || (provider == "gemini" && !ConfigManager.isGeminiLiveModel(effectiveModel)) {
+            Transcriber.shared.warmHTTPConnection(provider: provider)
         }
 
         DispatchQueue.main.async { [weak self] in

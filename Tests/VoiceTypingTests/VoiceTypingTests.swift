@@ -1197,6 +1197,48 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertEqual(cliResult, "Terminalde `npm run test` çalıştırır mısın?")
     }
 
+    func testTextPolisherPreservesMeaningfulWords() {
+        let polisher = TextPolisher.shared
+        var config = AppConfig.defaultConfig
+        config.remove_filler_words = true
+        config.enable_app_profiles = false
+
+        // "şey" belirleyiciden sonra isimdir; silinmemeli
+        XCTAssertEqual(polisher.polish(text: "Sana bir şey söyleyeceğim.", config: config), "Sana bir şey söyleyeceğim.")
+        XCTAssertEqual(polisher.polish(text: "Her şey yolunda.", config: config), "Her şey yolunda.")
+        XCTAssertEqual(polisher.polish(text: "Şeyi masaya koy.", config: config), "Şeyi masaya koy.")
+        XCTAssertEqual(polisher.polish(text: "Bazı şeyler değişti.", config: config), "Bazı şeyler değişti.")
+
+        // Türkçe ikilemeler kekeleme değildir
+        XCTAssertEqual(polisher.polish(text: "Dosyaları tek tek kontrol et.", config: config), "Dosyaları tek tek kontrol et.")
+        XCTAssertEqual(polisher.polish(text: "Yavaş yavaş öğreniyorum.", config: config), "Yavaş yavaş öğreniyorum.")
+        XCTAssertEqual(polisher.polish(text: "Koşa koşa geldim.", config: config), "Koşa koşa geldim.")
+        XCTAssertEqual(polisher.polish(text: "Bu çok çok güzel.", config: config), "Bu çok çok güzel.")
+
+        // İngilizce gerçek kelimeler dolgu sayılmamalı
+        XCTAssertEqual(polisher.polish(text: "I like this idea.", config: config), "I like this idea.")
+        XCTAssertEqual(polisher.polish(text: "Well done, tell him.", config: config), "Well done, tell him.")
+        XCTAssertEqual(polisher.polish(text: "Do you know the way?", config: config), "Do you know the way?")
+        XCTAssertEqual(polisher.polish(text: "Er geç gelecek.", config: config), "Er geç gelecek.")
+        XCTAssertEqual(polisher.polish(text: "Hani bana söz vermiştin.", config: config), "Hani bana söz vermiştin.")
+    }
+
+    func testTextPolisherQuestionHeuristic() {
+        let polisher = TextPolisher.shared
+        var config = AppConfig.defaultConfig
+        config.remove_filler_words = false
+        config.enable_app_profiles = false
+
+        XCTAssertEqual(polisher.polish(text: "geliyor musun", config: config), "geliyor musun?")
+        XCTAssertEqual(polisher.polish(text: "ne zaman gideceğiz", config: config), "ne zaman gideceğiz?")
+        XCTAssertEqual(polisher.polish(text: "nasıl gidiyor", config: config), "nasıl gidiyor?")
+        XCTAssertEqual(polisher.polish(text: "neden geldiğini biliyorum", config: config), "neden geldiğini biliyorum")
+        XCTAssertEqual(polisher.polish(text: "kim olduğunu bilmiyorum", config: config), "kim olduğunu bilmiyorum")
+        XCTAssertEqual(polisher.polish(text: "nasıl yapılacağını anlattım", config: config), "nasıl yapılacağını anlattım")
+        // Yalnızca son cümle değerlendirilir
+        XCTAssertEqual(polisher.polish(text: "Bu nasıl oldu? Sonra eve gittik", config: config), "Bu nasıl oldu? Sonra eve gittik")
+    }
+
     func testGeminiSystemPromptConfiguration() {
         var config = AppConfig.defaultConfig
         XCTAssertFalse(config.gemini_system_prompt.isEmpty)
