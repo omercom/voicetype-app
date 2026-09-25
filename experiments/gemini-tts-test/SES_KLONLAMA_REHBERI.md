@@ -2,7 +2,7 @@
 
 **Tarih:** 2026-09-25
 **Durum:** ✅ Çalışıyor — resmi Voices API ile
-**Ses kimliği:** `voice_snw1ur9attln` ("Omer", tr-TR, bitiş 2027-09-25)
+**Ses kimlikleri:** proje 1 `voice_snw1ur9attln`, proje 2 `voice_7y0fu7ljv8cv` ("Omer", tr-TR)
 
 > Bu rehber, `VOICE_CLONING.md` ve `KENDI_SESINLE_KLONLAMA.md` dosyalarındaki
 > "klonlama çalışmıyor" sonucunu **geçersiz kılar**. O denemeler resmi olmayan
@@ -116,6 +116,19 @@ Yanıt: `audio/l16; rate=24000` ham PCM → `speak.ts` WAV başlığı ekler.
 **Listeleme / silme** — `GET /v1beta/voices`, `DELETE /v1beta/voices/{id}`
 
 ---
+
+## Birden fazla API anahtarı (limit döndürme)
+
+`.env` içinde `GEMINI_API_KEYS=anahtar1,anahtar2,...` tutulur. `speak.ts` anahtarları
+sırayla dener; günlük limiti dolan anahtardan sonrakine geçer.
+
+- **Limit anahtara değil projeye bağlıdır.** Aynı projedeki iki anahtar aynı 10 hakkı paylaşır;
+  ek hak için anahtarlar **farklı Google projelerinden** olmalı.
+- **Klon ses projeye aittir.** Bir projede ses yoksa `speak.ts` onu referans + onay
+  kayıtlarından otomatik oluşturur (`--no-create` ile kapatılır). Anahtar → ses eşlemesi
+  `out/voices.json` dosyasında önbelleklenir.
+- Web sitesine kısıtlı anahtarlar (`Requests from referer <empty> are blocked`) komut
+  satırından çalışmaz; AI Studio / Cloud Console'da uygulama kısıtlamasını kaldırmak gerekir.
 
 ## Kotalar (ücretsiz katman)
 

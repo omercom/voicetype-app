@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[2] / 'tools' / 'release_benchmark.py'
+SCRIPT = Path(__file__).resolve().parents[1] / 'tools' / 'release_benchmark.py'
 SPEC = importlib.util.spec_from_file_location('release_benchmark', SCRIPT)
 benchmark = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(benchmark)

@@ -16,8 +16,8 @@ venv/
 release_measurements/
 
 # Benchmark artifacts / temp audio
-samples/custom/
-!samples/custom/.gitkeep
+experiments/benchmark/samples/custom/
+!experiments/benchmark/samples/custom/.gitkeep
 test_*.mp3
 test_*.wav
 *.wav

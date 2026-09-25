@@ -63,3 +63,26 @@ export function requireApiKey(): string {
   console.log(`[env] kullanilan API key: ${key.slice(0, 6)}...${key.slice(-4)} (${key.length} karakter)`);
   return key;
 }
+
+/**
+ * .env icindeki tum Gemini anahtarlari: GEMINI_API_KEYS (virgulle ayrilmis)
+ * + GEMINI_API_KEY. Tekrarlar atilir, sira korunur. Limit anahtara degil
+ * projeye baglidir; farkli projelerin anahtarlari ayri gunluk hak demektir.
+ */
+export function apiKeys(): string[] {
+  loadEnv();
+  const list = [
+    ...(process.env.GEMINI_API_KEYS ?? '').split(','),
+    process.env.GEMINI_API_KEY ?? '',
+    process.env.GOOGLE_API_KEY ?? '',
+  ].map((k) => k.trim()).filter(Boolean);
+  const keys = [...new Set(list)];
+  if (keys.length === 0) {
+    console.error('[hata] Hic Gemini anahtari yok (.env: GEMINI_API_KEYS veya GEMINI_API_KEY).');
+    process.exit(1);
+  }
+  return keys;
+}
+
+/** Anahtari loglarda gizler. */
+export const maskKey = (key: string) => `…${key.slice(-4)}`;

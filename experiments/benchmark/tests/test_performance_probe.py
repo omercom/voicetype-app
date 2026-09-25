@@ -8,7 +8,7 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-SCRIPT = Path(__file__).resolve().parents[2] / 'tools' / 'performance_probe.py'
+SCRIPT = Path(__file__).resolve().parents[1] / 'tools' / 'performance_probe.py'
 SPEC = importlib.util.spec_from_file_location('performance_probe', SCRIPT)
 probe = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(probe)
