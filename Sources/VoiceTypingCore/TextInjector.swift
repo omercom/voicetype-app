@@ -237,7 +237,6 @@ public class TextInjector {
         pasteDelayMs: Int = 20,
         autoSubmit: Bool = false,
         autoSubmitKey: String = "return",
-        preferInputMethod: Bool = false,
         typeDirectly: Bool = false,
         completion: ((InjectionOutcome) -> Void)? = nil
     ) -> Bool {
@@ -271,41 +270,7 @@ public class TextInjector {
         let field = TargetInputManager.shared.focusedElement()
         let before = Self.snapshot(of: field)
 
-        // 3a. Giriş yöntemi: pano ve sentetik tuş olmadan doğrudan alana yaz.
-        // Başarısız olursa aynı doğrulamalarla Cmd+V yoluna düşülür.
-        if preferInputMethod, InputMethodBridge.shared.isAvailable {
-            InputMethodBridge.shared.insert(text) { [weak self] delivered in
-                guard let self else { return }
-                if delivered {
-                    self.queue.async {
-                        let outcome = Self.waitForChange(field: field, before: before)
-                        if outcome == .notInserted {
-                            print("[TextInjector] ❌ Giriş yöntemi metni iletti ama alan değişmedi. Metin panoda.")
-                            DispatchQueue.main.async { self.leaveOnClipboard(text) }
-                            finish(.notInserted)
-                            return
-                        }
-                        print("[TextInjector] ⌨️ Metin giriş yöntemiyle yazıldı (\(outcome)).")
-                        if autoSubmit {
-                            Thread.sleep(forTimeInterval: 0.080)
-                            self.triggerAutoSubmit(key: autoSubmitKey)
-                        }
-                        finish(outcome)
-                    }
-                } else {
-                    print("[TextInjector] ↩️ Giriş yöntemi kullanılamadı; diğer yöntemler deneniyor.")
-                    self.insertWithoutInputMethod(
-                        text: text, target: targetContext, typeDirectly: typeDirectly,
-                        restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
-                        autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
-                        field: field, before: before, finish: finish
-                    )
-                }
-            }
-            return true
-        }
-
-        // 3b. Doğrudan alana yazma → karakter olarak yazma → pano + Cmd+V.
+        // 3. Doğrudan alana yazma → karakter olarak yazma → pano + Cmd+V.
         guard typeDirectly else {
             return pasteViaClipboard(
                 text: text, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
@@ -531,7 +496,6 @@ public class TextInjector {
             pasteDelayMs: pasteDelayMs,
             autoSubmit: config.enable_auto_submit,
             autoSubmitKey: config.auto_submit_key,
-            preferInputMethod: config.use_input_method,
             typeDirectly: config.type_text_directly,
             completion: completion
         )

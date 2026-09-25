@@ -115,13 +115,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             self?.isExplicitQuit = true
         }
 
-        // Giriş yöntemi ileri düzey ve isteğe bağlıdır; kapalıysa giriş
-        // kaynakları listesinde görünmesin.
-        if ConfigManager.shared.config.use_input_method {
-            InputMethodBridge.shared.prepare()
-        } else {
-            InputMethodBridge.shared.disableIfEnabled()
-        }
 
         // Menu Bar Status Item Oluştur (Sabit premium ses dalgası ikonu)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)

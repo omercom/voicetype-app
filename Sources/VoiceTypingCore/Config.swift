@@ -114,9 +114,6 @@ public struct AppConfig: Codable {
     public var only_in_text_fields: Bool
     public var enable_auto_submit: Bool
     public var auto_submit_key: String // "return", "cmd_return", "shift_return", "tab"
-    /// Metni pano + Cmd+V yerine VoiceTyping Giriş Yöntemi ile yazar (ileri düzey,
-    /// Klavye ayarlarından giriş kaynağının eklenmesini gerektirir). Varsayılan kapalı.
-    public var use_input_method: Bool
     /// Panoyu kullanmadan yazar: Mac uygulamalarında doğrudan alana, diğerlerinde
     /// karakter olarak. Olmazsa Cmd+V'ye düşülür. Yalnızca Erişilebilirlik izni ister.
     public var type_text_directly: Bool
@@ -170,7 +167,6 @@ public struct AppConfig: Codable {
         only_in_text_fields: true,
         enable_auto_submit: false,
         auto_submit_key: "return",
-        use_input_method: false,
         type_text_directly: true,
         enable_app_profiles: true,
         voice_snippets: ["kısayol mail": "ornek@sirket.com"],
@@ -192,7 +188,7 @@ public struct AppConfig: Codable {
         case background_audio_mode, enable_microphone_boost, show_dock_icon
         case haptic_feedback, remove_filler_words, custom_vocabulary, dictation_mode, save_history
         case gemini_system_prompt, only_in_text_fields
-        case enable_auto_submit, auto_submit_key, use_input_method, type_text_directly, enable_app_profiles, voice_snippets
+        case enable_auto_submit, auto_submit_key, type_text_directly, enable_app_profiles, voice_snippets
         case sound_theme, sound_volume
         case hud_style
         case decode_tokens_per_sec, decode_token_base
@@ -227,7 +223,6 @@ public struct AppConfig: Codable {
         only_in_text_fields: Bool = true,
         enable_auto_submit: Bool = false,
         auto_submit_key: String = "return",
-        use_input_method: Bool = false,
         type_text_directly: Bool = true,
         enable_app_profiles: Bool = true,
         voice_snippets: [String: String] = [:],
@@ -268,7 +263,6 @@ public struct AppConfig: Codable {
         self.only_in_text_fields = only_in_text_fields
         self.enable_auto_submit = enable_auto_submit
         self.auto_submit_key = auto_submit_key
-        self.use_input_method = use_input_method
         self.type_text_directly = type_text_directly
         self.enable_app_profiles = enable_app_profiles
         self.voice_snippets = voice_snippets
@@ -312,7 +306,6 @@ public struct AppConfig: Codable {
         only_in_text_fields = try container.decodeIfPresent(Bool.self, forKey: .only_in_text_fields) ?? true
         enable_auto_submit = try container.decodeIfPresent(Bool.self, forKey: .enable_auto_submit) ?? false
         auto_submit_key = try container.decodeIfPresent(String.self, forKey: .auto_submit_key) ?? "return"
-        use_input_method = try container.decodeIfPresent(Bool.self, forKey: .use_input_method) ?? false
         type_text_directly = try container.decodeIfPresent(Bool.self, forKey: .type_text_directly) ?? true
         enable_app_profiles = try container.decodeIfPresent(Bool.self, forKey: .enable_app_profiles) ?? true
         voice_snippets = try container.decodeIfPresent([String: String].self, forKey: .voice_snippets) ?? [:]
