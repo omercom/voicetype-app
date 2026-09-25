@@ -238,6 +238,7 @@ public class TextInjector {
         autoSubmit: Bool = false,
         autoSubmitKey: String = "return",
         preferInputMethod: Bool = false,
+        typeDirectly: Bool = false,
         completion: ((InjectionOutcome) -> Void)? = nil
     ) -> Bool {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
@@ -292,9 +293,10 @@ public class TextInjector {
                         finish(outcome)
                     }
                 } else {
-                    print("[TextInjector] ↩️ Giriş yöntemi kullanılamadı; Cmd+V ile deneniyor.")
-                    _ = self.pasteViaClipboard(
-                        text: text, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
+                    print("[TextInjector] ↩️ Giriş yöntemi kullanılamadı; diğer yöntemler deneniyor.")
+                    self.insertWithoutInputMethod(
+                        text: text, target: targetContext, typeDirectly: typeDirectly,
+                        restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
                         autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
                         field: field, before: before, finish: finish
                     )
@@ -303,12 +305,135 @@ public class TextInjector {
             return true
         }
 
-        // 3b. Pano + Cmd+V.
-        return pasteViaClipboard(
-            text: text, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
+        // 3b. Doğrudan alana yazma → karakter olarak yazma → pano + Cmd+V.
+        guard typeDirectly else {
+            return pasteViaClipboard(
+                text: text, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
+                autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
+                field: field, before: before, finish: finish
+            )
+        }
+        insertWithoutInputMethod(
+            text: text, target: targetContext, typeDirectly: typeDirectly,
+            restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
             autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
             field: field, before: before, finish: finish
         )
+        return true
+    }
+
+    // MARK: - Panosuz yazma yöntemleri
+
+    /// Sırayla dener, her adımda alanın gerçekten değiştiğini doğrular:
+    /// 1. Doğrudan alana yazma (AX `kAXSelectedText`) — yalnızca Mac'in kendi
+    ///    uygulamalarında; web/Electron alanlarında JS olayları tetiklenmediği
+    ///    için sayfa metni "görmeyebilir", orada kullanılmaz.
+    /// 2. Karakter olarak yazma (Unicode klavye olayları) — her yerde çalışır,
+    ///    klavye düzeninden bağımsızdır.
+    /// 3. Pano + Cmd+V — son çare.
+    private func insertWithoutInputMethod(
+        text: String,
+        target: TargetContext?,
+        typeDirectly: Bool,
+        restoreClipboard: Bool,
+        pasteDelayMs: Int,
+        autoSubmit: Bool,
+        autoSubmitKey: String,
+        field: AXUIElement?,
+        before: FieldSnapshot,
+        finish: @escaping (InjectionOutcome) -> Void
+    ) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let succeed: (InjectionOutcome, String) -> Void = { outcome, method in
+                print("[TextInjector] ✍️ Metin \(method) ile yazıldı (\(outcome)).")
+                if autoSubmit {
+                    Thread.sleep(forTimeInterval: 0.080)
+                    self.triggerAutoSubmit(key: autoSubmitKey)
+                }
+                finish(outcome)
+            }
+
+            if typeDirectly, let field, Self.canInsertViaAccessibility(target: target, before: before),
+               AXUIElementSetAttributeValue(field, kAXSelectedTextAttribute as CFString, text as CFString) == .success {
+                let outcome = Self.waitForChange(field: field, before: before)
+                if outcome == .verified { return succeed(outcome, "doğrudan alana yazma") }
+                print("[TextInjector] ↩️ Doğrudan yazma alanı değiştirmedi; karakter olarak yazılacak.")
+            }
+
+            if typeDirectly, Self.canTypeAsCharacters(text) {
+                self.typeCharacters(text)
+                let outcome = Self.waitForChange(field: field, before: before)
+                if outcome != .notInserted { return succeed(outcome, "karakter olarak yazma") }
+                print("[TextInjector] ↩️ Karakter olarak yazma alanı değiştirmedi; Cmd+V deneniyor.")
+            }
+
+            DispatchQueue.main.async {
+                _ = self.pasteViaClipboard(
+                    text: text, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
+                    autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
+                    field: field, before: before, finish: finish
+                )
+            }
+        }
+    }
+
+    /// Doğrudan alana yazma yalnızca içeriği okunabilen (sonucu doğrulanabilen)
+    /// Mac uygulaması alanlarında kullanılır.
+    static func canInsertViaAccessibility(target: TargetContext?, before: FieldSnapshot) -> Bool {
+        guard before.value != nil else { return false }
+        guard let target else { return false }
+        if target.pageURL != nil { return false }
+        let category = AppProfileFormatter.shared.detectCategory(
+            bundleIdentifier: target.bundleIdentifier, appName: target.appName
+        )
+        if category == .terminal || category == .codeEditor { return false }
+        let webHosts: Set<String> = [
+            "com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser", "com.brave.Browser",
+            "org.mozilla.firefox", "com.microsoft.edgemac", "com.operasoftware.Opera",
+            "com.tinyspeck.slackmacgap", "com.hnc.Discord", "notion.id", "net.whatsapp.WhatsApp",
+        ]
+        return !webHosts.contains(target.bundleIdentifier)
+    }
+
+    /// Satır sonu ve sekme karakterleri tuş olarak gönderilirse sohbet
+    /// uygulamalarında mesajı erkenden gönderebilir veya odağı taşıyabilir;
+    /// bu metinler pano yoluna bırakılır.
+    static func canTypeAsCharacters(_ text: String) -> Bool {
+        !text.isEmpty && text.count <= 4000 && !text.contains(where: { $0 == "\n" || $0 == "\r" || $0 == "\t" })
+    }
+
+    /// Metni Unicode klavye olayları olarak gönderir (20 UTF-16 birimlik parçalar).
+    /// Tuş kodu değil karakter taşıdığı için klavye düzeninden etkilenmez; basılı
+    /// kalmış değiştirici tuşlar araya girmesin diye bayraklar temizlenir.
+    func typeCharacters(_ text: String) {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let tap: CGEventTapLocation = AXIsProcessTrusted() ? .cghidEventTap : .cgSessionEventTap
+        var chunk: [UniChar] = []
+
+        func flush() {
+            guard !chunk.isEmpty,
+                  let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else { return }
+            down.flags = []
+            up.flags = []
+            chunk.withUnsafeBufferPointer { buffer in
+                down.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
+                up.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
+            }
+            down.post(tap: tap)
+            up.post(tap: tap)
+            chunk.removeAll(keepingCapacity: true)
+            usleep(4_000)
+        }
+
+        // Karakter sınırında böl: emoji ve birleşik harfler parçalanmaz.
+        for character in text {
+            let units = Array(String(character).utf16)
+            if chunk.count + units.count > 20 { flush() }
+            chunk.append(contentsOf: units)
+        }
+        flush()
     }
 
     /// Alan içeriği değişene kadar en fazla ~450 ms izler.
@@ -407,6 +532,7 @@ public class TextInjector {
             autoSubmit: config.enable_auto_submit,
             autoSubmitKey: config.auto_submit_key,
             preferInputMethod: config.use_input_method,
+            typeDirectly: config.type_text_directly,
             completion: completion
         )
     }

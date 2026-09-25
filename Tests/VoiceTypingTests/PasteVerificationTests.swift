@@ -40,3 +40,30 @@ final class PasteVerificationTests: XCTestCase {
                                             after: Snap(value: nil, count: nil)), .unverifiable)
     }
 }
+
+final class DirectTypingRulesTests: XCTestCase {
+    private func context(bundle: String, pageURL: String? = nil) -> TargetContext {
+        TargetContext(pid: 1, bundleIdentifier: bundle, appName: "", runningApp: nil,
+                      element: AXUIElementCreateSystemWide(), window: nil, role: "AXTextArea", pageURL: pageURL)
+    }
+
+    func testAccessibilityInsertOnlyForReadableNativeFields() {
+        let readable = TextInjector.FieldSnapshot(value: "abc", count: 3)
+        XCTAssertTrue(TextInjector.canInsertViaAccessibility(target: context(bundle: "com.apple.Notes"), before: readable))
+        // Web alanında JS olayları tetiklenmez: kullanılmamalı
+        XCTAssertFalse(TextInjector.canInsertViaAccessibility(target: context(bundle: "com.apple.Notes", pageURL: "https://x.com"), before: readable))
+        XCTAssertFalse(TextInjector.canInsertViaAccessibility(target: context(bundle: "com.google.Chrome"), before: readable))
+        XCTAssertFalse(TextInjector.canInsertViaAccessibility(target: context(bundle: "com.tinyspeck.slackmacgap"), before: readable))
+        // Sonuç doğrulanamıyorsa kullanılmamalı
+        XCTAssertFalse(TextInjector.canInsertViaAccessibility(target: context(bundle: "com.apple.Notes"),
+                                                              before: .init(value: nil, count: 3)))
+        XCTAssertFalse(TextInjector.canInsertViaAccessibility(target: nil, before: readable))
+    }
+
+    func testCharacterTypingSkipsNewlinesAndTabs() {
+        XCTAssertTrue(TextInjector.canTypeAsCharacters("Merhaba dünya 👋 İğüşöç"))
+        XCTAssertFalse(TextInjector.canTypeAsCharacters("- madde 1\n- madde 2"), "Satır sonu sohbeti erken gönderebilir")
+        XCTAssertFalse(TextInjector.canTypeAsCharacters("a\tb"))
+        XCTAssertFalse(TextInjector.canTypeAsCharacters(""))
+    }
+}
