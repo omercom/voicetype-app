@@ -19,6 +19,9 @@ fi
 if [ -d "$TARGET_APP" ]; then
     echo "🗑️ $TARGET_APP siliniyor..."
     rm -rf "$TARGET_APP"
+    pkill -x VoiceTypingIME 2>/dev/null || true
+    rm -rf "$HOME/Library/Input Methods/VoiceTypingIME.app"
+    rm -f "$HOME/.voice_typing/ime_token"
 fi
 
 echo "✅ Uygulama ve otomatik başlangıç servisi başarıyla kaldırıldı."

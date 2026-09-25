@@ -63,6 +63,14 @@ echo "📁 3/5. Uygulama /Applications klasörüne kopyalanıyor..."
 rm -rf "$TARGET_APP"
 cp -R VoiceTyping.app "$TARGET_APP"
 
+# Giriş Yöntemi: kullanıcı düzeyinde kurulur; eski süreç kapatılır ki yenisi yüklensin.
+IME_DIR="$HOME/Library/Input Methods"
+mkdir -p "$IME_DIR"
+pkill -x VoiceTypingIME 2>/dev/null || true
+rm -rf "$IME_DIR/VoiceTypingIME.app"
+cp -R VoiceTypingIME.app "$IME_DIR/VoiceTypingIME.app"
+echo "⌨️  Giriş yöntemi kuruldu: $IME_DIR/VoiceTypingIME.app"
+
 # Eğer özel isim verildiyse Info.plist içindeki isimleri güncelle
 if [ "$APP_NAME" != "VoiceTyping" ]; then
     /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_NAME" "$TARGET_APP/Contents/Info.plist" 2>/dev/null || true

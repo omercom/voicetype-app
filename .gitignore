@@ -35,6 +35,7 @@ reference/
 .build/
 /VoiceTyping
 VoiceTyping.app/
+VoiceTypingIME.app/
 *.bundle/
 sounds
 .DS_Store

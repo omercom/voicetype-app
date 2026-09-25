@@ -114,6 +114,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             self?.isExplicitQuit = true
         }
 
+        // Pano kullanmadan yazan giriş yöntemini kaydet/etkinleştir (kuruluysa).
+        InputMethodBridge.shared.prepare()
+
         // Menu Bar Status Item Oluştur (Sabit premium ses dalgası ikonu)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
