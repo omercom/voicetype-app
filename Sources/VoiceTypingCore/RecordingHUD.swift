@@ -781,10 +781,14 @@ public class RecordingHUD: NSObject {
         }
 
         let isRecording = currentState == .recording
-        let isBusy = currentState == .transcribing || currentState == .preparing
-        notchMeterContainer.isHidden = !isRecording
-        spinner.isHidden = !isBusy
-        if isBusy { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+        let isTranscribing = currentState == .transcribing
+        let isPreparing = currentState == .preparing
+        // Yazılırken de ekolayzır görünür kalır ve dalga gibi akar: kullanıcı
+        // "bir şey oluyor" hissini spinner yerine aynı görsel dilden alır.
+        notchMeterContainer.isHidden = !(isRecording || isTranscribing)
+        spinner.isHidden = !isPreparing
+        if isPreparing { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+        if isTranscribing { startProcessingAnimation() } else { stopProcessingAnimation() }
         if case .success = currentState { checkmarkLabel.isHidden = false } else { checkmarkLabel.isHidden = true }
         if case .error = currentState { errorIconLabel.isHidden = false } else { errorIconLabel.isHidden = true }
         if case .notice = currentState { noticeIconLabel.isHidden = false } else { noticeIconLabel.isHidden = true }
@@ -806,6 +810,51 @@ public class RecordingHUD: NSObject {
             width: max(0, island.width - textX - NotchMetrics.sideInset),
             height: textHeight
         )
+    }
+
+    // MARK: - Yazılıyor animasyonu (çentik)
+
+    private var processingTimer: Timer?
+    private var processingStartedAt: TimeInterval = 0
+
+    /// Konuşma bitince çubuklar soldan sağa akan yumuşak bir dalgaya dönüşür.
+    private func startProcessingAnimation() {
+        guard processingTimer == nil else { return }
+        processingStartedAt = ProcessInfo.processInfo.systemUptime
+        animateProcessingBars()
+        guard !reduceMotion else { return }
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.animateProcessingBars()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        processingTimer = timer
+    }
+
+    private func stopProcessingAnimation() {
+        processingTimer?.invalidate()
+        processingTimer = nil
+    }
+
+    private func animateProcessingBars() {
+        let t = ProcessInfo.processInfo.systemUptime - processingStartedAt
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (i, bar) in notchWaveformBars.enumerated() {
+            let level: CGFloat
+            if reduceMotion {
+                level = 0.45
+            } else {
+                // 1.3 Hz, çubuklar arası faz kayması: dalga soldan sağa akar.
+                let phase = t * 2 * .pi * 1.3 - Double(i) * 0.7
+                level = CGFloat(0.28 + 0.52 * (0.5 + 0.5 * sin(phase)))
+            }
+            let h = NotchAudioMeter.barHeight(level: level, weight: 1.0)
+            bar.layer?.backgroundColor = NSColor(calibratedWhite: 1.0, alpha: 0.9).cgColor
+            bar.layer?.setAffineTransform(.identity)
+            bar.frame = NSRect(x: bar.frame.origin.x, y: NotchAudioMeter.barOriginY(height: h),
+                               width: bar.frame.width, height: h)
+        }
+        CATransaction.commit()
     }
 
     private func setNotchContentAlpha(_ alpha: CGFloat) {
@@ -1192,6 +1241,7 @@ public class RecordingHUD: NSObject {
             self.currentState = .idle
             self.endLowInputWarningSession()
 
+            self.stopProcessingAnimation()
             if self.placement == .notch {
                 self.visibilityTransition.cancel()
                 self.animateNotchClose(completion: completion)

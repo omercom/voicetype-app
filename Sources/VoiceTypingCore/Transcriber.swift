@@ -772,6 +772,10 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
     private var taskGeneration: UInt64 = 0
     private var restartCount = 0
     private static let maximumRestarts = 40
+    /// Tuş bırakıldıktan sonra metin bu süre değişmezse Apple'ın geç gelen
+    /// "final" sonucunu beklemeden toplanan metinle tamamlanır (algılanan hız).
+    private static let quietFinishDelay: TimeInterval = 0.4
+    private var quietFinishWork: DispatchWorkItem?
 
     public init(
         language: String = "tr",
@@ -964,6 +968,10 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
 
         if !isFinal {
             callback?(mergedText)
+            lock.lock()
+            let audioFinished = isAudioFinished
+            lock.unlock()
+            if audioFinished { scheduleQuietFinish() }
             return
         }
 
@@ -1120,7 +1128,26 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
 
         if shouldEndAudio {
             request.endAudio()
+            scheduleQuietFinish()
         }
+    }
+
+    /// Ses bittikten sonra gelen her ara sonuçta yeniden kurulur; metin
+    /// `quietFinishDelay` boyunca değişmezse toplanan metinle tamamlanır.
+    private func scheduleQuietFinish() {
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let collected = self.transcriptAccumulator.text
+            self.lock.unlock()
+            guard !collected.isEmpty else { return }
+            self.notifyCompletion(success: true, text: collected, error: nil)
+        }
+        lock.lock()
+        quietFinishWork?.cancel()
+        quietFinishWork = work
+        lock.unlock()
+        streamQueue.asyncAfter(deadline: .now() + Self.quietFinishDelay, execute: work)
     }
 
     private func notifyCompletion(success: Bool, text: String, error: String?, isFinal: Bool = true) {

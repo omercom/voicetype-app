@@ -251,8 +251,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.image = nil
         menu.addItem(settingsItem)
 
-        menu.addItem(NSMenuItem.separator())
-
         // 3. Tetikleyici Tuş Submenu
         let keyMenu = NSMenu()
         let quickKeys: [(Int, String)] = [
@@ -277,7 +275,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         let keyParent = NSMenuItem(title: "Tetikleyici Tuş", action: nil, keyEquivalent: "")
         keyParent.submenu = keyMenu
-        menu.addItem(keyParent)
 
         // 4. Tetikleme Modu Submenu
         let modeMenu = NSMenu()
@@ -295,7 +292,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         let modeParent = NSMenuItem(title: "Tetikleme Modu", action: nil, keyEquivalent: "")
         modeParent.submenu = modeMenu
-        menu.addItem(modeParent)
 
         // 5. Sağlayıcı Submenu
         let providerMenu = NSMenu()
@@ -317,7 +313,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         let providerParent = NSMenuItem(title: "Sağlayıcı", action: nil, keyEquivalent: "")
         providerParent.submenu = providerMenu
-        menu.addItem(providerParent)
 
         // 5b. Son Dikteler (History) Submenu
         historyMenu = NSMenu()
@@ -326,44 +321,36 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(historyParentMenuItem)
         refreshHistoryMenu()
 
-        menu.addItem(NSMenuItem.separator())
+        // Sade menü: yalnızca sık kullanılanlar. Tetikleyici tuş, mod, sağlayıcı
+        // ve tüm tercihler Ayarlar penceresinde (öğeler durum takibi için
+        // oluşturulur ama menüye eklenmez).
 
-        // 6. Tercihler (Checkmark Seçenekleri)
         soundEffectsMenuItem = NSMenuItem(title: "Ses Efektleri", action: #selector(toggleSoundEffects), keyEquivalent: "")
         soundEffectsMenuItem.target = self
-        menu.addItem(soundEffectsMenuItem)
 
         hapticMenuItem = NSMenuItem(title: "Dokunsal Titreşim (Trackpad)", action: #selector(toggleHapticFeedback), keyEquivalent: "")
         hapticMenuItem.target = self
-        menu.addItem(hapticMenuItem)
 
         fillerWordsMenuItem = NSMenuItem(title: "Dolgu Kelimelerini Temizle", action: #selector(toggleFillerWords), keyEquivalent: "")
         fillerWordsMenuItem.target = self
-        menu.addItem(fillerWordsMenuItem)
 
         pauseMediaMenuItem = NSMenuItem(title: "Konuşurken Medyayı Duraklat (Play/Pause)", action: #selector(togglePauseMediaPlayback), keyEquivalent: "")
         pauseMediaMenuItem.target = self
-        menu.addItem(pauseMediaMenuItem)
 
         muteAudioMenuItem = NSMenuItem(title: "Konuşurken Medyayı Sustur", action: #selector(toggleMuteSystemAudio), keyEquivalent: "")
         muteAudioMenuItem.target = self
-        menu.addItem(muteAudioMenuItem)
 
         saveHistoryMenuItem = NSMenuItem(title: "Dikte Geçmişini Kaydet", action: #selector(toggleSaveHistory), keyEquivalent: "")
         saveHistoryMenuItem.target = self
-        menu.addItem(saveHistoryMenuItem)
 
         onlyInTextFieldsMenuItem = NSMenuItem(title: "Sadece Yazı Alanında Çalıştır", action: #selector(toggleOnlyInTextFields), keyEquivalent: "")
         onlyInTextFieldsMenuItem.target = self
-        menu.addItem(onlyInTextFieldsMenuItem)
 
         inputMethodMenuItem = NSMenuItem(title: "Panoyu Kullanmadan Yaz", action: #selector(toggleDirectTyping), keyEquivalent: "")
         inputMethodMenuItem.target = self
-        menu.addItem(inputMethodMenuItem)
 
         launchAtLoginMenuItem = NSMenuItem(title: "Başlangıçta Otomatik Çalıştır", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLoginMenuItem.target = self
-        menu.addItem(launchAtLoginMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -373,8 +360,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         if let recItem = recoverAudioMenuItem {
             menu.addItem(recItem)
         }
-
-        menu.addItem(NSMenuItem.separator())
 
         // 7. Çıkış
         let quitItem = NSMenuItem(title: "Çıkış", action: #selector(quitApp), keyEquivalent: "q")
