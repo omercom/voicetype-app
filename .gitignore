@@ -12,6 +12,9 @@ env/
 venv/
 .venv/
 
+# Private release measurements (may contain user transcripts)
+release_measurements/
+
 # Benchmark artifacts / temp audio
 samples/custom/
 !samples/custom/.gitkeep
@@ -25,9 +28,13 @@ test_*.wav
 .app.pid
 app.log
 config.json
+
+# Third-party reference source (cloned for design consultation only)
+reference/
 # Swift build artifacts
 .build/
 /VoiceTyping
 VoiceTyping.app/
 *.bundle/
 sounds
+.DS_Store

@@ -2,12 +2,43 @@ import XCTest
 import AppKit
 @testable import VoiceTypingCore
 
+private final class FakeMediaPlaybackBackend {
+    private var detectionResults: [Bool]
+    private(set) var detectionTimeouts: [TimeInterval] = []
+    private(set) var commandCount = 0
+
+    init(detectionResults: [Bool]) {
+        self.detectionResults = detectionResults
+    }
+
+    func detectPlayback(timeout: TimeInterval) -> Bool {
+        detectionTimeouts.append(timeout)
+        return detectionResults.isEmpty ? false : detectionResults.removeFirst()
+    }
+
+    func sendPlayPause() {
+        commandCount += 1
+    }
+
+    func makeManager() -> MediaPlaybackManager {
+        MediaPlaybackManager(
+            playbackDetector: detectPlayback,
+            playPauseSender: sendPlayPause
+        )
+    }
+}
+
 final class VoiceTypingTests: XCTestCase {
 
     func testConfigLoadingAndDefaults() {
         let config = ConfigManager.shared.config
-        XCTAssertTrue(["groq", "gemini", "apple"].contains(config.provider.lowercased()), "Geçerli bir sağlayıcı seçili olmalıdır: \(config.provider)")
+        XCTAssertTrue(["groq", "gemini", "apple", "assemblyai"].contains(config.provider.lowercased()), "Geçerli bir sağlayıcı seçili olmalıdır: \(config.provider)")
         XCTAssertGreaterThan(config.min_record_duration, 0.0)
+
+        let attributes = try? FileManager.default.attributesOfItem(atPath: ConfigManager.shared.configURL.path)
+        if let permissions = attributes?[.posixPermissions] as? NSNumber {
+            XCTAssertEqual(permissions.intValue & 0o777, 0o600, "Config dosyası API anahtarlarını korumalıdır.")
+        }
 
         // LaTeX ($) yasağı kontrolü
         for model in ConfigManager.availableAppleModels {
@@ -53,6 +84,16 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertFalse(acc.badge.isEmpty)
     }
 
+    func testAccessibilityPermissionExplanation() {
+        let explanation = AccessibilityPermissionInfo.usageDescription(triggerKeyName: "Sağ Cmd")
+
+        XCTAssertTrue(explanation.contains("Sağ Cmd"))
+        XCTAssertTrue(explanation.contains("Esc"))
+        XCTAssertTrue(explanation.contains("Cmd+V"))
+        XCTAssertTrue(AccessibilityPermissionInfo.privacyNotice.contains("Mikrofon"))
+        XCTAssertTrue(AccessibilityPermissionInfo.missingPermissionEffect.contains("global"))
+    }
+
     func testSoundManager() {
         let sm = SoundManager.shared
         sm.isEnabled = true
@@ -71,7 +112,7 @@ final class VoiceTypingTests: XCTestCase {
         let original = injector.getClipboard()
 
         let testStr = "Kadıköy Beşiktaş Şişli 123 Türkçe Karakter Testi: ığüşöç İĞÜŞÖÇ"
-        injector.setClipboard(testStr)
+        XCTAssertTrue(injector.setClipboard(testStr))
         XCTAssertEqual(injector.getClipboard(), testStr)
 
         // Boş metin testi
@@ -115,10 +156,8 @@ final class VoiceTypingTests: XCTestCase {
         let (data, duration) = recorder.stop()
         XCTAssertFalse(recorder.isRecording)
         XCTAssertGreaterThan(duration, 0.25)
-        // Ortamda ses/mikrofon durumuna göre data nil veya Data olabilir, ancak çökmemelidir.
-        if let data = data {
-            XCTAssertGreaterThan(data.count, 0)
-        }
+        XCTAssertNotNil(data, "Tamamlanmış kayıt sessiz olsa bile WAV döndürmelidir.")
+        XCTAssertGreaterThanOrEqual(data?.count ?? 0, 44)
     }
 
     func testRealGroqTranscriptionWithSampleAudio() {
@@ -235,6 +274,15 @@ final class VoiceTypingTests: XCTestCase {
         wait(for: [expectation], timeout: 30.0)
     }
 
+    func testQuietAudioSilenceBoundaryMatchesPCMAndWAV() {
+        for (amplitude, silent) in [(Int16(0), true), (23, true), (24, false), (-24, false), (34, false)] {
+            var sample = amplitude.littleEndian
+            let pcm = withUnsafeBytes(of: &sample) { Data($0) }
+            XCTAssertEqual(AudioRecorder.isPCM16Silent(data: pcm), silent)
+            XCTAssertEqual(AudioRecorder.isAudioSilent(data: AudioRecorder.finalizeRecordingPCM(pcm)), silent)
+        }
+    }
+
     func testAudioRecorderSilenceDetection() {
         // 1. live_recording.wav gerçek ses içerir -> Sessiz OLMAMALI
         let sampleURL = URL(fileURLWithPath: "live_recording.wav")
@@ -257,6 +305,44 @@ final class VoiceTypingTests: XCTestCase {
         }
         let isSilentLoud = AudioRecorder.isAudioSilent(data: loudWav)
         XCTAssertFalse(isSilentLoud, "Yüksek genlikli ses kaydı sessiz işaretlenmemelidir.")
+
+        // Int16.min örneği abs(Int16) taşmasına yol açmamalı.
+        var minimumSampleWav = silentWav
+        minimumSampleWav.withUnsafeMutableBytes { ptr in
+            let samplePtr = ptr.baseAddress!.advanced(by: 44).assumingMemoryBound(to: Int16.self)
+            samplePtr[0] = Int16.min
+        }
+        XCTAssertFalse(AudioRecorder.isAudioSilent(data: minimumSampleWav), "Tam negatif PCM örneği çökmemeli ve ses olarak algılanmalıdır.")
+    }
+
+    func testCompletedSilentRecordingFinalizationIsSeparatedFromSubmission() {
+        let silentPCM = Data(count: 3_200)
+        let silentWAV = AudioRecorder.finalizeRecordingPCM(silentPCM)
+        XCTAssertEqual(silentWAV.count, 44 + silentPCM.count)
+        XCTAssertTrue(AudioRecorder.isAudioSilent(data: silentWAV))
+        XCTAssertTrue(AudioRecorder.isPCM16Silent(data: silentPCM))
+        XCTAssertFalse(AppDelegate.shouldSubmitRecording(silentWAV), "Tamamlanmış dijital sessizlik sağlayıcıya gönderilmemeli.")
+        XCTAssertFalse(AppDelegate.shouldSubmitRecording(nil))
+
+        var voicedPCM = silentPCM
+        voicedPCM.withUnsafeMutableBytes { buffer in
+            buffer.bindMemory(to: Int16.self)[100] = 500
+        }
+        let voicedWAV = AudioRecorder.finalizeRecordingPCM(voicedPCM)
+        XCTAssertTrue(AppDelegate.shouldSubmitRecording(voicedWAV))
+    }
+
+    func testLivePCMForwardingPreservesSpeechSilenceSpeechTimeline() {
+        let firstSpeech = Data((0..<3_200).map { UInt8(truncatingIfNeeded: $0) })
+        let twoSecondsSilence = Data(count: 64_000)
+        let secondSpeech = Data((0..<4_800).map { UInt8(truncatingIfNeeded: 255 - $0) })
+        let chunks = [firstSpeech, twoSecondsSilence, secondSpeech]
+        let forwarded = chunks.map(AppDelegate.livePCMChunkForForwarding)
+
+        XCTAssertEqual(forwarded.count, chunks.count)
+        XCTAssertEqual(forwarded.map(\.count), chunks.map(\.count))
+        XCTAssertEqual(forwarded.reduce(into: Data()) { $0.append($1) }, chunks.reduce(into: Data()) { $0.append($1) })
+        XCTAssertEqual(forwarded[1], twoSecondsSilence, "İki saniyelik sessizlik süresi ve byte'ları canlı akışta korunmalı.")
     }
 
     func testTriggerKeyOptionHelpers() {
@@ -368,6 +454,9 @@ final class VoiceTypingTests: XCTestCase {
         let controller = SettingsWindowController.shared
         XCTAssertNotNil(controller.window)
         XCTAssertEqual(controller.window?.title, "Voice Typing - Ayarlar")
+        let aboutText = SettingsWindowController.aboutVersionText(bundle: .main)
+        XCTAssertTrue(aboutText.contains("Native macOS"))
+        XCTAssertFalse(aboutText.contains("Swift 6"))
         controller.refreshPermissionStatuses()
         controller.loadValues()
 
@@ -482,6 +571,16 @@ final class VoiceTypingTests: XCTestCase {
         hud.showError(message: "Test Hatası", autoDismissDelay: 0.1)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
         XCTAssertEqual(hud.currentState, .error("Test Hatası"))
+        XCTAssertTrue(hud.isVisible, "Hata HUD'si önceki bir HUD durumu olmadan da görünmelidir.")
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.35))
+        XCTAssertEqual(hud.currentState, .idle)
+
+        // 7. Konuşma olmaması teknik hata değil, kullanıcıya bilgi olarak gösterilmeli
+        hud.showNotice(message: "Ses algılanmadı", autoDismissDelay: 0.1)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(hud.currentState, .notice("Ses algılanmadı"))
+        XCTAssertTrue(hud.isVisible)
 
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.35))
         XCTAssertEqual(hud.currentState, .idle)
@@ -562,10 +661,14 @@ final class VoiceTypingTests: XCTestCase {
 
     func testAudioRecorderRealtimeChunkStreaming() {
         let recorder = AudioRecorder.shared
-        var chunkCount = 0
+        let callbackLock = NSLock()
+        var deliveredPCM = Data()
+        var deliveredSizes: [Int] = []
         let started = recorder.start { chunk in
-            chunkCount += 1
-            XCTAssertFalse(chunk.isEmpty)
+            callbackLock.lock()
+            deliveredPCM.append(chunk)
+            deliveredSizes.append(chunk.count)
+            callbackLock.unlock()
         }
         XCTAssertTrue(started)
         XCTAssertTrue(recorder.isRecording)
@@ -573,10 +676,22 @@ final class VoiceTypingTests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.35)
 
         let (data, duration) = recorder.stop()
+        callbackLock.lock()
+        let callbackPCM = deliveredPCM
+        let callbackSizes = deliveredSizes
+        callbackLock.unlock()
+
         XCTAssertFalse(recorder.isRecording)
         XCTAssertGreaterThan(duration, 0.25)
+        XCTAssertNotNil(data)
+        XCTAssertGreaterThanOrEqual(data?.count ?? 0, 44)
         if let data = data {
-            XCTAssertGreaterThan(data.count, 44)
+            XCTAssertEqual(callbackPCM, Data(data.dropFirst(44)), "Callback byte sırası final WAV PCM sırasıyla aynı olmalı.")
+            XCTAssertEqual(callbackSizes.first, AudioRecorder.initialStreamingChunkByteCount)
+            XCTAssertTrue(
+                callbackSizes.dropFirst().dropLast().allSatisfy { $0 == AudioRecorder.streamingChunkByteCount }
+            )
+            XCTAssertLessThanOrEqual(callbackSizes.last ?? 0, AudioRecorder.streamingChunkByteCount)
         }
     }
 
@@ -802,6 +917,93 @@ final class VoiceTypingTests: XCTestCase {
             t10,
             "Sen harika bir insansın, seni çok seviyorum.",
             "Kümülatif güncellemeler baştaki cümleyi yinelememeli, güncel halini almalı."
+        )
+    }
+
+    func testStreamingTranscriptAccumulatorPreservesPauseResetContinuationExactlyOnce() {
+        var accumulator = StreamingTranscriptAccumulator()
+
+        accumulator.receivePartial("Birinci ifade tamamlandı")
+        accumulator.receivePartial("Birinci ifade")
+        XCTAssertEqual(accumulator.text, "Birinci ifade tamamlandı", "Daha kısa partial önceki metni silemez.")
+
+        accumulator.receivePartial("ikinci ifade başladı")
+        XCTAssertEqual(accumulator.text, "Birinci ifade tamamlandı ikinci ifade başladı")
+
+        accumulator.receivePartial("ikinci ifade başladı")
+        accumulator.receivePartial("ikinci ifade başladı ve bitti")
+        XCTAssertEqual(
+            accumulator.text,
+            "Birinci ifade tamamlandı ikinci ifade başladı ve bitti",
+            "Pause sonrası sıfırlanan partial devamı tam bir kez eklenmeli."
+        )
+    }
+
+    func testStreamingTranscriptAccumulatorReplacesUnstableSuffixWithoutDuplication() {
+        var accumulator = StreamingTranscriptAccumulator()
+        accumulator.receivePartial("Yarın toplantıyı saat üçte yapalım")
+        accumulator.receivePartial("Yarın toplantıyı saat dörtte yapalım")
+
+        XCTAssertEqual(accumulator.text, "Yarın toplantıyı saat dörtte yapalım")
+        XCTAssertFalse(accumulator.text.contains("üçte yapalım Yarın"))
+    }
+
+    func testStreamingTranscriptAccumulatorUsesOverlapAndTimedCorrections() {
+        var overlapAccumulator = StreamingTranscriptAccumulator()
+        overlapAccumulator.receivePartial("Bugün toplantı saat")
+        overlapAccumulator.receivePartial("saat üçte olacak")
+        XCTAssertEqual(overlapAccumulator.text, "Bugün toplantı saat üçte olacak")
+
+        var timedAccumulator = StreamingTranscriptAccumulator()
+        timedAccumulator.receivePartial(
+            "kırmızı elma",
+            segments: [TimedTranscriptSegment(startTime: 0, duration: 0.8, text: "kırmızı elma")]
+        )
+        timedAccumulator.receivePartial(
+            "yeşil elma",
+            segments: [TimedTranscriptSegment(startTime: 0.02, duration: 0.82, text: "yeşil elma")]
+        )
+        XCTAssertEqual(timedAccumulator.text, "yeşil elma", "Aynı zaman aralığındaki kökten düzeltme eski hipotezi değiştirmeli.")
+
+        timedAccumulator.receivePartial(
+            "ikinci ifade",
+            segments: [TimedTranscriptSegment(startTime: 2.0, duration: 0.7, text: "ikinci ifade")]
+        )
+        XCTAssertEqual(timedAccumulator.text, "yeşil elma ikinci ifade")
+
+        var segmentFallback = StreamingTranscriptAccumulator()
+        segmentFallback.receivePartial(
+            "",
+            segments: [TimedTranscriptSegment(startTime: 0, duration: 0.5, text: "segment metni")]
+        )
+        XCTAssertEqual(segmentFallback.text, "segment metni")
+    }
+
+    func testStreamingTranscriptAccumulatorKeepsGeminiCommittedTextAndPendingTail() {
+        var accumulator = StreamingTranscriptAccumulator()
+        accumulator.receiveFinal("Birinci ifade")
+        accumulator.receivePartial("ikinci ifade")
+        XCTAssertEqual(accumulator.committedText, "Birinci ifade")
+        XCTAssertEqual(accumulator.text, "Birinci ifade ikinci ifade", "Interim önizleme committed içeriği korumalı.")
+
+        accumulator.receiveFinal("ikinci ifade")
+        XCTAssertEqual(accumulator.text, "Birinci ifade ikinci ifade")
+
+        var pendingTail = StreamingTranscriptAccumulator()
+        pendingTail.receivePartial("Merhaba dünya devam ediyor")
+        pendingTail.receiveFinal("Merhaba dünya")
+        XCTAssertEqual(pendingTail.committedText, "Merhaba dünya")
+        XCTAssertEqual(pendingTail.activeText, "devam ediyor")
+        XCTAssertEqual(pendingTail.text, "Merhaba dünya devam ediyor", "Son unpromoted interim kuyruğu final çıktıda kaybolmamalı.")
+    }
+
+    func testStreamingTranscriptReconcilerCumulativeCorrectionDoesNotDuplicateSentence() {
+        XCTAssertEqual(
+            StreamingTranscriptReconciler.merge(
+                existing: "The quick brown fox jumps",
+                incoming: "The quick brown fox jumped"
+            ),
+            "The quick brown fox jumped"
         )
     }
 
@@ -1166,29 +1368,70 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertFalse(emptyFail)
     }
 
-    func testMediaPlaybackManagerInstanceAndDetection() {
-        let manager = MediaPlaybackManager.shared
-        XCTAssertNotNil(manager)
+    func testMediaPlaybackManagerPlayingLifecycle() {
+        let backend = FakeMediaPlaybackBackend(detectionResults: [true])
+        let manager = backend.makeManager()
 
-        // isMediaActuallyPlaying çağrısı güvenli ve çökmeden bir Bool dönmelidir
-        let isPlaying = manager.isMediaActuallyPlaying(timeout: 0.15)
-        print("Test ortamında aktif medya çalma durumu: \(isPlaying)")
+        manager.pauseForDictation()
+        XCTAssertEqual(backend.commandCount, 1, "Çalan medya dikte başında bir kez duraklatılmalıdır.")
+        XCTAssertEqual(backend.detectionTimeouts.count, 1)
+        XCTAssertEqual(backend.detectionTimeouts[0], 0.12, accuracy: 0.001)
 
-        // resetState çağrısı güvenli olmalıdır
-        manager.resetState()
+        manager.resumeAfterDictation()
+        XCTAssertEqual(backend.commandCount, 2, "Dikte sonunda yalnızca daha önce duraklatılan medya sürdürülmelidir.")
 
-        // simulatePlayPauseKey donanım tuş çağrısı çökmeden tamamlanmalıdır
-        manager.simulatePlayPauseKey()
+        manager.resumeAfterDictation()
+        XCTAssertEqual(backend.commandCount, 2, "İkinci resume yeni bir medya komutu göndermemelidir.")
     }
 
-    func testMediaPlaybackManagerDictationLifecycleSafety() {
-        let manager = MediaPlaybackManager.shared
+    func testMediaPlaybackManagerNotPlayingLifecycle() {
+        let backend = FakeMediaPlaybackBackend(detectionResults: [false])
+        let manager = backend.makeManager()
 
-        // Dikte başlatma çağrısı
+        manager.pauseForDictation()
+        manager.resumeAfterDictation()
+        manager.resetState()
+
+        XCTAssertEqual(backend.detectionTimeouts.count, 1)
+        XCTAssertEqual(backend.commandCount, 0, "Çalmayan medya için hiçbir play/pause komutu gönderilmemelidir.")
+    }
+
+    func testMediaPlaybackManagerDoesNotPauseTwice() {
+        let backend = FakeMediaPlaybackBackend(detectionResults: [true])
+        let manager = backend.makeManager()
+
+        manager.pauseForDictation()
         manager.pauseForDictation()
 
-        // Dikte bitiş / iptal çağrısı
+        XCTAssertEqual(backend.detectionTimeouts.count, 1, "Aktif dikte oturumunda oynatma yeniden sorgulanmamalıdır.")
+        XCTAssertEqual(backend.commandCount, 1, "Aktif dikte oturumunda ikinci pause komutu gönderilmemelidir.")
+    }
+
+    func testMediaPlaybackManagerResumeAndResetClearState() {
+        let backend = FakeMediaPlaybackBackend(detectionResults: [true])
+        let manager = backend.makeManager()
+
         manager.resumeAfterDictation()
+        manager.resetState()
+        XCTAssertEqual(backend.commandCount, 0, "Kaydedilmiş pause durumu yokken resume/reset işlem yapmamalıdır.")
+
+        manager.pauseForDictation()
+        manager.resetState()
+        XCTAssertEqual(backend.commandCount, 2, "Reset, manager tarafından duraklatılan medyayı bir kez sürdürmelidir.")
+
+        manager.resumeAfterDictation()
+        manager.resetState()
+        XCTAssertEqual(backend.commandCount, 2, "Reset sonrası durum temizlenmiş olmalıdır.")
+    }
+
+    func testMediaPlaybackManagerForwardsDetectorTimeout() {
+        let backend = FakeMediaPlaybackBackend(detectionResults: [true])
+        let manager = backend.makeManager()
+
+        XCTAssertTrue(manager.isMediaActuallyPlaying(timeout: 0.37))
+        XCTAssertEqual(backend.detectionTimeouts.count, 1)
+        XCTAssertEqual(backend.detectionTimeouts[0], 0.37, accuracy: 0.001)
+        XCTAssertEqual(backend.commandCount, 0, "Salt oynatma sorgusu medya komutu göndermemelidir.")
     }
 
     func testLiveAppleSpeechSessionProtocolAndLifecycle() {
@@ -1264,11 +1507,12 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertTrue(firstStart)
         XCTAssertTrue(recorder.isRecording)
 
-        // 2. Durdurma (motor ılık bekletilmeli)
+        // 2. Durdurma (motor çalışmaz, hazırlanmış graph ılık bekletilir)
         _ = recorder.stop()
         XCTAssertFalse(recorder.isRecording)
+        XCTAssertTrue(recorder.isWarm)
 
-        // 3. İkinci başlatma (Warm engine - 0.1ms uyanma)
+        // 3. İkinci başlatma (hazırlanmış graph yeniden kullanılır)
         let warmStart = recorder.start()
         XCTAssertTrue(warmStart, "Ilık moddaki motor hemen başlayabilmeli.")
         XCTAssertTrue(recorder.isRecording)
@@ -1420,45 +1664,348 @@ final class VoiceTypingTests: XCTestCase {
 
     // MARK: - TypeWhisper Aşama 1 & 2 Testleri
 
-    func testMicrophoneBoostProcessor() {
-        let processor = MicrophoneBoostProcessor()
-
-        // 1. Boş dizi kontrolü
-        XCTAssertEqual(processor.process(samples: []).count, 0)
-
-        // 2. Kısık ses güçlendirme kontrolü (fısıltı veya uzaktan konuşma)
-        // inputRMS ~ 0.01 (hedef RMS 0.10 olduğu için kazanç artmalı)
-        let quietSamples = [Float](repeating: 0.01, count: 1600)
-        let boosted = processor.process(samples: quietSamples, enabled: true)
-        let boostedRMS = MicrophoneBoostProcessor.calculateRMS(boosted)
-        XCTAssertGreaterThan(boostedRMS, 0.01, "Kısık ses örneğinin RMS değeri yükseltilmiş olmalı.")
-
-        // 3. Dip gürültüsü kilidi (Noise Floor Hold):
-        // Çok düşük seviyedeki sessizlikte (RMS < 0.0015) oda gürültüsünü pompalamamalı
-        let silenceSamples = [Float](repeating: 0.0005, count: 1600)
-        let silenceProcessed = processor.process(samples: silenceSamples, enabled: true)
-        let silenceRMS = MicrophoneBoostProcessor.calculateRMS(silenceProcessed)
-        XCTAssertLessThanOrEqual(silenceRMS, 0.02, "Dip gürültüsü ve sessizlik gereksizce yükseltilmemeli.")
-
-        // 4. Tanh Soft Limiter kontrolü (Ani yüksek seslerde kırpılma/patlama önleme)
-        let loudSample: Float = 0.95
-        let limited = MicrophoneBoostProcessor.softLimited(loudSample)
-        XCTAssertLessThan(limited, 0.98, "Tanh limiter tepe değerini tavanın altında tutmalı.")
-
-        // 5. PCM16 Data işleme kontrolü
-        var rawPCM = Data(count: 3200)
-        rawPCM.withUnsafeMutableBytes { buf in
-            guard let ptr = buf.bindMemory(to: Int16.self).baseAddress else { return }
-            for i in 0..<1600 {
-                ptr[i] = 300 // Kısık ses
+    private func generatedPCM16(seconds: Double, sample: (Int, Double) -> Float) -> Data {
+        let sampleCount = Int(seconds * 16_000.0)
+        var data = Data(count: sampleCount * MemoryLayout<Int16>.size)
+        data.withUnsafeMutableBytes { buffer in
+            guard let samples = buffer.bindMemory(to: Int16.self).baseAddress else { return }
+            for index in 0..<sampleCount {
+                let value = max(-1.0, min(1.0, sample(index, Double(index) / 16_000.0)))
+                samples[index] = Int16(value * 32767.0)
             }
         }
-        let processedPCM = processor.processPCM16Data(rawPCM, enabled: true)
-        XCTAssertEqual(processedPCM.count, rawPCM.count)
-        processedPCM.withUnsafeBytes { buf in
-            guard let ptr = buf.bindMemory(to: Int16.self).baseAddress else { return }
-            XCTAssertGreaterThan(abs(ptr[100]), 300, "PCM16 genliği güçlendirilmiş olmalı.")
+        return data
+    }
+
+    private func speechLikePCM(seconds: Double, amplitude: Float = 0.014) -> Data {
+        generatedPCM16(seconds: seconds) { _, time in
+            let envelope = 0.62 + 0.23 * sin(2 * .pi * 3.1 * time) + 0.15 * sin(2 * .pi * 5.3 * time)
+            let carrier = 0.52 * sin(2 * .pi * 210 * time)
+                + 0.31 * sin(2 * .pi * 620 * time)
+                + 0.17 * sin(2 * .pi * 1_080 * time)
+            return amplitude * Float(envelope * carrier)
         }
+    }
+
+    private func stationaryTonePCM(seconds: Double, frequency: Double, amplitude: Float = 0.010) -> Data {
+        generatedPCM16(seconds: seconds) { _, time in
+            amplitude * Float(sin(2 * .pi * frequency * time))
+        }
+    }
+
+    private func stationaryFanPCM(seconds: Double, amplitude: Float = 0.010) -> Data {
+        generatedPCM16(seconds: seconds) { _, time in
+            amplitude * Float(0.62 * sin(2 * .pi * 90 * time)
+                + 0.24 * sin(2 * .pi * 200 * time)
+                + 0.14 * sin(2 * .pi * 500 * time))
+        }
+    }
+
+    private func seededColoredNoisePCM(seconds: Double, amplitude: Float = 0.025) -> Data {
+        var state: UInt32 = 0xC0FFEE
+        var filtered: Float = 0
+        return generatedPCM16(seconds: seconds) { _, _ in
+            state = 1_664_525 &* state &+ 1_013_904_223
+            let white = Float(Int32(bitPattern: state)) / Float(Int32.max)
+            filtered = filtered * 0.86 + white * 0.14
+            return filtered * amplitude
+        }
+    }
+
+    private func dampedKeyboardPCM(seconds: Double) -> Data {
+        generatedPCM16(seconds: seconds) { index, time in
+            let samplesPerStrike = 2_880 // 180 ms
+            let strikeOffset = index % samplesPerStrike
+            guard strikeOffset < 480 else { return 0 }
+            let envelope = exp(-Double(strikeOffset) / 70.0)
+            let impact = sin(2 * .pi * 1_700 * time) + 0.55 * sin(2 * .pi * 2_900 * time)
+            return Float(0.08 * envelope * impact)
+        }
+    }
+
+    private func pcmRMS(_ data: Data) -> Float {
+        let sampleCount = data.count / MemoryLayout<Int16>.size
+        guard sampleCount > 0 else { return 0 }
+        return data.withUnsafeBytes { buffer in
+            let samples = buffer.bindMemory(to: Int16.self)
+            var sum: Double = 0
+            for index in 0..<sampleCount {
+                let value = Double(samples[index]) / 32768.0
+                sum += value * value
+            }
+            return Float(sqrt(sum / Double(sampleCount)))
+        }
+    }
+
+    private func processPCMInChunks(_ data: Data, sampleChunkSizes: [Int], processor: MicrophoneBoostProcessor) -> Data {
+        var output = Data()
+        var byteOffset = 0
+        var chunkIndex = 0
+        while byteOffset < data.count {
+            let requestedBytes = sampleChunkSizes[chunkIndex % sampleChunkSizes.count] * MemoryLayout<Int16>.size
+            let byteCount = min(requestedBytes, data.count - byteOffset)
+            let chunk = data.subdata(in: byteOffset..<(byteOffset + byteCount))
+            output.append(processor.processPCM16Data(chunk))
+            byteOffset += byteCount
+            chunkIndex += 1
+        }
+        return output
+    }
+
+    func testMicrophoneBoostPreservesStartupAndSustainedQuietSpeech() {
+        let processor = MicrophoneBoostProcessor()
+        let speech = speechLikePCM(seconds: 5.0)
+        let processed = processor.processPCM16Data(speech)
+        let startupBytes = 3_200 * MemoryLayout<Int16>.size
+        let finalSecondStart = 4 * 16_000 * MemoryLayout<Int16>.size
+
+        XCTAssertEqual(processed.prefix(startupBytes), speech.prefix(startupBytes), "200 ms gözlem ilk kelime PCM'ini unity ve bit-exact korumalı.")
+        let inputTail = speech.subdata(in: finalSecondStart..<speech.count)
+        let outputTail = processed.subdata(in: finalSecondStart..<processed.count)
+        XCTAssertGreaterThan(pcmRMS(outputTail), pcmRMS(inputTail) * 1.7, "Sürekli gerçekçi kısık konuşma 5 saniye sonra da anlamlı yükseltilmeli.")
+    }
+
+    func testMicrophoneBoostNeverBlastsStationaryTonesOrFanNoise() {
+        for frequency in [90.0, 200.0, 500.0] {
+            let tone = stationaryTonePCM(seconds: 3.0, frequency: frequency)
+            let processed = processPCMInChunks(tone, sampleChunkSizes: [320], processor: MicrophoneBoostProcessor())
+            XCTAssertEqual(processed, tone, "\(frequency) Hz sabit ton startup dahil hiçbir noktada yükseltilmemeli.")
+        }
+
+        let fan = stationaryFanPCM(seconds: 5.0)
+        let processedFan = processPCMInChunks(fan, sampleChunkSizes: [113, 320, 997], processor: MicrophoneBoostProcessor())
+        XCTAssertEqual(processedFan, fan, "Çok tonlu sabit fan gürültüsü tüm trajektori boyunca unity kalmalı.")
+    }
+
+    func testMicrophoneBoostNeverBlastsSeededStationaryNoiseOrKeyboardBursts() {
+        let coloredNoise = seededColoredNoisePCM(seconds: 5.0)
+        let processedNoise = processPCMInChunks(coloredNoise, sampleChunkSizes: [320], processor: MicrophoneBoostProcessor())
+        XCTAssertEqual(processedNoise, coloredNoise, "Seeded broadband/colored sabit gürültü startup dahil yükseltilmemeli.")
+
+        let keyboard = dampedKeyboardPCM(seconds: 3.0)
+        let processedKeyboard = processPCMInChunks(keyboard, sampleChunkSizes: [320], processor: MicrophoneBoostProcessor())
+        XCTAssertEqual(processedKeyboard, keyboard, "Gerçekçi sönümlü klavye darbeleri konuşma boost'unu açmamalı.")
+    }
+
+    func testMicrophoneBoostRebasesMidRecordingStationaryNoisePlateauAtUnity() {
+        let silence = Data(count: 16_000 * MemoryLayout<Int16>.size)
+        let onset = seededColoredNoisePCM(seconds: 3.0)
+        var timeline = silence
+        timeline.append(onset)
+        let processed = processPCMInChunks(timeline, sampleChunkSizes: [1_600, 137, 509], processor: MicrophoneBoostProcessor())
+        XCTAssertEqual(processed, timeline, "Kayıt ortasında başlayan sabit gürültü boost açmadan tabanı yeniden kurmalı.")
+    }
+
+    func testMicrophoneBoostExcludesSparseImpulsesFromSpeechEntry() {
+        let impulses = generatedPCM16(seconds: 1.0) { index, _ in
+            index % 640 == 0 ? 0.20 : 0.0
+        }
+        let processed = processPCMInChunks(impulses, sampleChunkSizes: [320], processor: MicrophoneBoostProcessor())
+        XCTAssertEqual(processed, impulses, "Seyrek darbeler konuşma olarak AGC'yi açmamalı.")
+    }
+
+    func testMicrophoneBoostNoiseLimitIsActualGainBound() {
+        let processor = MicrophoneBoostProcessor()
+        _ = processor.processPCM16Data(stationaryFanPCM(seconds: 1.0))
+        let speech = speechLikePCM(seconds: 2.0, amplitude: 0.020)
+        let processed = processPCMInChunks(speech, sampleChunkSizes: [320], processor: processor)
+
+        XCTAssertLessThanOrEqual(pcmRMS(processed), 0.0081, "Kurulan gürültü tabanı çıkışı tanımlı boosted-noise RMS tavanında sınırlamalı.")
+    }
+
+    func testMicrophoneBoostIsChunkPartitionInvariant() {
+        let input = speechLikePCM(seconds: 2.0)
+        let productionChunks = processPCMInChunks(input, sampleChunkSizes: [1_600], processor: MicrophoneBoostProcessor())
+        let irregularChunks = processPCMInChunks(input, sampleChunkSizes: [113, 997, 41, 509, 2_003, 17], processor: MicrophoneBoostProcessor())
+        let singleChunk = MicrophoneBoostProcessor().processPCM16Data(input)
+
+        XCTAssertEqual(productionChunks, singleChunk)
+        XCTAssertEqual(irregularChunks, singleChunk)
+    }
+
+    func testMicrophoneBoostReturnsTowardUnityDuringSustainedNearSilence() {
+        let processor = MicrophoneBoostProcessor()
+        _ = processor.processPCM16Data(speechLikePCM(seconds: 1.5))
+        let nearSilence = generatedPCM16(seconds: 2.0) { _, time in
+            0.00020 * Float(sin(2 * .pi * 120 * time))
+        }
+        let processed = processor.processPCM16Data(nearSilence)
+        let tailStart = processed.count - 3_200
+        let inputTail = nearSilence.subdata(in: tailStart..<nearSilence.count)
+        let outputTail = processed.subdata(in: tailStart..<processed.count)
+
+        XCTAssertLessThanOrEqual(pcmRMS(outputTail), pcmRMS(inputTail) * 1.05, "Sessizlik önceki yüksek kazancı tutmamalı.")
+    }
+
+    func testMicrophoneBoostPCMIntegrityLimiterAndDisabledReset() {
+        let processor = MicrophoneBoostProcessor()
+        var extremes = Data()
+        var minimum = Int16.min
+        var maximum = Int16.max
+        extremes.append(Data(bytes: &minimum, count: 2))
+        extremes.append(Data(bytes: &maximum, count: 2))
+        extremes.append(0xAB)
+        XCTAssertEqual(processor.processPCM16Data(extremes), extremes, "Unity yolu Int16 uçlarını ve trailing byte'ı bit-exact korumalı.")
+
+        _ = processor.processPCM16Data(speechLikePCM(seconds: 1.0))
+        let transient = processor.process(samples: [Float](repeating: 0.95, count: 320))
+        XCTAssertEqual(transient.count, 320)
+        XCTAssertLessThan(transient.map(abs).max() ?? 1.0, 0.98)
+
+        let speech = speechLikePCM(seconds: 1.0)
+        XCTAssertEqual(processor.processPCM16Data(speech, enabled: false), speech)
+        let startupAfterReset = speech.prefix(6_400)
+        XCTAssertEqual(processor.processPCM16Data(Data(startupAfterReset)), Data(startupAfterReset), "Disabled işlemci durumunu sıfırlamalı.")
+    }
+
+    func testMicrophoneFeedbackInitialSilenceAndWeakInputStates() {
+        var tracker = MicrophoneFeedbackTracker()
+        tracker.reset(at: 0)
+
+        XCTAssertEqual(tracker.update(power: -90, at: 0.74), .hidden, "Geri bildirim grace süresi içinde görünmemeli.")
+        XCTAssertEqual(tracker.update(power: -90, at: 0.75), .hidden)
+        XCTAssertEqual(tracker.update(power: -90, at: 1.39), .hidden, "Bekleme dwell süresi tamamlanmalı.")
+        XCTAssertEqual(tracker.update(power: -90, at: 1.41), .waitingForVoice)
+
+        tracker.reset(at: 10)
+        XCTAssertEqual(tracker.update(power: -60, at: 10.75), .hidden)
+        XCTAssertEqual(tracker.update(power: -60, at: 11.39), .hidden)
+        XCTAssertEqual(tracker.update(power: -60, at: 11.41), .lowLevel, "Zayıf fakat sıfır olmayan giriş düşük seviye olmalı.")
+    }
+
+    func testMicrophoneFeedbackRecognizedSpeechPauseLaterWeakAndRecovery() {
+        var tracker = MicrophoneFeedbackTracker()
+        tracker.reset(at: 0)
+        _ = tracker.update(power: -90, at: 0.75)
+        XCTAssertEqual(tracker.update(power: -90, at: 1.41), .waitingForVoice)
+
+        tracker.markRecognizedSpeech()
+        XCTAssertTrue(tracker.hasRecognizedSpeech)
+        XCTAssertEqual(tracker.state, .hidden, "Interim bekleme geri bildirimini hemen temizlemeli.")
+        XCTAssertEqual(tracker.update(power: -90, at: 4.50), .hidden, "Üç saniyeden uzun konuşma sonrası sessizlik normal duraklamadır.")
+        XCTAssertEqual(tracker.update(power: -90, at: 8.00), .hidden)
+
+        XCTAssertEqual(tracker.update(power: -60, at: 8.10), .hidden)
+        XCTAssertEqual(tracker.update(power: -60, at: 8.75), .lowLevel, "Sonraki sürdürülen zayıf giriş yine bildirilmelidir.")
+        XCTAssertEqual(tracker.update(power: -48, at: 9.0), .lowLevel, "Histerezis bandı durumu titreştirmemeli.")
+        XCTAssertEqual(tracker.update(power: -43, at: 9.10), .lowLevel)
+        XCTAssertEqual(tracker.update(power: -48, at: 9.30), .lowLevel, "Kısa toparlanma geri bildirimi kapatmamalı.")
+        XCTAssertEqual(tracker.update(power: -43, at: 10.0), .lowLevel)
+        XCTAssertEqual(tracker.update(power: -43, at: 10.34), .lowLevel)
+        XCTAssertEqual(tracker.update(power: -43, at: 10.36), .hidden, "Sürdürülen toparlanma geri bildirimi kapatmalı.")
+    }
+
+    func testMicrophoneFeedbackAnnouncementsOnceAndRecordingPresentationUnchanged() {
+        let hud = RecordingHUD.shared
+        let originalAnnouncementHandler = hud.lowInputAnnouncementHandler
+        var announcements: [String] = []
+        hud.lowInputAnnouncementHandler = { announcements.append($0) }
+        defer { hud.lowInputAnnouncementHandler = originalAnnouncementHandler }
+
+        hud.dismiss(animated: false)
+        hud.showRecording()
+        hud.beginLowInputWarningSession(at: 0)
+        let originalState = hud.currentState
+        let originalText = hud.currentStatusText
+        let meterWasActive = hud.isMeteringActive
+        let pulseWasActive = hud.isPulseAnimationActive
+
+        hud.updateLowInputWarning(power: -90, at: 0.75)
+        hud.updateLowInputWarning(power: -90, at: 1.40)
+        hud.updateLowInputWarning(power: -90, at: 2.0)
+        XCTAssertEqual(hud.microphoneFeedbackState, .waitingForVoice)
+        XCTAssertEqual(hud.currentLowInputWarningText, MicrophoneFeedbackTracker.waitingText)
+        XCTAssertEqual(hud.isMicrophoneFeedbackAnimationActive, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        XCTAssertEqual(announcements, [MicrophoneFeedbackTracker.waitingAnnouncementText])
+
+        hud.updateInterimText("Merhaba nasılsın")
+        XCTAssertEqual(hud.microphoneFeedbackState, .hidden)
+        XCTAssertFalse(hud.isLowInputWarningVisible)
+        XCTAssertFalse(hud.isMicrophoneFeedbackAnimationActive)
+        XCTAssertEqual(hud.currentStatusText, "Merhaba nasılsın")
+        XCTAssertEqual(announcements.count, 1, "Gizlenirken duyuru yapılmamalı.")
+
+        hud.updateLowInputWarning(power: -90, at: 5.0)
+        hud.updateLowInputWarning(power: -90, at: 8.5)
+        XCTAssertEqual(hud.microphoneFeedbackState, .hidden, "Konuşma sonrası uzun sessizlik gizli kalmalı.")
+        hud.updateLowInputWarning(power: -60, at: 9.0)
+        hud.updateLowInputWarning(power: -60, at: 9.65)
+        hud.updateLowInputWarning(power: -60, at: 10.0)
+        XCTAssertEqual(hud.microphoneFeedbackState, .lowLevel)
+        XCTAssertEqual(hud.isMicrophoneFeedbackAnimationActive, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        XCTAssertEqual(announcements, [
+            MicrophoneFeedbackTracker.waitingAnnouncementText,
+            MicrophoneFeedbackTracker.lowLevelAnnouncementText
+        ], "Her görünür durum geçişi yalnızca bir kez duyurulmalı.")
+
+        XCTAssertEqual(hud.currentState, originalState)
+        XCTAssertNotEqual(hud.currentStatusText, originalText, "Yalnızca açıkça gönderilen interim metin değişikliği korunmalı.")
+        XCTAssertEqual(hud.currentStatusText, "Merhaba nasılsın")
+        XCTAssertEqual(hud.isMeteringActive, meterWasActive)
+        XCTAssertEqual(hud.isPulseAnimationActive, pulseWasActive)
+
+        hud.showTranscribing()
+        XCTAssertEqual(hud.microphoneFeedbackState, .hidden)
+        XCTAssertFalse(hud.isMeteringActive)
+        hud.dismiss(animated: false)
+    }
+
+    func testRecordingHUDCompactFeedbackLayoutAndRestoration() {
+        let short = RecordingHUDLayout.calculate(statusTextWidth: 70, warningTextWidth: nil, availableScreenWidth: 1_000)
+        XCTAssertEqual(short.panelWidth, 152)
+        XCTAssertNil(short.warningFrame)
+
+        let withBadge = RecordingHUDLayout.calculate(statusTextWidth: 70, warningTextWidth: 24, availableScreenWidth: 1_000)
+        XCTAssertLessThanOrEqual(withBadge.panelWidth - short.panelWidth, 40)
+        XCTAssertEqual(withBadge.warningFrame?.width, 24)
+        XCTAssertLessThanOrEqual(withBadge.statusFrame.maxX, withBadge.warningFrame?.minX ?? 0)
+        XCTAssertLessThanOrEqual(withBadge.warningFrame?.maxX ?? .greatestFiniteMagnitude, withBadge.panelWidth - 10)
+
+        let long = RecordingHUDLayout.calculate(statusTextWidth: 900, warningTextWidth: 24, availableScreenWidth: 1_000)
+        XCTAssertEqual(long.panelWidth, 968)
+        XCTAssertLessThanOrEqual(long.statusFrame.maxX, long.warningFrame?.minX ?? 0)
+        XCTAssertLessThanOrEqual(long.warningFrame?.maxX ?? .greatestFiniteMagnitude, long.panelWidth - 10)
+
+        let narrow = RecordingHUDLayout.calculate(statusTextWidth: 500, warningTextWidth: 24, availableScreenWidth: 190)
+        XCTAssertEqual(narrow.panelWidth, 158)
+        XCTAssertGreaterThanOrEqual(narrow.statusFrame.width, 24)
+        XCTAssertLessThanOrEqual(narrow.statusFrame.maxX, narrow.warningFrame?.minX ?? 0)
+        XCTAssertLessThanOrEqual(narrow.warningFrame?.maxX ?? .greatestFiniteMagnitude, narrow.panelWidth - 10)
+
+        let restored = RecordingHUDLayout.calculate(statusTextWidth: 70, warningTextWidth: nil, availableScreenWidth: 1_000)
+        XCTAssertEqual(restored, short)
+    }
+
+    func testRecordingHUDFeedbackToTranscribingRestoresStatusOnlyWidth() {
+        // Bu test kapsül (pill) yerleşiminin ölçülerini doğrular. Kullanıcının
+        // gerçek config'i çentik modundaysa minimum genişlik 400pt olur ve
+        // karşılaştırma anlamsızlaşır; bu yüzden mod açıkça sabitlenir.
+        let originalStyle = ConfigManager.shared.config.hud_style
+        ConfigManager.shared.update { $0.hud_style = "pill" }
+        defer { ConfigManager.shared.update { $0.hud_style = originalStyle } }
+
+        let hud = RecordingHUD.shared
+        let originalAnnouncementHandler = hud.lowInputAnnouncementHandler
+        hud.lowInputAnnouncementHandler = { _ in }
+        defer { hud.lowInputAnnouncementHandler = originalAnnouncementHandler }
+
+        hud.dismiss(animated: false)
+        hud.showRecording()
+        hud.updateInterimText("korunan ara metin")
+        hud.beginLowInputWarningSession(at: 0)
+        hud.updateLowInputWarning(power: -60, at: 0.75)
+        hud.updateLowInputWarning(power: -60, at: 1.41)
+        hud.finishPresentationTransitions()
+        let feedbackWidth = hud.currentPanelWidth
+        XCTAssertEqual(hud.microphoneFeedbackState, .lowLevel)
+
+        hud.showTranscribing()
+        XCTAssertEqual(hud.currentState, .transcribing)
+        XCTAssertEqual(hud.currentStatusText, "korunan ara metin")
+        XCTAssertEqual(hud.microphoneFeedbackState, .hidden)
+        hud.finishPresentationTransitions()
+        XCTAssertLessThan(hud.currentPanelWidth, feedbackWidth, "Transcribing geçişi kompakt badge genişliğini kaldırmalı.")
+        hud.dismiss(animated: false)
     }
 
     func testClamshellStateProvider() {
@@ -1566,6 +2113,19 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertEqual(cfg.auto_submit_key, "return")
     }
 
+    func testNoSpeechMessagesAreNotTechnicalErrors() {
+        XCTAssertTrue(Transcriber.isNoSpeechMessage("No speech detected"))
+        XCTAssertTrue(Transcriber.isNoSpeechMessage("Ses algılanmadı"))
+        XCTAssertTrue(Transcriber.isNoSpeechMessage("blank_audio"))
+        XCTAssertFalse(Transcriber.isNoSpeechMessage("Ağ bağlantısı zaman aşımına uğradı"))
+
+        let appleSilenceError = NSError(domain: "kAFAssistantErrorDomain", code: 203)
+        XCTAssertTrue(Transcriber.isNoSpeechError(appleSilenceError))
+
+        let providerError = NSError(domain: "VoiceTyping", code: 1, userInfo: [NSLocalizedDescriptionKey: "Sunucuya bağlanılamadı"])
+        XCTAssertFalse(Transcriber.isNoSpeechError(providerError))
+    }
+
     func testAppProfileFormatterCategories() {
         let formatter = AppProfileFormatter.shared
 
@@ -1579,6 +2139,9 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.microsoft.VSCode", appName: "Code"), .codeEditor)
         XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.todesktop.230313mzl4w4u92", appName: "Cursor"), .codeEditor)
         XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.apple.dt.Xcode", appName: "Xcode"), .codeEditor)
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "dev.zed.Zed", appName: "Zed"), .codeEditor)
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.panic.Nova", appName: "Nova"), .codeEditor)
+        XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.example.editor", appName: "Windsurf"), .codeEditor)
 
         // Messaging tespiti
         XCTAssertEqual(formatter.detectCategory(bundleIdentifier: "com.tinyspeck.slackmacgap", appName: "Slack"), .messaging)

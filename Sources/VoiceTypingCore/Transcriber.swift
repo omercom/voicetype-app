@@ -59,8 +59,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     private var hasSentStreamEnd: Bool = false
     private var streamEndSentTime: CFAbsoluteTime = 0
     private var startTime: CFAbsoluteTime = 0
-    private var accumulatedText: String = ""
-    private var latestInterimText: String = ""
+    private var transcriptAccumulator = StreamingTranscriptAccumulator()
     private var modelTurnFallbackText: String = ""
     private var safetyTimer: DispatchSourceTimer?
     private var finalizationTimer: DispatchSourceTimer?
@@ -72,6 +71,39 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         self.model = model.isEmpty ? "gemini-3.5-transcribe-live" : model
         self.language = language
         self.systemPrompt = systemPrompt
+    }
+
+    static func setupPayload(model: String, language: String, systemPrompt: String) -> [String: Any] {
+        let nativeAudio = ConfigManager.isGeminiNativeAudioLiveModel(model)
+        var setup: [String: Any] = [
+            "model": model.hasPrefix("models/") ? model : "models/\(model)",
+            "generationConfig": [
+                // Native audio Live models reject TEXT-only response modality.
+                "responseModalities": nativeAudio ? ["AUDIO"] : ["TEXT"]
+            ],
+            "inputAudioTranscription": [String: Any]()
+        ]
+
+        // Native audio models infer language automatically. The older transcribe
+        // Live model accepts an explicit language code.
+        let lang = language.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !nativeAudio && !lang.isEmpty && lang.lowercased() != "auto" {
+            setup["inputAudioTranscription"] = ["languageCodes": [lang]]
+        }
+
+        if ConfigManager.isGeminiExtendedThinkingModel(model) {
+            setup["thinkingConfig"] = ["thinkingLevel": "low"]
+        }
+
+        let prompt = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prompt.isEmpty && ConfigManager.supportsSystemPrompt(model: model) {
+            setup["systemInstruction"] = [
+                "parts": [
+                    ["text": prompt]
+                ]
+            ]
+        }
+        return ["setup": setup]
     }
 
     public func start() {
@@ -102,32 +134,11 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         ws.resume()
 
         // 1. Setup mesajı gönder
-        let lang = language.trimmingCharacters(in: .whitespacesAndNewlines)
-        var langCodes: [String] = []
-        if !lang.isEmpty && lang.lowercased() != "auto" {
-            langCodes.append(lang)
-        }
-
-        let modelPath = model.hasPrefix("models/") ? model : "models/\(model)"
-        var setupDict: [String: Any] = [
-            "model": modelPath,
-            "generationConfig": [
-                "responseModalities": ["TEXT"]
-            ],
-            "inputAudioTranscription": [
-                "languageCodes": langCodes
-            ]
-        ]
-
-        let prompt = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !prompt.isEmpty && ConfigManager.supportsSystemPrompt(model: model) {
-            setupDict["systemInstruction"] = [
-                "parts": [
-                    ["text": prompt]
-                ]
-            ]
-        }
-        let setupPayload: [String: Any] = ["setup": setupDict]
+        let setupPayload = Self.setupPayload(
+            model: model,
+            language: language,
+            systemPrompt: systemPrompt
+        )
 
         if let setupData = try? JSONSerialization.data(withJSONObject: setupPayload) {
             ws.send(.data(setupData)) { [weak self] error in
@@ -159,7 +170,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let cancelled = self.isCancelled
                 let finished = self.isAudioFinished
                 let completed = self.isCompleted
-                let hasText = !self.accumulatedText.isEmpty || !self.latestInterimText.isEmpty || !self.modelTurnFallbackText.isEmpty
+                let hasText = !self.transcriptAccumulator.text.isEmpty || !self.modelTurnFallbackText.isEmpty
                 self.lock.unlock()
 
                 if cancelled || completed { return }
@@ -244,22 +255,15 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let trimmed = Self.cleanNoiseTags(interimText)
                 if !trimmed.isEmpty {
                     lock.lock()
-                    self.latestInterimText = trimmed
-                    let currentAccum = self.accumulatedText
+                    let preview = GeminiTranscriptProcessor.applyPartial(
+                        accumulator: &self.transcriptAccumulator,
+                        text: trimmed,
+                        receivedAt: ProcessInfo.processInfo.systemUptime
+                    )
+                    let callback = self.onInterim
                     lock.unlock()
 
-                    // Canlı HUD önizlemesini güncelle
-                    let preview: String
-                    if currentAccum.isEmpty {
-                        preview = trimmed
-                    } else if Self.isCovered(subText: trimmed, in: currentAccum) {
-                        preview = currentAccum
-                    } else if Self.isCovered(subText: currentAccum, in: trimmed) {
-                        preview = trimmed
-                    } else {
-                        preview = "\(currentAccum) \(trimmed)"
-                    }
-                    onInterim?(preview)
+                    callback?(preview)
                 }
             }
 
@@ -269,15 +273,14 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let trimmed = Self.cleanNoiseTags(text)
                 if !trimmed.isEmpty {
                     lock.lock()
-                    self.accumulatedText = Self.reconcileTranscriptionText(accumulated: self.accumulatedText, interim: trimmed)
-
-                    // Kesinleşmiş metin güncellendiğinde ara önizleme metnini tamamen sıfırla
-                    self.latestInterimText = ""
-
-                    let current = self.accumulatedText
+                    let current = GeminiTranscriptProcessor.applyFinal(
+                        accumulator: &self.transcriptAccumulator,
+                        text: trimmed
+                    )
                     let endSent = self.hasSentStreamEnd
+                    let callback = self.onInterim
                     lock.unlock()
-                    onInterim?(current)
+                    callback?(current)
 
                     // Eğer kullanıcı konuşmayı bitirdiyse (streamEnd yollandıysa),
                     // generationComplete sinyali beklenir. Eğer generationComplete gecikirse
@@ -296,7 +299,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 if !text.isEmpty {
                     lock.lock()
                     self.modelTurnFallbackText = text
-                    let hasAccum = !self.accumulatedText.isEmpty
+                    let hasAccum = !self.transcriptAccumulator.committedText.isEmpty
                     let endSent = self.hasSentStreamEnd
                     lock.unlock()
 
@@ -458,13 +461,9 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
 
     // MARK: - Normalizasyon ve Mükerrer İfade Çözümleme
 
+
     public static func cleanNoiseTags(_ text: String) -> String {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let lower = trimmed.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]().,"))
-        if lower == "blank_audio" || lower == "sessizlik" || lower == "ses yok" || lower == "boşluk" || lower == "gürültü" || lower == "music" || lower == "müzik" {
-            return ""
-        }
-        return trimmed
+        StreamingTranscriptReconciler.clean(text)
     }
 
     public static func normalizeTokens(_ text: String) -> [String] {
@@ -583,88 +582,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     }
 
     public static func reconcileTranscriptionText(accumulated: String, interim: String) -> String {
-        let trimmedAccum = cleanNoiseTags(accumulated)
-        let trimmedIncoming = cleanNoiseTags(interim)
-
-        if trimmedAccum.isEmpty {
-            return trimmedIncoming
-        }
-        if trimmedIncoming.isEmpty {
-            return trimmedAccum
-        }
-
-        if trimmedAccum == trimmedIncoming {
-            return trimmedAccum
-        }
-
-        let accumTokens = normalizeTokens(trimmedAccum)
-        let incomingTokens = normalizeTokens(trimmedIncoming)
-
-        if accumTokens.isEmpty { return trimmedIncoming }
-        if incomingTokens.isEmpty { return trimmedAccum }
-
-        if accumTokens == incomingTokens {
-            return trimmedAccum.count >= trimmedIncoming.count ? trimmedAccum : trimmedIncoming
-        }
-
-        // 1. Incoming zaten tamamen Accumulated içinde var mı? (Örn. interim daha kısa kalmış ve birikmiş cümlenin alt kümesi)
-        if isCovered(subText: trimmedIncoming, in: trimmedAccum) {
-            return trimmedAccum
-        }
-
-        // 2. Kümülatif devam: Incoming, Accumulated ile başlayıp üzerine yeni kelimeler ekliyor mu?
-        if incomingTokens.starts(with: accumTokens) {
-            return trimmedIncoming
-        }
-
-        // 3. Ters kapsama: Accumulated zaten tamamen Incoming içinde var mı? (Örn. baştan güncellenmiş kümülatif metin)
-        if isCovered(subText: trimmedAccum, in: trimmedIncoming) {
-            return trimmedIncoming
-        }
-
-        // 4. Ortak önek (Longest Common Prefix) kontrolü:
-        // Her ikisi de baştan akıyorsa ve ilk kelimeleri büyük oranda ortaksa
-        let minTokensCount = min(accumTokens.count, incomingTokens.count)
-        var commonPrefixCount = 0
-        for i in 0..<minTokensCount {
-            if accumTokens[i] == incomingTokens[i] {
-                commonPrefixCount += 1
-            } else {
-                break
-            }
-        }
-        if commonPrefixCount >= 3 && Double(commonPrefixCount) >= Double(accumTokens.count) * 0.6 {
-            return incomingTokens.count >= accumTokens.count ? trimmedIncoming : trimmedAccum
-        }
-
-        // 5. Dikiş noktası örtüşmesi (Seam Overlap):
-        // Accumulated sonundaki kelimeler ile Incoming başındaki kelimelerin örtüşmesi
-        let maxCheck = min(accumTokens.count, incomingTokens.count)
-        var overlapCount = 0
-        for count in stride(from: maxCheck, through: 1, by: -1) {
-            let accumTail = accumTokens.suffix(count)
-            let incomingHead = incomingTokens.prefix(count)
-            if Array(accumTail) == Array(incomingHead) {
-                overlapCount = count
-                break
-            }
-        }
-
-        var result: String
-        if overlapCount > 0 {
-            let incomingWords = trimmedIncoming.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-            if overlapCount >= incomingWords.count {
-                result = trimmedAccum
-            } else {
-                let newWords = incomingWords.dropFirst(overlapCount)
-                let remainder = newWords.joined(separator: " ")
-                result = "\(trimmedAccum) \(remainder)"
-            }
-        } else {
-            result = "\(trimmedAccum) \(trimmedIncoming)"
-        }
-
-        return deduplicateRepeatedPhrases(result)
+        StreamingTranscriptReconciler.merge(existing: accumulated, incoming: interim)
     }
 
     private func finishAndComplete() {
@@ -679,11 +597,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         isCompleted = true
         let latency = CFAbsoluteTimeGetCurrent() - startTime
 
-        var text = accumulatedText.trimmingCharacters(in: .whitespacesAndNewlines)
-        // YALNIZCA VE YALNIZCA inputTranscription hiç gelmediyse yedek olarak interim metne başvur:
-        if text.isEmpty {
-            text = latestInterimText.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
+        var text = transcriptAccumulator.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
             text = modelTurnFallbackText.trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -722,8 +636,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         isCancelled = true
         isCompleted = true
         pendingChunks.removeAll()
-        accumulatedText = ""
-        latestInterimText = ""
+        transcriptAccumulator.reset()
         modelTurnFallbackText = ""
         let ws = webSocketTask
         webSocketTask = nil
@@ -783,6 +696,49 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
 
 // MARK: - Apple Speech Canlı Mikrofon Akış Oturumu (On-Device Speech Streaming)
 
+private func appleSpeechLocaleIdentifier(for language: String) -> String {
+    let normalized = language.lowercased()
+    if normalized.hasPrefix("en") { return "en_US" }
+    if normalized.hasPrefix("de") { return "de_DE" }
+    if normalized.hasPrefix("fr") { return "fr_FR" }
+    if normalized.hasPrefix("es") { return "es_ES" }
+    return "tr_TR"
+}
+
+/// Özel sözlük metnini sağlayıcı sınırlarına uygun terim listesine ayırır.
+/// Apple'ın canlı ve batch yolları ile AssemblyAI'nin keyterms alanı aynı
+/// ayırıcıları kullanır; tekrar eden ayrıştırma mantığı burada toplanmıştır.
+public enum CustomVocabularyParser {
+    /// Terimleri ayıran karakterler (virgül, noktalı virgül, satır sonu).
+    public static let separators = CharacterSet(charactersIn: ",;\n\r")
+
+    /// Ayrıştırılan terim sayısı üst sınırı.
+    /// Apple `contextualStrings` ve AssemblyAI `keyterms_prompt` sağlayıcı
+    /// tarafında sınırlıdır; fazlasını göndermek sessizce yok sayılır.
+    public static let maximumTermCount = 100
+
+    /// Sözlük metnini temizlenmiş, tekrarsız terim listesine ayırır.
+    public static func terms(from vocabulary: String, limit: Int = maximumTermCount) -> [String] {
+        let trimmed = vocabulary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        var seen = Set<String>()
+        var result: [String] = []
+
+        for raw in trimmed.components(separatedBy: separators) {
+            let term = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { continue }
+            // Sağlayıcılar büyük/küçük harfe duyarsız eşleştirir; aynı terimi
+            // farklı yazımla iki kez göndermek kotayı boşa harcar.
+            guard seen.insert(term.lowercased()).inserted else { continue }
+            result.append(term)
+            if result.count >= limit { break }
+        }
+
+        return result
+    }
+}
+
 public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @unchecked Sendable {
     public let language: String
     public let customVocabulary: String
@@ -802,17 +758,26 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
     private var isCompleted: Bool = false
     private var isCancelled: Bool = false
     private var isAudioFinished: Bool = false
-    private var hasEndedAudio: Bool = false
     private var startTime: CFAbsoluteTime = 0
-    private var latestText: String = ""
+    private var transcriptAccumulator = StreamingTranscriptAccumulator()
     private var pendingChunks: [Data] = []
     private var isTaskReady: Bool = false
-    private var finalizationTimer: DispatchSourceTimer?
+    private lazy var finalization = AppleSpeechFinalization(
+        schedule: AppleSpeechFinalization.scheduler(on: streamQueue)
+    )
     private var safetyTimer: DispatchSourceTimer?
+    private let authorizationAlreadyValidated: Bool
 
-    public init(language: String = "tr", customVocabulary: String = "") {
+    public init(
+        language: String = "tr",
+        customVocabulary: String = "",
+        prewarmedRecognizer: SFSpeechRecognizer? = nil,
+        authorizationAlreadyValidated: Bool = false
+    ) {
         self.language = language
         self.customVocabulary = customVocabulary
+        self.speechRecognizer = prewarmedRecognizer
+        self.authorizationAlreadyValidated = authorizationAlreadyValidated
         super.init()
     }
 
@@ -836,6 +801,11 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
         // Info.plist içinde NSSpeechRecognitionUsageDescription kontrolü (TCC kilitlenmesini önler)
         guard Bundle.main.object(forInfoDictionaryKey: "NSSpeechRecognitionUsageDescription") != nil else {
             notifyCompletion(success: false, text: "", error: "NSSpeechRecognitionUsageDescription bulunamadı.")
+            return
+        }
+
+        if authorizationAlreadyValidated {
+            setupAndStartTask()
             return
         }
 
@@ -864,21 +834,9 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
                 return
             }
 
-            let lang = self.language.lowercased()
-            let langCode: String
-            if lang.hasPrefix("en") {
-                langCode = "en_US"
-            } else if lang.hasPrefix("de") {
-                langCode = "de_DE"
-            } else if lang.hasPrefix("fr") {
-                langCode = "fr_FR"
-            } else if lang.hasPrefix("es") {
-                langCode = "es_ES"
-            } else {
-                langCode = "tr_TR"
-            }
+            let langCode = appleSpeechLocaleIdentifier(for: self.language)
 
-            guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: langCode)) else {
+            guard let recognizer = self.speechRecognizer ?? SFSpeechRecognizer(locale: Locale(identifier: langCode)) else {
                 self.lock.unlock()
                 self.notifyCompletion(success: false, text: "", error: "Apple Konuşma Tanıma motoru (\(langCode)) bu sistemde başlatılamadı.")
                 return
@@ -894,18 +852,17 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
 
             let request = SFSpeechAudioBufferRecognitionRequest()
             request.shouldReportPartialResults = true
-            if recognizer.supportsOnDeviceRecognition {
-                request.requiresOnDeviceRecognition = false
-            }
+            request.taskHint = .dictation
+            // Apple'ın yerel modeli mevcutsa ağ yolunu seçme; bu düşük gecikmeli
+            // canlı akışın cihazda kalmasını sağlar. Desteklenmiyorsa false,
+            // güvenli WAV fallback'in normal Apple Speech yolunu kullanmasına izin verir.
+            request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
 
-            if !self.customVocabulary.isEmpty {
-                let terms = self.customVocabulary
-                    .components(separatedBy: CharacterSet(charactersIn: ",;\n"))
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                if !terms.isEmpty {
-                    request.contextualStrings = terms
-                }
+            // Özel sözlük terimleri Apple'ın bağlamsal ipucu listesine eklenir;
+            // bu sayede model isimleri ve jargonu baştan doğru yönde tanır.
+            let terms = CustomVocabularyParser.terms(from: self.customVocabulary)
+            if !terms.isEmpty {
+                request.contextualStrings = terms
             }
 
             self.recognitionRequest = request
@@ -917,44 +874,54 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
                     let nsError = error as NSError
                     self.lock.lock()
                     let cancelled = self.isCancelled
-                    let current = self.latestText
+                    let current = self.transcriptAccumulator.text
                     let completed = self.isCompleted
                     self.lock.unlock()
 
-                    if cancelled { return }
+                    if cancelled || completed { return }
 
-                    if !completed {
-                        if !current.isEmpty {
-                            self.notifyCompletion(success: true, text: current, error: nil)
-                        } else if nsError.domain == "kAFAssistantErrorDomain" && (nsError.code == 203 || nsError.code == 216) {
-                            // Kullanıcı konuşmadan hemen bıraktıysa (boş ses / sessizlik)
-                            self.notifyCompletion(success: true, text: "", error: nil)
-                        } else {
-                            self.notifyCompletion(success: false, text: "", error: error.localizedDescription)
-                        }
+                    if current.isEmpty && Transcriber.isNoSpeechError(nsError) {
+                        // Kullanıcı konuşmadan bıraktıysa (boş ses / sessizlik)
+                        self.notifyCompletion(success: true, text: "", error: nil)
+                    } else {
+                        print("[AppleSpeech] Canlı tanıma hatası: \(nsError)")
+                        // Do not let the caller classify a failed partial as silence
+                        // from the localized message and skip WAV recovery.
+                        self.notifyCompletion(success: false, text: "", error: "Apple canlı tanıma hatası (\(nsError.domain)/\(nsError.code)).")
                     }
                     return
                 }
 
                 guard let result = result else { return }
 
-                let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+                let transcription = result.bestTranscription
+                let text = transcription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines)
+                let segments = transcription.segments.map {
+                    TimedTranscriptSegment(startTime: $0.timestamp, duration: $0.duration, text: $0.substring)
+                }
 
+                let receivedAt = ProcessInfo.processInfo.systemUptime
                 self.lock.lock()
-                self.latestText = text
-                let finished = self.isAudioFinished
+                guard !self.isCancelled, !self.isCompleted else {
+                    self.lock.unlock()
+                    return
+                }
+                let mergedText = AppleSpeechTranscriptProcessor.apply(
+                    accumulator: &self.transcriptAccumulator,
+                    text: text,
+                    segments: segments,
+                    isFinal: result.isFinal,
+                    receivedAt: receivedAt
+                )
                 let isFinal = result.isFinal
+                let callback = self.onInterim
                 self.lock.unlock()
 
                 if !isFinal {
-                    self.onInterim?(text)
+                    callback?(mergedText)
                 }
 
-                if isFinal {
-                    self.notifyCompletion(success: true, text: text, error: nil)
-                } else if finished {
-                    self.scheduleFinalization(delayMs: 250)
-                }
+                self.notifyCompletion(success: true, text: mergedText, error: nil, isFinal: isFinal)
             }
 
             self.recognitionTask = task
@@ -971,13 +938,15 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
             }
 
             if finished {
-                if !self.hasEndedAudio {
-                    self.hasEndedAudio = true
-                    request.endAudio()
-                }
-                self.scheduleFinalization(delayMs: 350)
+                self.endAudioAndWaitForFinal(request)
+                return
             }
 
+            self.lock.lock()
+            guard !self.isCancelled, !self.isCompleted else {
+                self.lock.unlock()
+                return
+            }
             // 30 saniyelik emniyet zamanlayıcısı
             let timer = DispatchSource.makeTimerSource(queue: self.streamQueue)
             timer.schedule(deadline: .now() + 30.0)
@@ -986,6 +955,7 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
             }
             self.safetyTimer = timer
             timer.resume()
+            self.lock.unlock()
         }
     }
 
@@ -1045,12 +1015,8 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
             let req = self.recognitionRequest
             self.lock.unlock()
 
-            if ready {
-                if !self.hasEndedAudio {
-                    self.hasEndedAudio = true
-                    req?.endAudio()
-                }
-                self.scheduleFinalization(delayMs: 350)
+            if ready, let req = req {
+                self.endAudioAndWaitForFinal(req)
             }
         }
     }
@@ -1060,70 +1026,75 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
         isCancelled = true
         safetyTimer?.cancel()
         safetyTimer = nil
-        finalizationTimer?.cancel()
-        finalizationTimer = nil
+        finalization.cancel()
         let task = self.recognitionTask
         self.recognitionTask = nil
         self.recognitionRequest = nil
         self.speechRecognizer = nil
         self.pendingChunks.removeAll()
+        self.transcriptAccumulator.reset()
+        self.onCompletion = nil
+        self.onInterim = nil
         lock.unlock()
 
         task?.cancel()
     }
 
-    private func scheduleFinalization(delayMs: Int) {
+    // Called only on streamQueue, after all queued PCM has been appended.
+    private func endAudioAndWaitForFinal(_ request: SFSpeechAudioBufferRecognitionRequest) {
         lock.lock()
-        guard !isCompleted, !isCancelled else {
-            lock.unlock()
-            return
+        let shouldEndAudio = finalization.finishAudio { [weak self] in
+            let outcome = AppleSpeechFinalization.timeoutOutcome
+            self?.notifyCompletion(success: outcome.success, text: outcome.text, error: outcome.error)
         }
-        finalizationTimer?.cancel()
-        let timer = DispatchSource.makeTimerSource(queue: streamQueue)
-        timer.schedule(deadline: .now() + .milliseconds(delayMs))
-        timer.setEventHandler { [weak self] in
-            guard let self = self else { return }
-            self.lock.lock()
-            let current = self.latestText
-            self.lock.unlock()
-            self.notifyCompletion(success: true, text: current, error: nil)
-        }
-        self.finalizationTimer = timer
-        timer.resume()
         lock.unlock()
+
+        if shouldEndAudio {
+            request.endAudio()
+        }
     }
 
-    private func notifyCompletion(success: Bool, text: String, error: String?) {
+    private func notifyCompletion(success: Bool, text: String, error: String?, isFinal: Bool = true) {
         lock.lock()
-        guard !isCompleted else {
+        let outcome = success
+            ? finalization.receive(text: text, isFinal: isFinal)
+            : finalization.complete(.init(success: false, text: text, error: error))
+        guard let outcome = outcome else {
             lock.unlock()
             return
         }
         isCompleted = true
         safetyTimer?.cancel()
         safetyTimer = nil
-        finalizationTimer?.cancel()
-        finalizationTimer = nil
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
         let task = self.recognitionTask
         self.recognitionTask = nil
         self.recognitionRequest = nil
         self.speechRecognizer = nil
         self.pendingChunks.removeAll()
+        let callback = self.onCompletion
+        self.onCompletion = nil
+        self.onInterim = nil
         lock.unlock()
 
         task?.cancel()
 
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = outcome.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Sözlük yankısı koruması: `contextualStrings` ile verilen terimler
+        // sessizlikte "duyulmuş gibi" dönebilir. Metin tamamen sözlükten
+        // oluşuyorsa gerçek konuşma değildir; boş bırakılır.
+        let echoGuarded = PromptEchoGuard.isEcho(cleaned, vocabulary: self.customVocabulary)
+            ? ""
+            : cleaned
         let result = TranscriptionResult(
-            success: success,
-            text: cleaned,
+            success: outcome.success,
+            text: echoGuarded,
             latency: elapsed,
-            error: error,
+            error: outcome.error,
             provider: "apple",
             model: "apple-speech-on-device"
         )
-        onCompletion?(result)
+        callback?(result)
     }
 }
 
@@ -1135,6 +1106,11 @@ public class Transcriber {
     private var currentTask: URLSessionTask?
     private var activeLiveSession: (any LiveStreamSession)?
     private let lock = NSLock()
+    private let appleWarmupQueue = DispatchQueue(
+        label: "com.voicetyping.apple-speech.warmup",
+        qos: .userInitiated
+    )
+    private var cachedAppleRecognizers: [String: SFSpeechRecognizer] = [:]
 
     /// HTTP Keep-Alive bağlantı havuzlu, düşük gecikmeli optimize oturum
     private let httpSession: URLSession = {
@@ -1147,7 +1123,55 @@ public class Transcriber {
         return URLSession(configuration: configuration)
     }()
 
+    /// Dictation API kısa istekleri normalde bir saniyenin altında tamamlar, ancak
+    /// resmi istemci önerisi 90 saniyelik üst sınırdır. `/warm` ve deşifre aynı
+    /// session'ı kullanarak DNS/TCP/TLS bağlantısını yeniden kullanır.
+    private let assemblySession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 90.0
+        configuration.timeoutIntervalForResource = 90.0
+        configuration.httpMaximumConnectionsPerHost = 2
+        configuration.httpShouldUsePipelining = true
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
+    }()
+
     private init() {}
+
+    /// Sağlayıcıların sessizlik için döndürdüğü hata/mesajları gerçek teknik
+    /// hatalardan ayırır. Kullanıcı konuşmadığında bu durum hata olarak sunulmaz.
+    public static func isNoSpeechMessage(_ message: String) -> Bool {
+        let normalized = message
+            .lowercased(with: Locale(identifier: "tr_TR"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !normalized.isEmpty else { return false }
+        let noSpeechPhrases = [
+            "no speech detected",
+            "no speech was detected",
+            "no speech recognized",
+            "no speech recognised",
+            "didn't hear",
+            "did not hear",
+            "nothing was heard",
+            "blank audio",
+            "blank_audio",
+            "empty audio",
+            "ses yok",
+            "ses algılanmadı",
+            "sessizlik",
+            "boş ses",
+            "boş kayıt"
+        ]
+        return noSpeechPhrases.contains(where: { normalized.contains($0) })
+    }
+
+    public static func isNoSpeechError(_ error: NSError) -> Bool {
+        let normalizedDomain = error.domain.lowercased()
+        let isAppleSilenceCode = normalizedDomain == "kafassistanterrordomain" &&
+                                 (error.code == 203 || error.code == 216)
+        return isAppleSilenceCode || isNoSpeechMessage(error.localizedDescription)
+    }
 
     public func cancel() {
         lock.lock()
@@ -1160,6 +1184,7 @@ public class Transcriber {
 
     public func startLiveGeminiSession(
         config: AppConfig,
+        targetContext: TargetContext? = nil,
         onInterim: ((String) -> Void)? = nil,
         completion: @escaping (TranscriptionResult) -> Void
     ) -> LiveGeminiStreamSession? {
@@ -1182,7 +1207,7 @@ public class Transcriber {
             apiKey: apiKey,
             model: model,
             language: config.language,
-            systemPrompt: config.gemini_system_prompt
+            systemPrompt: config.resolvedGeminiSystemPrompt(targetContext: targetContext)
         )
         session.onInterim = onInterim
         session.onCompletion = completion
@@ -1195,14 +1220,47 @@ public class Transcriber {
         return session
     }
 
+    public func warmAppleSpeech(language: String) {
+        let localeIdentifier = appleSpeechLocaleIdentifier(for: language)
+        appleWarmupQueue.async { [weak self] in
+            guard let self,
+                  SFSpeechRecognizer.authorizationStatus() == .authorized else { return }
+
+            self.lock.lock()
+            let cached = self.cachedAppleRecognizers[localeIdentifier]
+            self.lock.unlock()
+            guard cached == nil,
+                  let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)) else { return }
+
+            // Bu sorgu yerel model/asset servislerini hazırlar; recognition task ve
+            // mikrofon açılmaz.
+            _ = recognizer.supportsOnDeviceRecognition
+            self.lock.lock()
+            if self.cachedAppleRecognizers[localeIdentifier] == nil {
+                self.cachedAppleRecognizers[localeIdentifier] = recognizer
+            }
+            self.lock.unlock()
+        }
+    }
+
+    private func cachedAppleRecognizer(language: String) -> SFSpeechRecognizer? {
+        let localeIdentifier = appleSpeechLocaleIdentifier(for: language)
+        lock.lock()
+        defer { lock.unlock() }
+        return cachedAppleRecognizers[localeIdentifier]
+    }
+
     public func startLiveAppleSpeechSession(
         config: AppConfig,
+        authorizationAlreadyValidated: Bool = false,
         onInterim: ((String) -> Void)? = nil,
         completion: @escaping (TranscriptionResult) -> Void
     ) -> LiveAppleSpeechSession? {
         let session = LiveAppleSpeechSession(
             language: config.language,
-            customVocabulary: config.custom_vocabulary
+            customVocabulary: config.custom_vocabulary,
+            prewarmedRecognizer: cachedAppleRecognizer(language: config.language),
+            authorizationAlreadyValidated: authorizationAlreadyValidated
         )
         session.onInterim = onInterim
         session.onCompletion = completion
@@ -1218,22 +1276,25 @@ public class Transcriber {
     public func transcribe(
         audioData: Data,
         config: AppConfig,
+        targetContext: TargetContext? = nil,
         completion: @escaping (TranscriptionResult) -> Void
     ) {
-        let provider = config.provider.lowercased()
-        if provider == "apple" {
-            transcribeAppleSpeech(audioData: audioData, config: config, completion: completion)
-        } else if provider == "gemini" {
+        // Sağlayıcı kimliği tek kaynaktan normalize edilir; bilinmeyen veya
+        // kullanımdan kalkmış kimlikler varsayılan yerel motora düşer.
+        let provider = TranscriptionProviderRegistry.normalize(config.provider)
+        switch provider {
+        case "gemini":
             let model = config.gemini_model.isEmpty ? "gemini-3.5-transcribe-live" : config.gemini_model
-            if model == "gemini-3.5-transcribe-live" || model == "models/gemini-3.5-transcribe-live" {
-                transcribeGeminiLive(audioData: audioData, config: config, completion: completion)
+            if ConfigManager.isGeminiLiveModel(model) {
+                transcribeGeminiLive(audioData: audioData, config: config, targetContext: targetContext, completion: completion)
             } else {
-                transcribeGemini(audioData: audioData, config: config, completion: completion)
+                transcribeGemini(audioData: audioData, config: config, targetContext: targetContext, completion: completion)
             }
-        } else if provider == "groq" {
+        case "groq":
             transcribeGroq(audioData: audioData, config: config, completion: completion)
-        } else {
-            // Varsayılan: Yerel Apple Motoru
+        case "assemblyai":
+            transcribeAssemblyAI(audioData: audioData, config: config, completion: completion)
+        default:
             transcribeAppleSpeech(audioData: audioData, config: config, completion: completion)
         }
     }
@@ -1243,6 +1304,7 @@ public class Transcriber {
     public func transcribeGeminiLive(
         audioData: Data,
         config: AppConfig,
+        targetContext: TargetContext? = nil,
         completion: @escaping (TranscriptionResult) -> Void
     ) {
         let apiKey = config.gemini_api_key.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1272,7 +1334,7 @@ public class Transcriber {
             apiKey: apiKey,
             model: model,
             language: config.language,
-            systemPrompt: config.gemini_system_prompt
+            systemPrompt: config.resolvedGeminiSystemPrompt(targetContext: targetContext)
         )
 
         session.onCompletion = { [weak self] result in
@@ -1284,7 +1346,7 @@ public class Transcriber {
             } else {
                 // Diğer ağ ve soket kopmalarında REST fallback dene
                 print("[GeminiLive] WebSocket başarısız (\(result.error ?? "")), REST fallback deneniyor...")
-                self?.transcribeGemini(audioData: audioData, config: config, completion: completion)
+                self?.transcribeGemini(audioData: audioData, config: config, targetContext: targetContext, completion: completion)
             }
         }
 
@@ -1357,10 +1419,19 @@ public class Transcriber {
         }
 
         let request = SFSpeechURLRecognitionRequest(url: tempURL)
-        if recognizer.supportsOnDeviceRecognition {
-            request.requiresOnDeviceRecognition = false
-        }
+        // Canlı yerel tanıma başarısız olursa geçerli WAV kaydını koruyarak
+        // Apple'ın dosya tabanlı motoruyla yeniden dene; destek varsa bu da
+        // on-device çalışır, yoksa sistemin güvenli fallback'ine bırakılır.
+        request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
         request.shouldReportPartialResults = false
+
+        // Canlı akış yoluyla aynı özel sözlük ipuçlarını uygula. Bu yol
+        // daha önce bağlamsal terimleri hiç göndermiyordu; aynı ayarın iki
+        // yolda farklı davranması kullanıcı için tutarsız sonuç üretiyordu.
+        let vocabularyTerms = CustomVocabularyParser.terms(from: config.custom_vocabulary)
+        if !vocabularyTerms.isEmpty {
+            request.contextualStrings = vocabularyTerms
+        }
 
         lock.lock()
         var hasFinished = false
@@ -1376,14 +1447,26 @@ public class Transcriber {
                 try? FileManager.default.removeItem(at: tempURL)
 
                 let latency = CFAbsoluteTimeGetCurrent() - startTime
-                completion(TranscriptionResult(
-                    success: false,
-                    text: "",
-                    latency: latency,
-                    error: "Apple Tanıma Hatası: \(error.localizedDescription)",
-                    provider: "apple",
-                    model: "apple-speech-on-device"
-                ))
+                let nsError = error as NSError
+                if Transcriber.isNoSpeechError(nsError) {
+                    completion(TranscriptionResult(
+                        success: true,
+                        text: "",
+                        latency: latency,
+                        error: nil,
+                        provider: "apple",
+                        model: "apple-speech-on-device"
+                    ))
+                } else {
+                    completion(TranscriptionResult(
+                        success: false,
+                        text: "",
+                        latency: latency,
+                        error: "Apple Tanıma Hatası: \(error.localizedDescription)",
+                        provider: "apple",
+                        model: "apple-speech-on-device"
+                    ))
+                }
                 return
             }
 
@@ -1408,6 +1491,85 @@ public class Transcriber {
             }
         }
         lock.unlock()
+    }
+
+    // MARK: - AssemblyAI Dictation
+
+    public func warmAssemblyAIDictation() {
+        guard let url = URL(string: "https://dictation.assemblyai.com/warm") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10.0
+        assemblySession.dataTask(with: request) { _, _, _ in }.resume()
+    }
+
+    public func transcribeAssemblyAI(
+        audioData: Data,
+        config: AppConfig,
+        completion: @escaping (TranscriptionResult) -> Void
+    ) {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let request: URLRequest
+        do {
+            request = try AssemblyAIDictation.makeRequest(
+                apiKey: config.assemblyai_api_key,
+                wavData: audioData,
+                language: config.language,
+                customVocabulary: config.custom_vocabulary
+            )
+        } catch {
+            completion(TranscriptionResult(
+                success: false,
+                text: "",
+                latency: 0,
+                error: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                provider: "AssemblyAI",
+                model: AssemblyAIDictation.model
+            ))
+            return
+        }
+
+        lock.lock()
+        let task = assemblySession.dataTask(with: request) { [weak self] data, response, error in
+            let latency = CFAbsoluteTimeGetCurrent() - startTime
+            self?.lock.lock()
+            self?.currentTask = nil
+            self?.lock.unlock()
+
+            if let error {
+                if (error as NSError).code == NSURLErrorCancelled { return }
+                completion(TranscriptionResult(
+                    success: false,
+                    text: "",
+                    latency: latency,
+                    error: "AssemblyAI bağlantı hatası: \(error.localizedDescription)",
+                    provider: "AssemblyAI",
+                    model: AssemblyAIDictation.model
+                ))
+                return
+            }
+
+            guard let http = response as? HTTPURLResponse, let data else {
+                completion(TranscriptionResult(
+                    success: false,
+                    text: "",
+                    latency: latency,
+                    error: "AssemblyAI sunucusundan geçerli yanıt alınamadı.",
+                    provider: "AssemblyAI",
+                    model: AssemblyAIDictation.model
+                ))
+                return
+            }
+
+            completion(AssemblyAIDictation.parseResponse(
+                data: data,
+                statusCode: http.statusCode,
+                latency: latency
+            ))
+        }
+        currentTask = task
+        lock.unlock()
+        task.resume()
     }
 
     // MARK: - Groq Whisper
@@ -1467,11 +1629,19 @@ public class Transcriber {
         }
 
         // Custom Vocabulary Prompt (Whisper vocabulary hint)
-        let vocab = config.custom_vocabulary.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !vocab.isEmpty {
+        //
+        // Whisper `prompt` alanını 224 token'lik bir pencereye sığdırır ve
+        // fazlasını SESSİZCE atar — hata dönmez, uyarı çıkmaz. Bu yüzden
+        // sözlüğü burada bütçeye indiriyoruz; aksi halde uzun bir sözlüğün
+        // bir kısmı hiç uygulanmaz ve kullanıcı nedenini anlayamaz.
+        let budgeted = PromptBudget.promptText(fromVocabulary: config.custom_vocabulary)
+        if !budgeted.text.isEmpty {
+            if budgeted.wasTruncated {
+                print("[Groq] ⚠️ Sözlük \(PromptBudget.whisperTokenLimit) token sınırını aşıyor; kırpıldı. Önemli terimleri listenin SONUNA koyun.")
+            }
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
             body.append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n".data(using: .utf8)!)
-            body.append("\(vocab)\r\n".data(using: .utf8)!)
+            body.append("\(budgeted.text)\r\n".data(using: .utf8)!)
         }
 
         // Response format
@@ -1547,6 +1717,22 @@ public class Transcriber {
                     if lower == "blank_audio" || lower == "music" || lower == "sessizlik" || lower == "ses yok" || lower == "boşluk" || lower == "müzik" {
                         cleaned = ""
                     }
+                    // Groq çıktı uzunluğunu sınırlayan parametre kabul etmez
+                    // (max_tokens → HTTP 400). Bu yüzden gürültüde oluşan
+                    // kontrolsüz tekrarlar yanıt metni üzerinde temizlenir.
+                    let collapsed = RepetitionGuard.collapse(cleaned)
+                    if collapsed.collapsedGroups > 0 {
+                        print("[Groq] 🔁 \\(collapsed.collapsedGroups) tekrar grubu temizlendi (decode guard).")
+                        cleaned = collapsed.text
+                    }
+                    // Sözlük yankısı: model sessizlikte sözlüğü "duymuş gibi"
+                    // yazabilir. Kullanıcı hiçbir şey söylemediği için metin
+                    // tamamen silinir — yanlış bir metin yapıştırmaktansa
+                    // hiç yapıştırmamak doğru olan.
+                    if PromptEchoGuard.isEcho(cleaned, vocabulary: config.custom_vocabulary) {
+                        print("[Groq] 🚫 Sözlük yankısı tespit edildi; metin atıldı.")
+                        cleaned = ""
+                    }
                     completion(TranscriptionResult(
                         success: true,
                         text: cleaned,
@@ -1588,12 +1774,14 @@ public class Transcriber {
     public func transcribeGemini(
         audioData: Data,
         config: AppConfig,
+        targetContext: TargetContext? = nil,
         completion: @escaping (TranscriptionResult) -> Void
     ) {
         let apiKey = config.gemini_api_key.trimmingCharacters(in: .whitespacesAndNewlines)
-        var model = config.gemini_model.isEmpty ? "gemini-3.5-flash" : config.gemini_model
-        if model == "gemini-3.5-transcribe-live" || model == "models/gemini-3.5-transcribe-live" {
-            // REST için transcribe veya 3.5-flash kullan
+        var model = config.gemini_model.isEmpty ? "gemini-3.5-transcribe" : config.gemini_model
+        if !ConfigManager.supportsGeminiGenerateContent(model: model) {
+            // Live-only models do not expose generateContent. Use the audio
+            // transcription REST model only as a transport fallback.
             model = "gemini-3.5-transcribe"
         }
 
@@ -1628,6 +1816,13 @@ public class Transcriber {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let base64Audio = audioData.base64EncodedString()
+        // NOT: Burada ses süresine bağlı bir tavan KULLANILMAZ.
+        // Canlı testte görüldü ki Gemini, iç "düşünme" (thinking) token'larını
+        // maxOutputTokens bütçesinden düşüyor: 2.2 sn'lik ses için türetilen
+        // 67 token'ın 62'si düşünmeye gidip metne yalnızca 1 token kaldı ve
+        // deşifre tek kelimeye ("Merhaba") kırpıldı (finishReason=MAX_TOKENS).
+        // Bu yüzden Gemini için güvenli, sabit bir tavan korunur; ses süresine
+        // bağlı bütçe yalnızca düşünme token'ı harcamayan yollarda uygulanır.
         var payload: [String: Any] = [
             "contents": [
                 [
@@ -1649,11 +1844,9 @@ public class Transcriber {
 
         // Saf ses modelleri (transcribe) system_instruction desteklemez; sadece çok modlu Flash/Pro modellerine gönder
         if ConfigManager.supportsSystemPrompt(model: model) {
-            let userPrompt = config.gemini_system_prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-            let prompt = userPrompt.isEmpty ? AppConfig.defaultGeminiSystemPrompt : userPrompt
             payload["system_instruction"] = [
                 "parts": [
-                    ["text": prompt]
+                    ["text": config.resolvedGeminiSystemPrompt(targetContext: targetContext)]
                 ]
             ]
         }
@@ -1769,6 +1962,51 @@ public class Transcriber {
     }
 
     // MARK: - Bağlantı ve API Anahtarı Doğrulama
+
+    public func testAssemblyAIConnection(apiKey: String, completion: @escaping (Bool, String) -> Void) {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            completion(false, "Lütfen AssemblyAI API anahtarını girin.")
+            return
+        }
+
+        let silentPCM = Data(repeating: 0, count: 8_000) // 250 ms, 16 kHz mono Int16
+        let wav = AudioRecorder.createWavData(pcmData: silentPCM)
+        let request: URLRequest
+        do {
+            request = try AssemblyAIDictation.makeRequest(
+                apiKey: key,
+                wavData: wav,
+                language: "tr",
+                customVocabulary: ""
+            )
+        } catch {
+            completion(false, "AssemblyAI test isteği hazırlanamadı.")
+            return
+        }
+
+        assemblySession.dataTask(with: request) { data, response, error in
+            if let error {
+                completion(false, "Bağlantı hatası: \(error.localizedDescription)")
+                return
+            }
+            guard let http = response as? HTTPURLResponse else {
+                completion(false, "AssemblyAI sunucusundan yanıt alınamadı.")
+                return
+            }
+            if http.statusCode == 200 {
+                completion(true, "Bağlantı başarılı! AssemblyAI Dictation API hazır.")
+            } else if http.statusCode == 401 {
+                completion(false, "Yetkilendirme hatası (401): Geçersiz AssemblyAI API anahtarı.")
+            } else {
+                let result = AssemblyAIDictation.parseResponse(
+                    data: data ?? Data(),
+                    statusCode: http.statusCode
+                )
+                completion(false, result.error ?? "AssemblyAI HTTP \(http.statusCode)")
+            }
+        }.resume()
+    }
 
     public func testGroqConnection(apiKey: String, completion: @escaping (Bool, String) -> Void) {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)

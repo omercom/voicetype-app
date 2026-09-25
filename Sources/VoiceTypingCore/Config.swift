@@ -90,6 +90,7 @@ public struct AppConfig: Codable {
     public var provider: String
     public var groq_api_key: String
     public var gemini_api_key: String
+    public var assemblyai_api_key: String
     public var groq_model: String
     public var gemini_model: String
     public var language: String
@@ -117,6 +118,21 @@ public struct AppConfig: Codable {
     public var voice_snippets: [String: String]
     public var sound_theme: String // "modern", "subtle", "tactile", "chimes"
     public var sound_volume: Double // 0.0 - 1.0
+    // Gösterge stili: "pill" (alt-ortada kapsül, varsayılan) veya
+    // "notch" (MacBook çentiğine yapışan Dynamic Island).
+    public var hud_style: String
+    // NOT: Yazı boyutu ayarı kaldırıldı. Çentik modunda yazı boyutu
+    // TAMAMEN OTOMATİKTİR: sabit ada genişliğine sığacak şekilde küçülür
+    // ve okunabilirlik tabanının altına inmez (bkz. NotchTypography).
+    // Deşifre bütçesi: modele tek seferde üretilebilecek en fazla token.
+    // 0 = tavan yok (eski davranış).
+    public var decode_tokens_per_sec: Int
+    public var decode_token_base: Int
+    // Konuşma kapısı (VAD) eşikleri.
+    public var vad_gate_db: Double
+    public var vad_stay_ratio: Double
+    public var vad_silence_hold_sec: Double
+    public var vad_max_segment_sec: Double
 
     public static let defaultGeminiSystemPrompt = "Sen profesyonel bir ses deşifre asistanısın. Kullanıcının konuşmasını dinle ve doğrudan yazıya dök. Asla selamlama, özet, onaylama ('Tabii ki', 'Anladım' gibi) veya fazladan yorum ekleme; sadece konuşulan metni temiz, doğru imla ve akıcı bir dille yaz."
 
@@ -124,6 +140,7 @@ public struct AppConfig: Codable {
         provider: "apple",
         groq_api_key: "",
         gemini_api_key: "",
+        assemblyai_api_key: "",
         groq_model: "whisper-large-v3",
         gemini_model: "gemini-3.5-transcribe-live",
         language: "tr",
@@ -150,11 +167,18 @@ public struct AppConfig: Codable {
         enable_app_profiles: true,
         voice_snippets: ["kısayol mail": "ornek@sirket.com"],
         sound_theme: "modern",
-        sound_volume: 0.8
+        sound_volume: 0.8,
+        hud_style: "pill",
+        decode_tokens_per_sec: 16,
+        decode_token_base: 32,
+        vad_gate_db: -60.0,
+        vad_stay_ratio: 0.5,
+        vad_silence_hold_sec: 0.4,
+        vad_max_segment_sec: 8.0
     )
 
     enum CodingKeys: String, CodingKey {
-        case provider, groq_api_key, gemini_api_key, groq_model, gemini_model
+        case provider, groq_api_key, gemini_api_key, assemblyai_api_key, groq_model, gemini_model
         case language, trigger_key, trigger_mode, play_sounds, restore_clipboard
         case paste_delay_ms, min_record_duration, mute_system_audio, pause_media_playback
         case background_audio_mode, enable_microphone_boost, show_dock_icon
@@ -162,12 +186,16 @@ public struct AppConfig: Codable {
         case gemini_system_prompt, only_in_text_fields
         case enable_auto_submit, auto_submit_key, enable_app_profiles, voice_snippets
         case sound_theme, sound_volume
+        case hud_style
+        case decode_tokens_per_sec, decode_token_base
+        case vad_gate_db, vad_stay_ratio, vad_silence_hold_sec, vad_max_segment_sec
     }
 
     public init(
         provider: String,
         groq_api_key: String,
         gemini_api_key: String,
+        assemblyai_api_key: String = "",
         groq_model: String,
         gemini_model: String,
         language: String,
@@ -194,11 +222,19 @@ public struct AppConfig: Codable {
         enable_app_profiles: Bool = true,
         voice_snippets: [String: String] = [:],
         sound_theme: String = "modern",
-        sound_volume: Double = 0.8
+        sound_volume: Double = 0.8,
+        hud_style: String = "pill",
+        decode_tokens_per_sec: Int = 16,
+        decode_token_base: Int = 32,
+        vad_gate_db: Double = -60.0,
+        vad_stay_ratio: Double = 0.5,
+        vad_silence_hold_sec: Double = 0.4,
+        vad_max_segment_sec: Double = 8.0
     ) {
         self.provider = provider
         self.groq_api_key = groq_api_key
         self.gemini_api_key = gemini_api_key
+        self.assemblyai_api_key = assemblyai_api_key
         self.groq_model = groq_model
         self.gemini_model = gemini_model
         self.language = language
@@ -226,6 +262,13 @@ public struct AppConfig: Codable {
         self.voice_snippets = voice_snippets
         self.sound_theme = sound_theme
         self.sound_volume = sound_volume
+        self.hud_style = hud_style
+        self.decode_tokens_per_sec = decode_tokens_per_sec
+        self.decode_token_base = decode_token_base
+        self.vad_gate_db = vad_gate_db
+        self.vad_stay_ratio = vad_stay_ratio
+        self.vad_silence_hold_sec = vad_silence_hold_sec
+        self.vad_max_segment_sec = vad_max_segment_sec
     }
 
     public init(from decoder: Decoder) throws {
@@ -233,6 +276,7 @@ public struct AppConfig: Codable {
         provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "apple"
         groq_api_key = try container.decodeIfPresent(String.self, forKey: .groq_api_key) ?? ""
         gemini_api_key = try container.decodeIfPresent(String.self, forKey: .gemini_api_key) ?? ""
+        assemblyai_api_key = try container.decodeIfPresent(String.self, forKey: .assemblyai_api_key) ?? ""
         groq_model = try container.decodeIfPresent(String.self, forKey: .groq_model) ?? "whisper-large-v3"
         gemini_model = try container.decodeIfPresent(String.self, forKey: .gemini_model) ?? "gemini-3.5-transcribe-live"
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? "tr"
@@ -260,6 +304,13 @@ public struct AppConfig: Codable {
         voice_snippets = try container.decodeIfPresent([String: String].self, forKey: .voice_snippets) ?? [:]
         sound_theme = try container.decodeIfPresent(String.self, forKey: .sound_theme) ?? "modern"
         sound_volume = try container.decodeIfPresent(Double.self, forKey: .sound_volume) ?? 0.8
+        hud_style = try container.decodeIfPresent(String.self, forKey: .hud_style) ?? "pill"
+        decode_tokens_per_sec = try container.decodeIfPresent(Int.self, forKey: .decode_tokens_per_sec) ?? 16
+        decode_token_base = try container.decodeIfPresent(Int.self, forKey: .decode_token_base) ?? 32
+        vad_gate_db = try container.decodeIfPresent(Double.self, forKey: .vad_gate_db) ?? -60.0
+        vad_stay_ratio = try container.decodeIfPresent(Double.self, forKey: .vad_stay_ratio) ?? 0.5
+        vad_silence_hold_sec = try container.decodeIfPresent(Double.self, forKey: .vad_silence_hold_sec) ?? 0.4
+        vad_max_segment_sec = try container.decodeIfPresent(Double.self, forKey: .vad_max_segment_sec) ?? 8.0
     }
 
     public static func parseVoiceSnippets(from text: String) -> [String: String] {
@@ -282,6 +333,46 @@ public struct AppConfig: Codable {
 
     public static func formatVoiceSnippets(_ map: [String: String]) -> String {
         return map.map { "\($0.key) = \($0.value)" }.sorted().joined(separator: "\n")
+    }
+
+    /// Gemini sistem istemini otomatik değişkenlerle çözümler.
+    ///
+    /// Gemini'nin `generateContent` API'sinde ayrı bir hotword/prompt alanı
+    /// yoktur; bu yüzden özel sözlük metnini modele ulaştırmanın tek yolu
+    /// sistem istemidir. Kullanıcı istemine `{{sozluk}}`, `{{dil}}`,
+    /// `{{model}}`, `{{saglayici}}`, `{{uygulama}}`, `{{profil}}` veya
+    /// `{{bundle_id}}` yazarsa ilgili değer otomatik dolar.
+    /// Değişken içermeyen istemler eskisi gibi aynen döner.
+    public func resolvedGeminiSystemPrompt(targetContext: TargetContext? = nil) -> String {
+        let template = gemini_system_prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveTemplate = template.isEmpty ? AppConfig.defaultGeminiSystemPrompt : template
+
+        // Değişken yoksa gereksiz çözümleme ve kırpma yapmadan doğrudan dön;
+        // varsayılan istemin biçimi birebir korunsun.
+        guard !PromptTemplate.extractVariables(from: effectiveTemplate).isEmpty else {
+            return effectiveTemplate
+        }
+
+        var values: [String: String] = [
+            "dil": language,
+            "model": gemini_model,
+            "saglayici": TranscriptionProviderRegistry.descriptor(for: provider).displayName,
+            "sozluk": custom_vocabulary
+        ]
+
+        if let target = targetContext {
+            values["uygulama"] = target.appName
+            values["bundle_id"] = target.bundleIdentifier
+            values["rol"] = target.role
+            let category = AppProfileFormatter.shared.detectCategory(
+                bundleIdentifier: target.bundleIdentifier,
+                appName: target.appName
+            )
+            values["profil"] = category.rawValue
+        }
+
+        let rendered = PromptTemplate.render(effectiveTemplate, values: values)
+        return rendered.isEmpty ? effectiveTemplate : rendered
     }
 }
 
@@ -312,48 +403,54 @@ public class ConfigManager {
     public static let availableGeminiModels: [ModelOption] = [
         ModelOption(
             id: "gemini-3.5-transcribe-live",
-            name: "Gemini 3.5 Transcribe Live (Canlı Akış - Saf Ses)",
-            price: "Ücretsiz Kota",
+            name: "Gemini 3.5 Transcribe Live (Canlı Akış · Saf Ses)",
+            price: "Maliyet: Google API",
             speed: "Canlı Akış"
         ),
         ModelOption(
-            id: "gemini-3.6-flash",
-            name: "Gemini 3.6 Flash (Sistem İstemi & Çeviri Destekli)",
-            price: "Ücretsiz Kota",
-            speed: "Hızlı"
-        ),
-        ModelOption(
-            id: "gemini-3.5-flash",
-            name: "Gemini 3.5 Flash (Sistem İstemi & Çeviri Destekli)",
-            price: "Ücretsiz Kota",
-            speed: "Hızlı"
-        ),
-        ModelOption(
-            id: "gemini-3.5-flash-lite",
-            name: "Gemini 3.5 Flash Lite (Hafif Model)",
-            price: "Ücretsiz Kota",
-            speed: "Hafif"
-        ),
-        ModelOption(
             id: "gemini-3.5-transcribe",
-            name: "Gemini 3.5 Transcribe (REST - Saf Ses)",
-            price: "Ücretsiz Kota",
+            name: "Gemini 3.5 Transcribe (REST · Saf Ses)",
+            price: "Maliyet: Google API",
             speed: "Standart"
         )
     ]
 
+    public static func normalizedGeminiModelID(_ model: String) -> String {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed.hasPrefix("models/") ? String(trimmed.dropFirst("models/".count)) : trimmed
+    }
+
+    public static func isGeminiLiveModel(_ model: String) -> Bool {
+        let normalized = normalizedGeminiModelID(model)
+        return normalized.contains("live") && !normalized.contains("tts")
+    }
+
+    public static func isGeminiExtendedThinkingModel(_ model: String) -> Bool {
+        normalizedGeminiModelID(model).contains("live-extended-thinking")
+    }
+
+    public static func isGeminiNativeAudioLiveModel(_ model: String) -> Bool {
+        let normalized = normalizedGeminiModelID(model)
+        return isGeminiLiveModel(normalized) && !normalized.contains("transcribe")
+    }
+
+    public static func supportsGeminiGenerateContent(model: String) -> Bool {
+        !isGeminiLiveModel(model)
+    }
+
     public static func supportsSystemPrompt(model: String) -> Bool {
-        let m = model.lowercased()
+        let m = normalizedGeminiModelID(model)
         if m.contains("transcribe") || m.contains("whisper") {
             return false
         }
-        return m.contains("flash") || m.contains("pro")
+        return m.contains("flash") || m.contains("pro") || isGeminiNativeAudioLiveModel(m)
     }
 
     private init() {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let userConfigDir = homeDir.appendingPathComponent(".voice_typing")
         try? FileManager.default.createDirectory(at: userConfigDir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: userConfigDir.path)
         let primaryConfigURL = userConfigDir.appendingPathComponent("config.json")
         let legacyConfigURL = homeDir.appendingPathComponent(".voice_typing_config.json")
 
@@ -375,8 +472,8 @@ public class ConfigManager {
                 // Eğer daha önce config bulunmadıysa veya bu config dolu API anahtarlarına sahipse seç
                 if bestConfig == nil {
                     bestConfig = decoded
-                } else if (!decoded.gemini_api_key.isEmpty || !decoded.groq_api_key.isEmpty) &&
-                          (bestConfig!.gemini_api_key.isEmpty && bestConfig!.groq_api_key.isEmpty) {
+                } else if (!decoded.gemini_api_key.isEmpty || !decoded.groq_api_key.isEmpty || !decoded.assemblyai_api_key.isEmpty) &&
+                          (bestConfig!.gemini_api_key.isEmpty && bestConfig!.groq_api_key.isEmpty && bestConfig!.assemblyai_api_key.isEmpty) {
                     bestConfig = decoded
                 }
             }
@@ -389,16 +486,68 @@ public class ConfigManager {
             finalConfig.groq_model = "whisper-large-v3"
         }
         if finalConfig.provider.lowercased() == "openai" {
-            finalConfig.provider = "apple"
+            finalConfig.provider = TranscriptionProviderRegistry.defaultProviderID
         }
 
         self.configURL = primaryConfigURL
         self.config = finalConfig
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: primaryConfigURL.path)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: legacyConfigURL.path)
 
         // Eğer birincil dosyada henüz kayıt yoksa veya API anahtarları olan yapılandırma varsa hemen senkronize et
-        if !FileManager.default.fileExists(atPath: primaryConfigURL.path) || !finalConfig.gemini_api_key.isEmpty || !finalConfig.groq_api_key.isEmpty {
+        if !FileManager.default.fileExists(atPath: primaryConfigURL.path) || !finalConfig.gemini_api_key.isEmpty || !finalConfig.groq_api_key.isEmpty || !finalConfig.assemblyai_api_key.isEmpty {
             _ = save()
         }
+
+        // Dosya izlemeyi başlat: dışarıdan yapılan değişiklikler uygulama
+        // yeniden başlatılmadan etkili olsun. (Test sırasında gereksiz.)
+        if !ConfigManager.isRunningTests {
+            startWatchingConfig()
+        }
+    }
+
+    /// Config dosyasını izler ve dışarıdan değiştirilirse yeniden okur.
+    ///
+    /// Neden gerekli: config başlangıçta bir kez okunup bellekte tutulur ve
+    /// eskiden `reload()` hiçbir yerden çağrılmıyordu. Bu yüzden dosyayı elle
+    /// düzenlemek (ya da başka bir araçla değiştirmek) uygulama yeniden
+    /// başlatılana kadar ETKİSİZ kalıyordu — kullanıcı "hiç değişiklik yok"
+    /// diyordu çünkü gerçekten yoktu.
+    private var configWatcher: DispatchSourceFileSystemObject?
+    private var watcherFD: CInt = -1
+
+    private func startWatchingConfig() {
+        stopWatchingConfig()
+        // Yazma olaylarını izle; dosya değişince yeniden oku.
+        watcherFD = open(configURL.path, O_EVTONLY)
+        guard watcherFD >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: watcherFD,
+            eventMask: [.write, .rename, .delete],
+            queue: DispatchQueue.global(qos: .utility)
+        )
+        source.setEventHandler { [weak self] in
+            guard let self else { return }
+            // Yazma tamamlanana kadar çok kısa bekle (kısmi okuma olmasın).
+            Thread.sleep(forTimeInterval: 0.15)
+            DispatchQueue.main.async {
+                self.reload()
+                NotificationCenter.default.post(name: .configDidReload, object: nil)
+            }
+        }
+        source.setCancelHandler { [weak self] in
+            guard let self, self.watcherFD >= 0 else { return }
+            close(self.watcherFD)
+            self.watcherFD = -1
+        }
+        configWatcher = source
+        source.resume()
+    }
+
+    private func stopWatchingConfig() {
+        configWatcher?.cancel()
+        configWatcher = nil
     }
 
     public func reload() {
@@ -413,10 +562,10 @@ public class ConfigManager {
                     decoded.groq_model = "whisper-large-v3"
                 }
                 if decoded.provider.lowercased() == "openai" {
-                    decoded.provider = "apple"
+                    decoded.provider = TranscriptionProviderRegistry.defaultProviderID
                 }
                 self.config = decoded
-                break
+                return
             }
         }
     }
@@ -427,7 +576,26 @@ public class ConfigManager {
         return save()
     }
 
+    /// Test sürecinde miyiz?
+    ///
+    /// Neden gerekli: testler üretimdeki `ConfigManager.shared` ile aynı
+    /// singleton'ı kullanır. Her `update()` çağrısı diske yazdığı için
+    /// testler kullanıcının GERÇEK `~/.voice_typing/config.json` dosyasını
+    /// eziyordu — çentik ayarı bu yüzden sürekli `pill`'e geri dönüyordu.
+    private static let isRunningTests: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        if env["XCTestConfigurationFilePath"] != nil { return true }
+        if env["XCTestBundlePath"] != nil { return true }
+        // Test çalıştırıcısı yüklüyse de test sayılır.
+        return NSClassFromString("XCTestCase") != nil
+    }()
+
     public func save() -> Bool {
+        // Test sırasında diske YAZMA: kullanıcının gerçek ayarlarını bozmasın.
+        // Bellekteki `config` yine güncellenir, böylece testler davranışı
+        // doğrulayabilir; yalnızca kalıcılaştırma atlanır.
+        if Self.isRunningTests { return true }
+
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -435,11 +603,13 @@ public class ConfigManager {
 
             // 1. Birincil kullanıcı yapılandırması: ~/.voice_typing/config.json
             try data.write(to: configURL, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
 
             // 2. Geriye dönük uyumluluk: ~/.voice_typing_config.json
             let homeDir = FileManager.default.homeDirectoryForCurrentUser
             let legacyURL = homeDir.appendingPathComponent(".voice_typing_config.json")
             try? data.write(to: legacyURL, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: legacyURL.path)
 
             return true
         } catch {
@@ -447,4 +617,13 @@ public class ConfigManager {
             return false
         }
     }
+}
+
+public extension Notification.Name {
+    /// Config dosyası dışarıdan değişip yeniden okunduğunda yayınlanır.
+    ///
+    /// Gösterge (HUD) gibi ayara bağlı bileşenler bunu dinleyip kendini
+    /// tazeleyebilir; böylece ayar değişikliği için uygulamayı yeniden
+    /// başlatmak gerekmez.
+    static let configDidReload = Notification.Name("VoiceTyping.configDidReload")
 }

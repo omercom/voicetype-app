@@ -1,0 +1,19 @@
+{
+  "name": "gemini-tts-test",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Izole Gemini TTS denemesi - model/ses dogrulama ve tek dosya WAV cikti",
+  "scripts": {
+    "models": "node src/list-models.ts",
+    "tts": "node src/tts-test.ts",
+    "probe": "node src/probe.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

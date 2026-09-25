@@ -78,6 +78,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var geminiKeyField: NSTextField!
     private var geminiModelPopUp: NSPopUpButton!
     private var geminiStatusLabel: NSTextField!
+    private var assemblyAIKeyField: NSTextField!
+    private var assemblyAIStatusLabel: NSTextField!
+    private var geminiModelOptions: [ModelOption] = ConfigManager.availableGeminiModels
 
     // Tab: Gelişmiş & Kısayollar (Advanced & Snippets)
     private var autoSubmitCheckbox: NSButton!
@@ -85,10 +88,13 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var appProfilesCheckbox: NSButton!
     private var soundThemePopUp: NSPopUpButton!
     private var soundVolumeSlider: NSSlider!
+    private var hudStylePopUp: NSPopUpButton!
+    private var hudNotchNoteLabel: NSTextField!
     private var soundVolumeLabel: NSTextField!
     private var testSoundButton: NSButton!
     private var voiceSnippetsTextView: NSTextView!
     private var voiceSnippetsScrollView: NSScrollView!
+    private var restoreClipboardCheckbox: NSButton!
 
     // Tab 3: Sistem & İzinler
     private var micStatusLabel: NSTextField!
@@ -128,6 +134,22 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         NSToolbarItem.Identifier("permissions"),
         NSToolbarItem.Identifier("about")
     ]
+
+    static func aboutVersionText(
+        bundle: Bundle = .main,
+        fallbackInfoPlistURL: URL? = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Info.plist")
+    ) -> String {
+        let bundledVersion = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        var fallbackVersion: String?
+        if let url = fallbackInfoPlistURL,
+           let data = try? Data(contentsOf: url),
+           let propertyList = try? PropertyListSerialization.propertyList(from: data, format: nil),
+           let info = propertyList as? [String: Any] {
+            fallbackVersion = info["CFBundleShortVersionString"] as? String
+        }
+        let version = bundledVersion ?? fallbackVersion ?? "Geliştirme"
+        return "Sürüm \(version) • Native macOS • Apple Silicon & Intel"
+    }
 
     private init() {
         let window = NSWindow(
@@ -532,7 +554,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
 
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 635, height: 660))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 635, height: 840))
         scrollView.documentView = container
 
         // 1. Aktif Sağlayıcı (Active Provider)
@@ -540,7 +562,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(provLabel)
 
         providerSegmentedControl = NSSegmentedControl(
-            labels: ["🍎 Apple Speech (Canlı)", "✨ Gemini Live", "⚡ Groq Whisper"],
+            labels: ["🍎 Apple", "✨ Gemini", "⚡ Groq", "🎙 AssemblyAI"],
             trackingMode: .selectOne,
             target: self,
             action: #selector(providerSegmentedChanged(_:))
@@ -556,10 +578,11 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         providerPopUp.addItem(withTitle: "Apple Speech (Canlı Akış / 0 Kota)")
         providerPopUp.addItem(withTitle: "Google Gemini Live (Canlı Akış)")
         providerPopUp.addItem(withTitle: "Groq Whisper (whisper-large-v3)")
+        providerPopUp.addItem(withTitle: "AssemblyAI Dictation API (Universal-3.5 Pro)")
         providerPopUp.isHidden = true
         container.addSubview(providerPopUp)
 
-        providerNoteLabel = createNoteLabel(text: "🍎 Apple Speech: Canlı akış ile konuşurken anında ekranda görünür. Sıfır kota, sıfır API anahtarı ve Apple Silicon Neural Engine ile %100 yerel ve çevrimdışı dikte.", y: 46)
+        providerNoteLabel = createNoteLabel(text: "🍎 Apple Speech: Uygun sistemlerde yerel konuşma tanıma ile çalışır. API anahtarı gerekmez; Apple Speech izni gerekir.", y: 46)
         container.addSubview(providerNoteLabel)
 
         container.addSubview(createSeparator(y: 78))
@@ -568,13 +591,13 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let appleSection = createSectionLabel(text: "Apple Speech", y: 92)
         container.addSubview(appleSection)
 
-        appleStatusLabel = NSTextField(labelWithString: "🟢 Apple Speech Canlı Akış (0 Kota / Sıfır API Key / Çevrimdışı)")
+        appleStatusLabel = NSTextField(labelWithString: "🟢 Apple Speech kullanılabilir")
         appleStatusLabel.frame = NSRect(x: 175, y: 90, width: 440, height: 22)
         appleStatusLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
         appleStatusLabel.textColor = .systemGreen
         container.addSubview(appleStatusLabel)
 
-        let appleNote = createNoteLabel(text: "Apple Silicon Neural Engine üzerinde canlı mikrofon akışıyla çalışır. Konuştuğunuz kelimeler anında canlı olarak ekranda görünür. API anahtarı, internet veya kota gerektirmez.", y: 116)
+        let appleNote = createNoteLabel(text: "Konuşma tanıma izni ve macOS'un desteklediği dil modeli gerekir; sonuç kalitesi sisteme ve dile bağlıdır.", y: 116)
         container.addSubview(appleNote)
 
         container.addSubview(createSeparator(y: 148))
@@ -585,13 +608,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         geminiKeyField = createSingleLineInputField(
             frame: NSRect(x: 175, y: 160, width: 440, height: 24),
-            placeholder: "AIzaSy..."
+            placeholder: "AIzaSy...",
+            isSecure: true
         )
         geminiKeyField.delegate = self
         container.addSubview(geminiKeyField)
 
         geminiModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 192, width: 440, height: 26), pullsDown: false)
-        for m in ConfigManager.availableGeminiModels {
+        for m in geminiModelOptions {
             geminiModelPopUp.addItem(withTitle: m.name)
         }
         geminiModelPopUp.target = self
@@ -612,6 +636,13 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         getGeminiKeyBtn.action = #selector(openGeminiConsoleClicked)
         container.addSubview(getGeminiKeyBtn)
 
+        let refreshGeminiBtn = NSButton(frame: NSRect(x: 475, y: 226, width: 140, height: 28))
+        refreshGeminiBtn.title = "Modelleri Webden Yenile"
+        refreshGeminiBtn.bezelStyle = .rounded
+        refreshGeminiBtn.target = self
+        refreshGeminiBtn.action = #selector(refreshGeminiModelsClicked)
+        container.addSubview(refreshGeminiBtn)
+
         geminiStatusLabel = NSTextField(wrappingLabelWithString: "")
         geminiStatusLabel.frame = NSRect(x: 175, y: 258, width: 440, height: 32)
         geminiStatusLabel.font = NSFont.systemFont(ofSize: 11)
@@ -630,7 +661,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         groqKeyField = createSingleLineInputField(
             frame: NSRect(x: 175, y: 336, width: 440, height: 24),
-            placeholder: "gsk_..."
+            placeholder: "gsk_...",
+            isSecure: true
         )
         groqKeyField.delegate = self
         container.addSubview(groqKeyField)
@@ -669,11 +701,55 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         container.addSubview(createSeparator(y: 500))
 
-        // 5. Gemini Sistem İstemi (System Instruction / Cevap & Yazım Tarzı)
-        promptSectionLabel = createSectionLabel(text: "Sistem İstemi", y: 514)
+        // 5. AssemblyAI Dictation
+        let assemblySection = createSectionLabel(text: "AssemblyAI", y: 514)
+        container.addSubview(assemblySection)
+
+        assemblyAIKeyField = createSingleLineInputField(
+            frame: NSRect(x: 175, y: 512, width: 440, height: 24),
+            placeholder: "AssemblyAI API anahtarı",
+            isSecure: true
+        )
+        assemblyAIKeyField.delegate = self
+        container.addSubview(assemblyAIKeyField)
+
+        let assemblyModelLabel = NSTextField(labelWithString: "Dictation API · Universal-3.5 Pro tabanlı · Gönderime hazır metin")
+        assemblyModelLabel.frame = NSRect(x: 175, y: 544, width: 440, height: 20)
+        assemblyModelLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        assemblyModelLabel.textColor = .secondaryLabelColor
+        container.addSubview(assemblyModelLabel)
+
+        let testAssemblyBtn = NSButton(frame: NSRect(x: 175, y: 572, width: 145, height: 28))
+        testAssemblyBtn.title = "Bağlantıyı Test Et"
+        testAssemblyBtn.bezelStyle = .rounded
+        testAssemblyBtn.target = self
+        testAssemblyBtn.action = #selector(testAssemblyAIConnectionClicked)
+        container.addSubview(testAssemblyBtn)
+
+        let getAssemblyKeyBtn = NSButton(frame: NSRect(x: 326, y: 572, width: 140, height: 28))
+        getAssemblyKeyBtn.title = "API Anahtarı Al ↗"
+        getAssemblyKeyBtn.bezelStyle = .rounded
+        getAssemblyKeyBtn.target = self
+        getAssemblyKeyBtn.action = #selector(openAssemblyAIConsoleClicked)
+        container.addSubview(getAssemblyKeyBtn)
+
+        assemblyAIStatusLabel = NSTextField(wrappingLabelWithString: "")
+        assemblyAIStatusLabel.frame = NSRect(x: 175, y: 604, width: 440, height: 32)
+        assemblyAIStatusLabel.font = NSFont.systemFont(ofSize: 11)
+        assemblyAIStatusLabel.textColor = .secondaryLabelColor
+        assemblyAIStatusLabel.maximumNumberOfLines = 2
+        container.addSubview(assemblyAIStatusLabel)
+
+        let assemblyNote = createNoteLabel(text: "Kayıt bitince ham metin ve gönderime hazır temizlenmiş metin birlikte alınır; ses AssemblyAI bulutuna gönderilir.", y: 640)
+        container.addSubview(assemblyNote)
+
+        container.addSubview(createSeparator(y: 676))
+
+        // 6. Gemini Sistem İstemi (System Instruction / Cevap & Yazım Tarzı)
+        promptSectionLabel = createSectionLabel(text: "Sistem İstemi", y: 690)
         container.addSubview(promptSectionLabel)
 
-        geminiPromptPresetPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 512, width: 440, height: 26), pullsDown: false)
+        geminiPromptPresetPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 688, width: 440, height: 26), pullsDown: false)
         for preset in promptPresets {
             geminiPromptPresetPopUp.addItem(withTitle: preset.name)
         }
@@ -681,7 +757,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         geminiPromptPresetPopUp.action = #selector(promptPresetChanged(_:))
         container.addSubview(geminiPromptPresetPopUp)
 
-        geminiPromptScrollView = NSScrollView(frame: NSRect(x: 175, y: 542, width: 440, height: 54))
+        geminiPromptScrollView = NSScrollView(frame: NSRect(x: 175, y: 718, width: 440, height: 54))
         geminiPromptScrollView.hasVerticalScroller = true
         geminiPromptScrollView.hasHorizontalScroller = false
         geminiPromptScrollView.autohidesScrollers = true
@@ -702,11 +778,11 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         geminiPromptScrollView.documentView = geminiPromptTextView
         container.addSubview(geminiPromptScrollView)
 
-        promptNoteLabel = createNoteLabel(text: "Gemini bu sistem talimatına (systemInstruction) göre çıktıyı biçimlendirir ve üslubu belirler.", y: 602)
+        promptNoteLabel = createNoteLabel(text: "Gemini bu sistem talimatına (systemInstruction) göre çıktıyı biçimlendirir ve üslubu belirler.", y: 778)
         container.addSubview(promptNoteLabel)
 
-        promptUnsupportedLabel = NSTextField(wrappingLabelWithString: "ℹ️ Seçili model saf ses deşifre (ASR) modelidir; konuşulanları doğrudan birebir metne döker. Sistem istemi, üslup ve anında çeviri özellikleri yalnızca Gemini Flash modellerinde (örn: Gemini 3.6 Flash) desteklenir.")
-        promptUnsupportedLabel.frame = NSRect(x: 175, y: 514, width: 440, height: 42)
+        promptUnsupportedLabel = NSTextField(wrappingLabelWithString: "ℹ️ Seçili Gemini modeli saf ses deşifre (ASR) içindir; konuşulanları doğrudan metne döker. Sistem istemi ve sohbet özellikleri bu model seçicisinde kullanılmaz.")
+        promptUnsupportedLabel.frame = NSRect(x: 175, y: 690, width: 440, height: 42)
         promptUnsupportedLabel.font = NSFont.systemFont(ofSize: 11)
         promptUnsupportedLabel.textColor = .secondaryLabelColor
         promptUnsupportedLabel.isHidden = true
@@ -718,22 +794,66 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private func updateProviderNote(for provider: String) {
         switch provider {
         case "apple":
-            providerNoteLabel.stringValue = "🍎 Apple Speech: Canlı akış ile konuşurken anında ekranda görünür. Sıfır kota, sıfır API anahtarı ve Apple Silicon Neural Engine ile %100 yerel ve çevrimdışı dikte."
+            providerNoteLabel.stringValue = "🍎 Apple Speech: Uygun sistemlerde yerel konuşma tanıma ile çalışır. API anahtarı gerekmez; Apple Speech izni gerekir."
         case "gemini":
-            providerNoteLabel.stringValue = "✨ Google Gemini Live: Canlı WebSocket akışıyla anında dikte ve akıllı bağlam."
+            providerNoteLabel.stringValue = "✨ Google Gemini: API anahtarı ve internet bağlantısı gerekir; seçili modele göre canlı veya normal deşifre kullanılır."
+        case "groq":
+            providerNoteLabel.stringValue = "⚡ Groq Whisper: API anahtarı ve internet bağlantısı gerekir; ses kaydı bulutta işlenir."
+        case "assemblyai":
+            providerNoteLabel.stringValue = "🎙 AssemblyAI Dictation API: Sesi gönderime hazır metne dönüştürür; dolgu ve öz-düzeltmeleri varsayılan olarak temizler."
         default:
-            providerNoteLabel.stringValue = "⚡ Groq Whisper: Whisper Large modelini LPU bulut donanımında ~0.3 saniyede tamamlar."
+            providerNoteLabel.stringValue = "Sağlayıcı ayarını kontrol edin."
+        }
+    }
+
+    private func updateProviderStatusLabels() {
+        let speech = PermissionManager.shared.getSpeechRecognitionStatus()
+        if speech.status == .authorized {
+            appleStatusLabel.stringValue = "🟢 Apple Speech hazır"
+            appleStatusLabel.textColor = .systemGreen
+        } else {
+            appleStatusLabel.stringValue = "🟡 Apple Speech izni gerekli"
+            appleStatusLabel.textColor = .systemOrange
+        }
+
+        let geminiKey = geminiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if geminiKey.isEmpty {
+            geminiStatusLabel.stringValue = "🟡 API anahtarı girilmedi"
+            geminiStatusLabel.textColor = .systemOrange
+        } else {
+            geminiStatusLabel.stringValue = "🟢 API anahtarı girildi · Kullanımdan önce bağlantıyı test edin"
+            geminiStatusLabel.textColor = .systemGreen
+        }
+
+        let assemblyKey = assemblyAIKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if assemblyKey.isEmpty {
+            assemblyAIStatusLabel.stringValue = "🟡 API anahtarı girilmedi"
+            assemblyAIStatusLabel.textColor = .systemOrange
+        } else {
+            assemblyAIStatusLabel.stringValue = "🟢 API anahtarı girildi · Kullanımdan önce bağlantıyı test edin"
+            assemblyAIStatusLabel.textColor = .systemGreen
+        }
+
+        let groqKey = groqKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if groqKey.isEmpty {
+            groqStatusLabel.stringValue = "🟡 API anahtarı girilmedi"
+            groqStatusLabel.textColor = .systemOrange
+        } else {
+            groqStatusLabel.stringValue = "🟢 API anahtarı girildi · Kullanımdan önce bağlantıyı test edin"
+            groqStatusLabel.textColor = .systemGreen
         }
     }
 
     private func updateSystemPromptVisibility() {
-        let isGemini = (providerSegmentedControl.selectedSegment == 1)
+        let supportsPrompt = TranscriptionProviderRegistry.supports(.initialPrompt, providerID: selectedProviderID)
         let geminiIdx = max(0, geminiModelPopUp.indexOfSelectedItem)
-        let modelId = (geminiIdx < ConfigManager.availableGeminiModels.count)
-            ? ConfigManager.availableGeminiModels[geminiIdx].id
-            : "gemini-3.5-transcribe-live"
+        let modelId = (geminiIdx < geminiModelOptions.count)
+            ? geminiModelOptions[geminiIdx].id
+            : AppConfig.defaultConfig.gemini_model
 
-        let isSupported = isGemini && ConfigManager.supportsSystemPrompt(model: modelId)
+        // Sağlayıcı istem desteklemeli VE seçili model bunu kabul etmeli
+        // (ör. saf ses "transcribe" modelleri system_instruction almaz).
+        let isSupported = supportsPrompt && ConfigManager.supportsSystemPrompt(model: modelId)
 
         geminiPromptPresetPopUp.isHidden = !isSupported
         geminiPromptScrollView.isHidden = !isSupported
@@ -747,9 +867,77 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
     }
 
+    private var selectedGeminiModelID: String {
+        let index = geminiModelPopUp?.indexOfSelectedItem ?? -1
+        guard index >= 0, index < geminiModelOptions.count else {
+            return AppConfig.defaultConfig.gemini_model
+        }
+        return geminiModelOptions[index].id
+    }
+
     @objc private func geminiModelChanged(_ sender: NSPopUpButton) {
         updateSystemPromptVisibility()
         autoSave()
+    }
+
+    @objc private func refreshGeminiModelsClicked() {
+        let key = geminiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            geminiStatusLabel.stringValue = "⚠️ Önce Gemini API anahtarını girin."
+            geminiStatusLabel.textColor = .systemOrange
+            SoundManager.shared.playCancel()
+            return
+        }
+
+        let selectedID = selectedGeminiModelID
+        geminiStatusLabel.stringValue = "⏳ Transkripsiyon modelleri webden kontrol ediliyor..."
+        geminiStatusLabel.textColor = .systemBlue
+
+        GeminiModelCatalog.fetch(apiKey: key) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(var models):
+                    if !models.contains(where: { $0.id == selectedID }),
+                       let known = ConfigManager.availableGeminiModels.first(where: { $0.id == selectedID }) {
+                        models.append(known)
+                    }
+                    guard !models.isEmpty else {
+                        self.geminiStatusLabel.stringValue = "⚠️ Erişilebilir transkripsiyon modeli bulunamadı."
+                        self.geminiStatusLabel.textColor = .systemOrange
+                        return
+                    }
+                    self.geminiModelOptions = models
+                    self.geminiModelPopUp.removeAllItems()
+                    for model in models {
+                        self.geminiModelPopUp.addItem(withTitle: model.name)
+                    }
+                    if let index = models.firstIndex(where: { $0.id == selectedID }) {
+                        self.geminiModelPopUp.selectItem(at: index)
+                    } else {
+                        self.geminiModelPopUp.selectItem(at: 0)
+                    }
+                    self.updateSystemPromptVisibility()
+                    let liveCount = models.filter { ConfigManager.isGeminiLiveModel($0.id) }.count
+                    self.geminiStatusLabel.stringValue = "🟢 Web listesi güncel · \(models.count) transkripsiyon modeli (\(liveCount) canlı)"
+                    self.geminiStatusLabel.textColor = .systemGreen
+                    SoundManager.shared.playSuccess()
+                case .failure(let error):
+                    let detail: String
+                    if let catalogError = error as? GeminiModelCatalogError {
+                        switch catalogError {
+                        case .httpStatus(let code): detail = "HTTP \(code)"
+                        default: detail = "Bağlantı kurulamadı"
+                        }
+                    } else {
+                        detail = "Bağlantı kurulamadı"
+                    }
+                    self.geminiStatusLabel.stringValue = "⚠️ Web modeli alınamadı (\(detail)); yerleşik liste kullanılacak."
+                    self.geminiStatusLabel.textColor = .systemOrange
+                    SoundManager.shared.playCancel()
+                }
+            }
+        }
     }
 
     @objc private func groqModelChanged(_ sender: NSPopUpButton) {
@@ -765,31 +953,34 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         autoSave()
     }
 
+    /// Kayıt defterindeki sıraya göre segment indeksini döndürür.
+    /// Segment denetimi bu sırayla oluşturulur; bilinmeyen kimlik varsayılana düşer.
+    private func providerSegmentIndex(for providerID: String) -> Int {
+        let normalized = TranscriptionProviderRegistry.normalize(providerID)
+        return TranscriptionProviderRegistry.all.firstIndex { $0.id == normalized } ?? 0
+    }
+
     @objc private func providerSegmentedChanged(_ sender: NSSegmentedControl) {
-        let provider: String
-        let popUpIdx: Int
-        switch sender.selectedSegment {
-        case 0:
-            provider = "apple"
-            popUpIdx = 0
-        case 1:
-            provider = "gemini"
-            popUpIdx = 1
-        default:
-            provider = "groq"
-            popUpIdx = 2
-        }
-        providerPopUp.selectItem(at: popUpIdx)
+        let providers = TranscriptionProviderRegistry.all
+        let index = sender.selectedSegment
+        guard index >= 0, index < providers.count else { return }
+
+        let provider = providers[index].id
+        providerPopUp.selectItem(at: index)
         updateProviderNote(for: provider)
+        updateProviderStatusLabels()
         updateSystemPromptVisibility()
         autoSave()
+        // autoSave provider bilgisini ConfigManager'a yazdıktan sonra izin
+        // sekmesinin "gerekli / gerekli değil" durumunu yeni sağlayıcıya göre yenile.
+        refreshPermissionStatuses()
     }
 
     // =========================================================================
     // TAB: Gelişmiş & Kısayollar (Auto-Submit, App Profiles, Voice Snippets, Sound Themes)
     // =========================================================================
     private func buildTabAdvancedView() -> NSView {
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 570))
 
         // 1. Otomatik Gönderim (Auto-Submit / Enter)
         let autoSubmitLabel = createSectionLabel(text: "Otomatik Gönderim", y: 16)
@@ -925,7 +1116,71 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         snippetsExample.textColor = .secondaryLabelColor
         container.addSubview(snippetsExample)
 
+        container.addSubview(createSeparator(y: 408))
+
+        // 5. Pano davranışı
+        let clipboardLabel = createSectionLabel(text: "Pano", y: 422)
+        container.addSubview(clipboardLabel)
+
+        restoreClipboardCheckbox = NSButton(
+            checkboxWithTitle: "Dikte sonrası önceki panoyu geri yükle",
+            target: self,
+            action: #selector(checkboxChanged(_:))
+        )
+        restoreClipboardCheckbox.frame = NSRect(x: 175, y: 420, width: 440, height: 18)
+        container.addSubview(restoreClipboardCheckbox)
+
+        let clipboardNote = createNoteLabel(
+            text: "Açıksa Voice Typing metni yapıştırdıktan kısa süre sonra eski pano içeriğini geri getirir. Pano yöneticisi kullanıyorsanız önerilir.",
+            y: 444
+        )
+        container.addSubview(clipboardNote)
+
+        container.addSubview(createSeparator(y: 470))
+
+        // 6. Gösterge Stili (HUD)
+        let hudLabel = createSectionLabel(text: "Gösterge Stili", y: 484)
+        container.addSubview(hudLabel)
+
+        hudStylePopUp = NSPopUpButton(frame: NSRect(x: 175, y: 480, width: 300, height: 26), pullsDown: false)
+        hudStylePopUp.addItem(withTitle: "Alt-ortada kapsül (varsayılan)")
+        hudStylePopUp.addItem(withTitle: "MacBook çentiği · Dynamic Island")
+        hudStylePopUp.target = self
+        hudStylePopUp.action = #selector(hudStyleChanged(_:))
+        container.addSubview(hudStylePopUp)
+
+        hudNotchNoteLabel = createNoteLabel(
+            text: "Dynamic Island yalnızca çentikli MacBook ekranlarında görünür. Çentik yoksa kapsül alt-ortada kalır.",
+            y: 506
+        )
+        container.addSubview(hudNotchNoteLabel)
+
+        // Yazı boyutu ayarı KALDIRILDI: çentik modunda boyut otomatik
+        // hesaplanır (sabit genişliğe sığdırma + okunabilirlik tabanı).
+        // Etkisi olmayan bir kontrol göstermek yanıltıcı olurdu.
+        let hudAutoNote = createNoteLabel(
+            text: "Yazı boyutu otomatiktir: ada genişliği sabittir, uzun metin alt satırlara sarar ve yazı gerektiği kadar küçülür (okunabilirlik sınırına kadar).",
+            y: 528
+        )
+        container.addSubview(hudAutoNote)
+
         return container
+    }
+
+    @objc private func hudStyleChanged(_ sender: NSPopUpButton) {
+        let style = sender.indexOfSelectedItem == 1 ? "notch" : "pill"
+        ConfigManager.shared.update { $0.hud_style = style }
+        updateHudControls()
+    }
+
+    /// Ada seçeneğini mevcut donanıma göre etkinleştirir/pasifleştirir.
+    private func updateHudControls() {
+        let hasNotch = RecordingHUD.notchedScreen() != nil
+        let notchItem = hudStylePopUp.item(at: 1)
+        notchItem?.isEnabled = hasNotch
+        if !hasNotch {
+            hudNotchNoteLabel.stringValue = "Bu ekranda çentik bulunamadı; Dynamic Island kullanılamaz."
+        }
     }
 
     @objc private func insertSampleSnippetsClicked() {
@@ -1034,18 +1289,18 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         accActionButton.action = #selector(openAccSettingsClicked)
         container.addSubview(accActionButton)
 
-        let accNote = createNoteLabel(text: "Kısayol tuşunu dinlemek ve metni imlece yazmak için gereklidir.", y: 176)
+        let accNote = createNoteLabel(text: "Global kısayolu, aktif yazı alanını ve Cmd+V ile metin gönderimini kullanmak içindir; Mikrofon izninden ayrıdır.", y: 176)
         container.addSubview(accNote)
 
         // Canlı Algılama Göstergesi (Yalnızca izin beklenirken görünür)
-        accProgressIndicator = NSProgressIndicator(frame: NSRect(x: 175, y: 201, width: 14, height: 14))
+        accProgressIndicator = NSProgressIndicator(frame: NSRect(x: 175, y: 204, width: 14, height: 14))
         accProgressIndicator.style = .spinning
         accProgressIndicator.controlSize = .small
         accProgressIndicator.isDisplayedWhenStopped = false
         container.addSubview(accProgressIndicator)
 
-        accGuideLabel = NSTextField(labelWithString: "")
-        accGuideLabel.frame = NSRect(x: 195, y: 199, width: 420, height: 18)
+        accGuideLabel = NSTextField(labelWithString: "İzin kapsamı: global kısayolu algılama, odaklı alanı bulma ve deşifreyi hedef uygulamaya gönderme.")
+        accGuideLabel.frame = NSRect(x: 195, y: 203, width: 420, height: 18)
         accGuideLabel.font = NSFont.systemFont(ofSize: 10.5)
         accGuideLabel.textColor = .secondaryLabelColor
         container.addSubview(accGuideLabel)
@@ -1096,7 +1351,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         resultContainer.contentView = resultFlipped
         container.addSubview(resultContainer)
 
-        let tipLabel = NSTextField(labelWithString: "💡 İzin verildiğinde macOS Sistem Ayarları penceresi otomatik kapatılır.")
+        let tipLabel = NSTextField(labelWithString: "💡 İzinler tamamlandığında Sistem Ayarları gizlenir; açık işleriniz sonlandırılmaz.")
         tipLabel.frame = NSRect(x: 175, y: 416, width: 440, height: 20)
         tipLabel.font = NSFont.systemFont(ofSize: 10.5)
         tipLabel.textColor = .tertiaryLabelColor
@@ -1131,7 +1386,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         appTitle.alignment = .center
         container.addSubview(appTitle)
 
-        let versionLabel = NSTextField(labelWithString: "Sürüm 2.0 • Native Swift 6 / Apple Silicon & Intel")
+        let versionLabel = NSTextField(labelWithString: Self.aboutVersionText())
         versionLabel.frame = NSRect(x: (650 - 450) / 2, y: 114, width: 450, height: 18)
         versionLabel.font = NSFont.systemFont(ofSize: 11)
         versionLabel.textColor = .secondaryLabelColor
@@ -1231,8 +1486,18 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         return box
     }
 
-    private func createSingleLineInputField(frame: NSRect, placeholder: String, isMonospaced: Bool = true) -> NSTextField {
-        let textField = NSTextField(frame: frame)
+    private func createSingleLineInputField(
+        frame: NSRect,
+        placeholder: String,
+        isMonospaced: Bool = true,
+        isSecure: Bool = false
+    ) -> NSTextField {
+        let textField: NSTextField
+        if isSecure {
+            textField = NSSecureTextField(frame: frame)
+        } else {
+            textField = NSTextField(frame: frame)
+        }
         textField.placeholderString = placeholder
         if isMonospaced {
             textField.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
@@ -1310,16 +1575,17 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // VERİ YÜKLEME VE SENKRONİZASYON
     // =========================================================================
     @objc public func refreshPermissionStatuses() {
+        let wasMicAuthorized = lastKnownMicStatus
+        let wasSpeechAuthorized = lastKnownSpeechStatus
+        let wasAccAuthorized = lastKnownAccStatus
+        let speechRequired = TranscriptionProviderRegistry
+            .supports(.onDevice, providerID: ConfigManager.shared.config.provider)
         let mic = PermissionManager.shared.getMicrophoneStatus()
         micStatusLabel.stringValue = "\(mic.badge) \(mic.description)"
         switch mic.status {
         case .authorized:
             micStatusLabel.textColor = .systemGreen
             micActionButton?.title = "Sistem Ayarları"
-            if !lastKnownMicStatus && permissionPollTimer != nil {
-                SoundManager.shared.playSuccess()
-                PermissionManager.shared.closeSystemSettings()
-            }
             lastKnownMicStatus = true
         case .denied:
             micStatusLabel.textColor = .systemRed
@@ -1336,28 +1602,33 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
 
         let speech = PermissionManager.shared.getSpeechRecognitionStatus()
-        speechStatusLabel.stringValue = "\(speech.badge) \(speech.description)"
-        switch speech.status {
-        case .authorized:
-            speechStatusLabel.textColor = .systemGreen
-            speechActionButton?.title = "Sistem Ayarları"
-            if !lastKnownSpeechStatus && permissionPollTimer != nil {
-                SoundManager.shared.playSuccess()
-                PermissionManager.shared.closeSystemSettings()
-            }
+        if !speechRequired {
+            speechStatusLabel.stringValue = "⚪ Gerekli değil (Apple Speech seçili değil)"
+            speechStatusLabel.textColor = .secondaryLabelColor
+            speechActionButton?.title = "Apple Speech'i seç"
+            speechActionButton?.isEnabled = false
             lastKnownSpeechStatus = true
-        case .denied:
-            speechStatusLabel.textColor = .systemRed
-            speechActionButton?.title = "Sistem Ayarlarını Aç"
-            lastKnownSpeechStatus = false
-        case .notDetermined:
-            speechStatusLabel.textColor = .systemOrange
-            speechActionButton?.title = "İzin Ver"
-            lastKnownSpeechStatus = false
-        default:
-            speechStatusLabel.textColor = .systemOrange
-            speechActionButton?.title = "İzin Ver"
-            lastKnownSpeechStatus = false
+        } else {
+            speechStatusLabel.stringValue = "\(speech.badge) \(speech.description)"
+            speechActionButton?.isEnabled = true
+            switch speech.status {
+            case .authorized:
+                speechStatusLabel.textColor = .systemGreen
+                speechActionButton?.title = "Sistem Ayarları"
+                lastKnownSpeechStatus = true
+            case .denied:
+                speechStatusLabel.textColor = .systemRed
+                speechActionButton?.title = "Sistem Ayarlarını Aç"
+                lastKnownSpeechStatus = false
+            case .notDetermined:
+                speechStatusLabel.textColor = .systemOrange
+                speechActionButton?.title = "İzin Ver"
+                lastKnownSpeechStatus = false
+            default:
+                speechStatusLabel.textColor = .systemOrange
+                speechActionButton?.title = "İzin Ver"
+                lastKnownSpeechStatus = false
+            }
         }
 
         let acc = PermissionManager.shared.getAccessibilityStatus()
@@ -1370,8 +1641,6 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             if !lastKnownAccStatus && permissionPollTimer != nil {
                 accGuideLabel?.stringValue = "✅ Yetki verildi! Voice Typing kullanıma hazır."
                 accGuideLabel?.textColor = .systemGreen
-                SoundManager.shared.playSuccess()
-                PermissionManager.shared.closeSystemSettings()
             }
             lastKnownAccStatus = true
         case .denied:
@@ -1383,6 +1652,17 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             accActionButton?.title = "İzin Ver"
             lastKnownAccStatus = false
         }
+
+        let allRequiredPermissionsGranted = mic.status == .authorized &&
+            acc.status == .authorized &&
+            (!speechRequired || speech.status == .authorized)
+        let becameReady = permissionPollTimer != nil &&
+            allRequiredPermissionsGranted &&
+            (!wasMicAuthorized || !wasAccAuthorized || (speechRequired && !wasSpeechAuthorized))
+        if becameReady {
+            SoundManager.shared.playSuccess()
+            PermissionManager.shared.closeSystemSettings()
+        }
     }
 
     public func loadValues() {
@@ -1393,19 +1673,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         let cfg = ConfigManager.shared.config
 
-        // Provider
-        switch cfg.provider.lowercased() {
-        case "apple":
-            providerPopUp.selectItem(at: 0)
-            providerSegmentedControl.selectedSegment = 0
-        case "gemini":
-            providerPopUp.selectItem(at: 1)
-            providerSegmentedControl.selectedSegment = 1
-        default:
-            providerPopUp.selectItem(at: 2)
-            providerSegmentedControl.selectedSegment = 2
-        }
-        updateProviderNote(for: cfg.provider.lowercased())
+        // Provider — segment sırası kayıt defterindeki sağlayıcı sırasıyla
+        // birebir aynıdır; arayüz bu listeyi tek kaynak olarak kullanır.
+        let providerIndex = providerSegmentIndex(for: cfg.provider)
+        providerPopUp.selectItem(at: providerIndex)
+        providerSegmentedControl.selectedSegment = providerIndex
+        updateProviderNote(for: TranscriptionProviderRegistry.normalize(cfg.provider))
 
         // Groq
         groqKeyField.stringValue = cfg.groq_api_key
@@ -1415,13 +1688,18 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             groqModelPopUp.selectItem(at: 0)
         }
 
+        // AssemblyAI
+        assemblyAIKeyField.stringValue = cfg.assemblyai_api_key
+
         // Gemini
         geminiKeyField.stringValue = cfg.gemini_api_key
-        if let idx = ConfigManager.availableGeminiModels.firstIndex(where: { $0.id == cfg.gemini_model }) {
+        if let idx = geminiModelOptions.firstIndex(where: { $0.id == cfg.gemini_model }) {
             geminiModelPopUp.selectItem(at: idx)
         } else {
             geminiModelPopUp.selectItem(at: 0)
         }
+
+        updateProviderStatusLabels()
 
         // Language
         languageField.stringValue = cfg.language
@@ -1508,17 +1786,23 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         soundVolumeSlider.doubleValue = cfg.sound_volume
         soundVolumeLabel.stringValue = "Ses: \(Int(cfg.sound_volume * 100))%"
 
-        // Gelişmiş: Voice Snippets
-        if cfg.voice_snippets.isEmpty {
-            voiceSnippetsTextView.string = "kısayol mail = ornek@sirket.com"
-        } else {
-            voiceSnippetsTextView.string = AppConfig.formatVoiceSnippets(cfg.voice_snippets)
-        }
+        // Gösterge stili: yazı boyutu artık ayarlanmaz (otomatik hesaplanır).
+        hudStylePopUp.selectItem(at: HUDPlacement.resolve(cfg.hud_style) == .notch ? 1 : 0)
+        updateHudControls()
+
+        // Gelişmiş: Voice Snippets. Alanı örnek metinle doldurmak yerine boş
+        // bırakıyoruz; böylece kullanıcı ayarlarda dolaşırken örnek bir snippet
+        // istemeden etkinleşmez. Örnek için "+ Örnek Ekle" kullanılabilir.
+        voiceSnippetsTextView.string = AppConfig.formatVoiceSnippets(cfg.voice_snippets)
+
+        // Gelişmiş: Pano
+        restoreClipboardCheckbox.state = cfg.restore_clipboard ? .on : .off
 
         updateSystemPromptVisibility()
 
         statusMessageLabel.stringValue = "Değişiklikler anında kaydedilir."
         statusMessageLabel.textColor = .secondaryLabelColor
+        refreshPermissionStatuses()
     }
 
     // =========================================================================
@@ -1655,6 +1939,31 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
     }
 
+    @objc private func testAssemblyAIConnectionClicked() {
+        let key = assemblyAIKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else {
+            assemblyAIStatusLabel.stringValue = "⚠️ Lütfen önce AssemblyAI API anahtarını girin."
+            assemblyAIStatusLabel.textColor = .systemOrange
+            SoundManager.shared.playCancel()
+            return
+        }
+
+        assemblyAIStatusLabel.stringValue = "⏳ Dictation API anahtarı doğrulanıyor..."
+        assemblyAIStatusLabel.textColor = .systemBlue
+
+        Transcriber.shared.testAssemblyAIConnection(apiKey: key) { [weak self] success, message in
+            DispatchQueue.main.async {
+                self?.assemblyAIStatusLabel.stringValue = message
+                self?.assemblyAIStatusLabel.textColor = success ? .systemGreen : .systemRed
+                if success {
+                    SoundManager.shared.playSuccess()
+                } else {
+                    SoundManager.shared.playCancel()
+                }
+            }
+        }
+    }
+
     @objc private func testGeminiConnectionClicked() {
         let key = geminiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else {
@@ -1692,7 +2001,19 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
     }
 
+    @objc private func openAssemblyAIConsoleClicked() {
+        if let url = URL(string: "https://www.assemblyai.com/dashboard/api-keys") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     @objc private func testRecordClicked() {
+        guard !AudioRecorder.shared.isRecording else {
+            testStatusLabel.stringValue = "⚠️ Başka bir kayıt devam ediyor. Önce onu bitirin."
+            testStatusLabel.textColor = .systemOrange
+            return
+        }
+
         testStatusLabel.stringValue = "🔴 2 saniyelik test kaydı yapılıyor, lütfen konuşun..."
         testStatusLabel.textColor = .systemRed
         testAudioResultLabel.stringValue = ""
@@ -1707,14 +2028,17 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
 
         testRecordButton.isEnabled = false
+        testRecordButton.title = "Kaydediliyor..."
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             guard let self = self else { return }
             let (data, dur) = AudioRecorder.shared.stop()
             SoundManager.shared.playStop()
-            self.testRecordButton.isEnabled = true
+            self.testRecordButton.title = "Deşifre ediliyor..."
 
             guard let audioData = data, !audioData.isEmpty else {
+                self.testRecordButton.isEnabled = true
+                self.testRecordButton.title = "2 Sn Test Kaydı Yap"
                 self.testStatusLabel.stringValue = "⚠️ Ses yakalanamadı (Sessizlik veya mikrofon kapalı)."
                 self.testStatusLabel.textColor = .systemOrange
                 SoundManager.shared.playCancel()
@@ -1725,13 +2049,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             self.testStatusLabel.textColor = .systemBlue
 
             var testConfig = ConfigManager.shared.config
-            let selectedProvider: String
-            switch self.providerSegmentedControl.selectedSegment {
-            case 0: selectedProvider = "apple"
-            case 1: selectedProvider = "gemini"
-            default: selectedProvider = "groq"
-            }
-            testConfig.provider = selectedProvider
+            testConfig.provider = self.selectedProviderID
             testConfig.groq_api_key = self.groqKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             testConfig.gemini_api_key = self.geminiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1743,10 +2061,10 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             }
 
             let geminiIdx = max(0, self.geminiModelPopUp.indexOfSelectedItem)
-            if geminiIdx < ConfigManager.availableGeminiModels.count {
-                testConfig.gemini_model = ConfigManager.availableGeminiModels[geminiIdx].id
+            if geminiIdx < geminiModelOptions.count {
+                testConfig.gemini_model = geminiModelOptions[geminiIdx].id
             } else {
-                testConfig.gemini_model = "gemini-3.5-transcribe-live"
+                testConfig.gemini_model = AppConfig.defaultConfig.gemini_model
             }
 
             let lang = self.languageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1754,13 +2072,22 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
             Transcriber.shared.transcribe(audioData: audioData, config: testConfig) { res in
                 DispatchQueue.main.async {
-                    if res.success {
-                        self.testStatusLabel.stringValue = "✅ Deşifre Başarılı! (\(String(format: "%.2f", res.latency)) sn - \(res.provider))"
+                    let recognizedText = res.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    self.testRecordButton.isEnabled = true
+                    self.testRecordButton.title = "2 Sn Test Kaydı Yap"
+
+                    if res.success && !recognizedText.isEmpty {
+                        self.testStatusLabel.stringValue = "✅ Deşifre başarılı (\(String(format: "%.2f", res.latency)) sn - \(res.provider))"
                         self.testStatusLabel.textColor = .systemGreen
-                        self.testAudioResultLabel.stringValue = "\"\(res.text)\""
+                        self.testAudioResultLabel.stringValue = "\"\(recognizedText)\""
                         SoundManager.shared.playSuccess()
+                    } else if res.success || Transcriber.isNoSpeechMessage(res.error ?? "") {
+                        self.testStatusLabel.stringValue = "⚠️ Ses algılanmadı. Lütfen test sırasında konuşun."
+                        self.testStatusLabel.textColor = .systemOrange
+                        self.testAudioResultLabel.stringValue = "Mikrofon çalışıyor olabilir; ancak deşifre edilecek konuşma bulunamadı."
+                        SoundManager.shared.playCancel()
                     } else {
-                        self.testStatusLabel.stringValue = "❌ Deşifre Hatası (\(res.provider))"
+                        self.testStatusLabel.stringValue = "❌ Deşifre hatası (\(res.provider))"
                         self.testStatusLabel.textColor = .systemRed
                         self.testAudioResultLabel.stringValue = res.error ?? "Bilinmeyen hata"
                         SoundManager.shared.playCancel()
@@ -1830,6 +2157,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     public func controlTextDidChange(_ obj: Notification) {
+        updateProviderStatusLabels()
         scheduleAutoSave()
     }
 
@@ -1850,16 +2178,25 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
     }
 
-    @objc public func autoSave(showMessage: Bool = true) {
-        let selectedProvider: String
-        switch providerSegmentedControl.selectedSegment {
-        case 0: selectedProvider = "apple"
-        case 1: selectedProvider = "gemini"
-        default: selectedProvider = "groq"
+    /// Segment denetiminde seçili sağlayıcının kimliği.
+    /// Segment→kimlik eşlemesi tek yerde tutulur; daha önce iki ayrı switch
+    /// birbiriyle tutarsızdı ve canlı test akışı AssemblyAI'yi yanlış
+    /// sağlayıcıya eşliyordu.
+    private var selectedProviderID: String {
+        let providers = TranscriptionProviderRegistry.all
+        let index = providerSegmentedControl.selectedSegment
+        guard index >= 0, index < providers.count else {
+            return TranscriptionProviderRegistry.defaultProviderID
         }
+        return providers[index].id
+    }
+
+    @objc public func autoSave(showMessage: Bool = true) {
+        let selectedProvider = selectedProviderID
 
         let groqKey = groqKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let geminiKey = geminiKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let assemblyAIKey = assemblyAIKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
         let groqIdx = max(0, groqModelPopUp.indexOfSelectedItem)
         let groqModel = (groqIdx < ConfigManager.availableGroqModels.count)
@@ -1867,9 +2204,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             : "whisper-large-v3"
 
         let geminiIdx = max(0, geminiModelPopUp.indexOfSelectedItem)
-        let geminiModel = (geminiIdx < ConfigManager.availableGeminiModels.count)
-            ? ConfigManager.availableGeminiModels[geminiIdx].id
-            : "gemini-3.5-transcribe-live"
+        let geminiModel = (geminiIdx < geminiModelOptions.count)
+            ? geminiModelOptions[geminiIdx].id
+            : AppConfig.defaultConfig.gemini_model
 
         let language = languageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1924,7 +2261,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
 
         let soundVolume = soundVolumeSlider.doubleValue
-        let snippets = AppConfig.parseVoiceSnippets(from: voiceSnippetsTextView.string)
+        let snippetsText = voiceSnippetsTextView.string
+        let snippets = AppConfig.parseVoiceSnippets(from: snippetsText)
 
         LaunchAtLoginManager.shared.setEnabled(launchLogin)
 
@@ -1932,6 +2270,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.provider = selectedProvider
             cfg.groq_api_key = groqKey
             cfg.gemini_api_key = geminiKey
+            cfg.assemblyai_api_key = assemblyAIKey
             cfg.groq_model = groqModel
             cfg.gemini_model = geminiModel
             cfg.language = language.isEmpty ? "tr" : language
@@ -1944,7 +2283,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.remove_filler_words = removeFillerOn
             cfg.save_history = saveHistOn
             cfg.play_sounds = playSounds
-            cfg.restore_clipboard = false
+            cfg.restore_clipboard = restoreClipboardCheckbox.state == .on
             cfg.background_audio_mode = bgAudioMode
             cfg.enable_microphone_boost = micBoostOn
             cfg.pause_media_playback = (bgAudioMode == "pause")
@@ -1957,6 +2296,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.sound_theme = soundTheme
             cfg.sound_volume = soundVolume
             cfg.voice_snippets = snippets
+            cfg.hud_style = hudStylePopUp.indexOfSelectedItem == 1 ? "notch" : "pill"
         }
 
         AppDelegate.updateDockVisibility(showDock)

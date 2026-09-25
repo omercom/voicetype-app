@@ -36,12 +36,20 @@ public final class AppProfileFormatter {
         "dev.zed.Zed",
         "com.sublimetext.4",
         "com.sublimetext.3",
+        "com.trae.app",
+        "com.panic.Nova",
+        "com.barebones.bbedit",
+        "com.macromates.TextMate",
+        "com.coteditor.CotEditor",
         "com.jetbrains.intellij",
         "com.jetbrains.pycharm",
         "com.jetbrains.webstorm",
         "com.jetbrains.clion",
         "com.jetbrains.rider",
-        "com.jetbrains.goland"
+        "com.jetbrains.goland",
+        "com.jetbrains.rubymine",
+        "com.jetbrains.phpstorm",
+        "com.google.android.studio"
     ]
 
     private let messagingBundleIDs: Set<String> = [
@@ -88,7 +96,11 @@ public final class AppProfileFormatter {
         }
 
         if codeEditorBundleIDs.contains(where: { $0.caseInsensitiveCompare(bundle) == .orderedSame }) ||
-           name.contains("code") || name.contains("cursor") || name.contains("xcode") || name.contains("intellij") {
+           name.contains("code") || name.contains("cursor") || name.contains("xcode") ||
+           name.contains("zed") || name.contains("sublime") || name.contains("nova") ||
+           name.contains("trae") || name.contains("windsurf") || name.contains("intellij") ||
+           name.contains("jetbrains") || name.contains("textmate") || name.contains("bbedit") ||
+           name.contains("coteditor") || name.contains("android studio") {
             return .codeEditor
         }
 

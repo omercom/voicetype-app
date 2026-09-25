@@ -2,23 +2,73 @@ import Foundation
 import AVFoundation
 import CoreAudio
 import AppKit
+import Accelerate
 
 public class AudioRecorder: NSObject {
     public static let shared = AudioRecorder()
 
     private var audioEngine: AVAudioEngine?
     private var audioConverter: AVAudioConverter?
+    private var conversionBuffer: AVAudioPCMBuffer?
+    private var preparedHardwareFormat: AVAudioFormat?
     private let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
 
     private var startTime: CFAbsoluteTime = 0
     private let lock = NSLock()
+    private let converterLock = NSLock()
+    private let chunkDeliveryQueue = DispatchQueue(
+        label: "com.voicetyping.audio-recorder.chunks",
+        qos: .userInteractive
+    )
+    private let chunkDeliveryQueueKey = DispatchSpecificKey<Void>()
+    private let warmupQueue = DispatchQueue(
+        label: "com.voicetyping.audio-recorder.warmup",
+        qos: .userInitiated
+    )
+
+    private var recordingState = false
+    private var isStopping = false
+    private var inputTapInstalled = false
+    private var activeTapCallbacks = DispatchGroup()
+    private var deliveryGeneration: UInt64 = 0
+    private var cancelledDeliveryGeneration: UInt64?
 
     private var chunkCallback: ((Data) -> Void)?
+    private var firstAudioBufferCallback: (() -> Void)?
     private var accumulatedPCM: Data = Data()
+    private var accumulatedPCMOffset = 0
     private var bufferedPCMData: Data = Data()
     private var currentPower: Float = -160.0
+    private var processingModeForRecording: RecordingAudioProcessingMode = .none
+    private var hasDeliveredInitialStreamingChunk = false
+    private var warmupGeneration: UInt64 = 0
 
-    public private(set) var isRecording: Bool = false
+    /// Çift eşikli konuşma kapısı. `currentPower` zaten her tamponda
+    /// hesaplandığı için kapıyı beslemek ek analiz maliyeti getirmez.
+    private var speechGate = SpeechGate()
+
+    // İlk 40 ms'yi hemen sağlayıcıya gönder; devamında 100 ms paketler ağ ve
+    // allocation maliyetini düşük tutar. Böylece sürekli paket sayısını artırmadan
+    // ilk tanıma için yaklaşık 60-100 ms kazanılır.
+    static let initialStreamingChunkByteCount = 1280 // 40ms @ 16kHz, mono, Int16
+    static let streamingChunkByteCount = 3200 // 100ms @ 16kHz, mono, Int16
+
+    /// Bu özellik eski public API ile aynı okunabilir yüzeyi korur; değeri
+    /// lock üzerinden okunduğu için AVAudioEngine callback'i ile stop yarışmaz.
+    public var isRecording: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordingState
+    }
+
+    /// Menüden başlatılan kayıtlarda da minimum süre kontrolünün klavye
+    /// tetikleyicisiyle aynı çalışması için anlık kayıt süresini döner.
+    public func currentRecordingDuration() -> Double {
+        lock.lock()
+        defer { lock.unlock() }
+        guard recordingState else { return 0.0 }
+        return max(0.0, CFAbsoluteTimeGetCurrent() - startTime)
+    }
 
     // MARK: - Donanım Dinleyicisi (Default Input Device & Sleep)
 
@@ -31,7 +81,93 @@ public class AudioRecorder: NSObject {
 
     override private init() {
         super.init()
+        chunkDeliveryQueue.setSpecific(key: chunkDeliveryQueueKey, value: ())
         setupHardwareListeners()
+    }
+
+    private func unconsumedAccumulatedPCM() -> Data {
+        guard accumulatedPCMOffset < accumulatedPCM.count else { return Data() }
+        return accumulatedPCM.subdata(in: accumulatedPCMOffset..<accumulatedPCM.count)
+    }
+
+    /// Tüketilmiş streaming verisini yalnızca seyrek aralıklarla öne alır.
+    /// Böylece her 100ms blokta O(n) removeFirst maliyeti oluşmaz.
+    private func compactAccumulatedPCMIfNeeded() {
+        guard accumulatedPCMOffset > 0 else { return }
+
+        if accumulatedPCMOffset == accumulatedPCM.count {
+            accumulatedPCM.removeAll(keepingCapacity: true)
+            accumulatedPCMOffset = 0
+        } else if accumulatedPCMOffset >= 64 * 1024 && accumulatedPCMOffset * 2 >= accumulatedPCM.count {
+            accumulatedPCM.removeSubrange(0..<accumulatedPCMOffset)
+            accumulatedPCMOffset = 0
+        }
+    }
+
+    private func enqueueReadyChunks(
+        _ chunks: [Data],
+        callback: @escaping (Data) -> Void,
+        generation: UInt64
+    ) {
+        for chunk in chunks {
+            chunkDeliveryQueue.async { [weak self] in
+                guard let self = self else { return }
+                self.lock.lock()
+                let shouldDeliver = self.deliveryGeneration == generation &&
+                    self.cancelledDeliveryGeneration != generation
+                self.lock.unlock()
+
+                if shouldDeliver {
+                    callback(chunk)
+                }
+            }
+        }
+    }
+
+    private func flushChunkDeliveryQueue() {
+        // Bir chunk callback'i içinden stop/cancel çağrılırsa aynı seri kuyruğa
+        // sync yapmak deadlock yaratır. Bu durumda mevcut callback tamamlandıktan
+        // sonra kuyruğun doğal FIFO sırası devam eder.
+        guard DispatchQueue.getSpecific(key: chunkDeliveryQueueKey) == nil else { return }
+        chunkDeliveryQueue.sync {}
+    }
+
+    private func deliverRemainingChunk(
+        _ chunk: Data,
+        callback: @escaping (Data) -> Void,
+        generation: UInt64
+    ) {
+        guard !chunk.isEmpty else { return }
+
+        let delivery = { [weak self] in
+            guard let self = self else { return }
+            self.lock.lock()
+            let shouldDeliver = self.deliveryGeneration == generation &&
+                self.cancelledDeliveryGeneration != generation
+            self.lock.unlock()
+
+            if shouldDeliver {
+                callback(chunk)
+            }
+        }
+
+        if DispatchQueue.getSpecific(key: chunkDeliveryQueueKey) != nil {
+            // stop() bir callback içinden çağrıldıysa mevcut callback'in önüne
+            // geçmemesi için kalan parçayı kuyruğun sonuna bırak.
+            chunkDeliveryQueue.async(execute: delivery)
+        } else {
+            chunkDeliveryQueue.sync(execute: delivery)
+        }
+    }
+
+    private func stopEngine(_ engine: AVAudioEngine?, removeTap: Bool) {
+        guard let engine = engine else { return }
+        if removeTap {
+            // Önce tap'i kaldırmak, stop ile aynı anda yeni callback başlamasını
+            // engeller; aktif callback'ler ayrıca DispatchGroup ile beklenir.
+            engine.inputNode.removeTap(onBus: 0)
+        }
+        engine.stop()
     }
 
     deinit {
@@ -83,7 +219,7 @@ public class AudioRecorder: NSObject {
     private func handleDefaultDeviceChanged() {
         print("[AudioRecorder] 🔄 Sistem varsayılan mikrofonu değişti (AirPods/Bluetooth/Dahili).")
         lock.lock()
-        let recording = isRecording
+        let recording = recordingState
         lock.unlock()
 
         if !recording {
@@ -96,111 +232,273 @@ public class AudioRecorder: NSObject {
 
     // MARK: - Kayıt Başlatma & Sıfır Gecikmeli Uyanma (Instant Warm Start)
 
-    public func start(onAudioChunk: ((Data) -> Void)? = nil) -> Bool {
+    /// CoreAudio graph'ını mikrofonu çalıştırmadan hazırlar. `engine.start()`
+    /// çağrılmadığı için boşta mikrofon kullanılmaz; yalnız allocation, format,
+    /// converter ve tap kurulumu kayıt hot path'inden çıkarılır.
+    public func warm() {
+        lock.lock()
+        let generation = warmupGeneration
+        lock.unlock()
+
+        warmupQueue.async { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            guard self.warmupGeneration == generation,
+                  !self.recordingState,
+                  !self.isStopping else {
+                self.lock.unlock()
+                return
+            }
+            _ = self.preparePipelineLocked()
+            self.lock.unlock()
+        }
+    }
+
+    public var isWarm: Bool {
         lock.lock()
         defer { lock.unlock() }
+        return audioEngine != nil && audioConverter != nil && conversionBuffer != nil && inputTapInstalled
+    }
 
-        if isRecording {
-            return false
+    private func formatsMatch(_ lhs: AVAudioFormat, _ rhs: AVAudioFormat) -> Bool {
+        lhs.sampleRate == rhs.sampleRate &&
+        lhs.channelCount == rhs.channelCount &&
+        lhs.commonFormat == rhs.commonFormat &&
+        lhs.isInterleaved == rhs.isInterleaved
+    }
+
+    /// Çağıran `lock` sahibi olmalıdır.
+    private func preparePipelineLocked() -> Bool {
+        if let engine = audioEngine,
+           let preparedFormat = preparedHardwareFormat,
+           audioConverter != nil,
+           conversionBuffer != nil,
+           inputTapInstalled {
+            let currentFormat = engine.inputNode.outputFormat(forBus: 0)
+            if currentFormat.sampleRate > 0,
+               currentFormat.channelCount > 0,
+               formatsMatch(currentFormat, preparedFormat) {
+                engine.prepare()
+                return true
+            }
         }
 
-        // 0. CLAMSHELL KONTROLÜ (MacBook Kapağı Kapalı mı?)
-        if IOKitClamshellStateProvider.shared.isLidClosed() {
-            print("[AudioRecorder] ⚠️ MacBook kapağı kapalı (Clamshell modu). Harici mikrofon yoksa Apple Silicon/T2 donanımı dahili mikrofonu susturmuş olabilir.")
+        if inputTapInstalled, let oldEngine = audioEngine {
+            oldEngine.inputNode.removeTap(onBus: 0)
         }
+        audioEngine?.stop()
+        inputTapInstalled = false
+        audioEngine = nil
+        audioConverter = nil
+        conversionBuffer = nil
+        preparedHardwareFormat = nil
 
-        // Ses motorunu sıfırdan temiz başlat
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
         let hwFormat = inputNode.outputFormat(forBus: 0)
-
         guard hwFormat.sampleRate > 0 && hwFormat.channelCount > 0 else {
             print("[Hata] Geçersiz mikrofon ses formatı: \(hwFormat)")
             return false
         }
-
         guard let converter = AVAudioConverter(from: hwFormat, to: targetFormat) else {
             print("[Hata] Ses dönüştürücü oluşturulamadı: \(hwFormat) -> \(targetFormat)")
             return false
         }
 
-        self.audioEngine = engine
-        self.audioConverter = converter
-        self.chunkCallback = onAudioChunk
-        self.accumulatedPCM = Data()
-        self.bufferedPCMData = Data()
-        self.currentPower = -160.0
-        self.startTime = CFAbsoluteTimeGetCurrent()
-        MicrophoneBoostProcessor.shared.reset()
-
-        inputNode.installTap(onBus: 0, bufferSize: 2048, format: hwFormat) { [weak self] buffer, time in
-            guard let self = self, self.isRecording else { return }
-
-            // Canlı güç seviyesini hesapla
-            let calculatedPower = self.calculatePower(buffer: buffer)
-
-            let outBuffer = AVAudioPCMBuffer(pcmFormat: self.targetFormat, frameCapacity: 4096)!
-            var error: NSError?
-            var haveData = true
-
-            let inputBlock: AVAudioConverterInputBlock = { inNumPackets, outStatus in
-                if haveData {
-                    haveData = false
-                    outStatus.pointee = .haveData
-                    return buffer
-                } else {
-                    outStatus.pointee = .noDataNow
-                    return nil
-                }
-            }
-
-            let status = converter.convert(to: outBuffer, error: &error, withInputFrom: inputBlock)
-            if (status == .haveData || status == .inputRanDry) && outBuffer.frameLength > 0,
-               let channelData = outBuffer.int16ChannelData {
-                let byteCount = Int(outBuffer.frameLength) * MemoryLayout<Int16>.size
-                let rawChunk = Data(bytes: channelData[0], count: byteCount)
-
-                // Mikrofon Akıllı Kazanç ve Yumuşak Sınırlayıcı (AGC Boost Processor)
-                let boostEnabled = ConfigManager.shared.config.enable_microphone_boost
-                let chunk = boostEnabled ? MicrophoneBoostProcessor.shared.processPCM16Data(rawChunk, enabled: true) : rawChunk
-
-                var readyChunks: [Data] = []
-                var localCallback: ((Data) -> Void)? = nil
-
-                self.lock.lock()
-                self.currentPower = calculatedPower
-                self.bufferedPCMData.append(chunk)
-                if self.chunkCallback != nil {
-                    self.accumulatedPCM.append(chunk)
-                    // ~100ms bloklar (1600 örnek = 3200 bayt)
-                    while self.accumulatedPCM.count >= 3200 {
-                        let block = self.accumulatedPCM.prefix(3200)
-                        readyChunks.append(Data(block))
-                        self.accumulatedPCM.removeFirst(3200)
-                    }
-                    localCallback = self.chunkCallback
-                }
-                self.lock.unlock()
-
-                if let cb = localCallback {
-                    for readyChunk in readyChunks {
-                        cb(readyChunk)
-                    }
-                }
-            }
+        let outputFrameCapacity = AVAudioFrameCount(
+            max(4096, Int(ceil(2048.0 * targetFormat.sampleRate / hwFormat.sampleRate)) + 512)
+        )
+        guard let outputBuffer = AVAudioPCMBuffer(
+            pcmFormat: targetFormat,
+            frameCapacity: outputFrameCapacity
+        ) else {
+            print("[Hata] Ses dönüşüm tamponu oluşturulamadı.")
+            return false
         }
 
+        audioEngine = engine
+        audioConverter = converter
+        conversionBuffer = outputBuffer
+        preparedHardwareFormat = hwFormat
+
+        inputNode.installTap(onBus: 0, bufferSize: 2048, format: hwFormat) { [weak self] buffer, _ in
+            self?.processInputBuffer(buffer)
+        }
+        inputTapInstalled = true
+        engine.prepare()
+        return true
+    }
+
+    private func processInputBuffer(_ buffer: AVAudioPCMBuffer) {
+        // Stop ile callback'in başlangıcı arasında yarış olursa yalnız callback'e
+        // girmiş oturum DispatchGroup'a katılır; warm graph boşta veriyi işlemez.
+        lock.lock()
+        guard recordingState else {
+            lock.unlock()
+            return
+        }
+        let generation = deliveryGeneration
+        let callbackGroup = activeTapCallbacks
+        let boostEnabled = processingModeForRecording == .realtimeBoost
+        let firstAudioCallback = firstAudioBufferCallback
+        firstAudioBufferCallback = nil
+        callbackGroup.enter()
+        lock.unlock()
+        firstAudioCallback?()
+        defer { callbackGroup.leave() }
+
+        // Converter ve yeniden kullanılan buffer tek sahipli kalır. Provider
+        // callback'leri bu kritik bölümün dışında ayrı seri kuyruğa teslim edilir.
+        converterLock.lock()
+        guard let converter = audioConverter, let outputBuffer = conversionBuffer else {
+            converterLock.unlock()
+            return
+        }
+
+        let calculatedPower = calculatePower(buffer: buffer)
+        outputBuffer.frameLength = 0
+        var error: NSError?
+        var haveData = true
+        let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+            if haveData {
+                haveData = false
+                outStatus.pointee = .haveData
+                return buffer
+            }
+            outStatus.pointee = .noDataNow
+            return nil
+        }
+
+        let status = converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
+        let frameLength = outputBuffer.frameLength
+        let rawChunk: Data?
+        if (status == .haveData || status == .inputRanDry),
+           frameLength > 0,
+           let channelData = outputBuffer.int16ChannelData {
+            rawChunk = Data(
+                bytes: channelData[0],
+                count: Int(frameLength) * MemoryLayout<Int16>.size
+            )
+        } else {
+            rawChunk = nil
+        }
+
+        var readyChunks: [Data]? = nil
+        var localCallback: ((Data) -> Void)? = nil
+        if let rawChunk {
+            let chunk = boostEnabled
+                ? MicrophoneBoostProcessor.shared.processPCM16Data(rawChunk, enabled: true)
+                : rawChunk
+
+            lock.lock()
+            let cancelled = cancelledDeliveryGeneration == generation
+            if !cancelled {
+                currentPower = calculatedPower
+                // Kapıyı aynı güç değeriyle besle: ek analiz yok, tek kaynak.
+                speechGate.update(
+                    powerDB: calculatedPower,
+                    now: ProcessInfo.processInfo.systemUptime,
+                    isRecording: recordingState
+                )
+                bufferedPCMData.append(chunk)
+                if let callback = chunkCallback {
+                    accumulatedPCM.append(chunk)
+                    while true {
+                        let requiredBytes = hasDeliveredInitialStreamingChunk
+                            ? Self.streamingChunkByteCount
+                            : Self.initialStreamingChunkByteCount
+                        guard accumulatedPCM.count - accumulatedPCMOffset >= requiredBytes else { break }
+                        let start = accumulatedPCMOffset
+                        let end = start + requiredBytes
+                        if readyChunks == nil { readyChunks = [] }
+                        readyChunks?.append(accumulatedPCM.subdata(in: start..<end))
+                        accumulatedPCMOffset = end
+                        hasDeliveredInitialStreamingChunk = true
+                    }
+                    compactAccumulatedPCMIfNeeded()
+                    localCallback = callback
+                }
+            }
+            lock.unlock()
+        }
+        converterLock.unlock()
+
+        if let callback = localCallback, let readyChunks, !readyChunks.isEmpty {
+            enqueueReadyChunks(readyChunks, callback: callback, generation: generation)
+        }
+    }
+
+    public func start(
+        onAudioChunk: ((Data) -> Void)? = nil,
+        onFirstAudioBuffer: (() -> Void)? = nil,
+        processingMode: RecordingAudioProcessingMode? = nil
+    ) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard !recordingState, !isStopping else { return false }
+        let reusedWarmPipeline = audioEngine != nil && inputTapInstalled
+        guard preparePipelineLocked(),
+              let engine = audioEngine,
+              let hwFormat = preparedHardwareFormat else {
+            return false
+        }
+
+        // İşleme planı kayıt başına snapshot alınır; realtime callback içinde
+        // ConfigManager veya dosya/ayar erişimi yapılmaz. Batch ve canlı yollar
+        // birbirini dışlar, böylece aynı PCM iki kez AGC'den geçmez.
+        if let processingMode {
+            processingModeForRecording = processingMode
+        } else if onAudioChunk != nil {
+            // Callback'li kullanım canlı akış sözleşmesidir; çağıran config'te
+            // batch sağlayıcı seçili olsa bile final WAV ile stream aynı işlenmiş
+            // PCM'i görmelidir.
+            processingModeForRecording = ConfigManager.shared.config.enable_microphone_boost
+                ? .realtimeBoost
+                : .none
+        } else {
+            processingModeForRecording = RecordingAudioProcessingMode.resolve(
+                config: ConfigManager.shared.config
+            )
+        }
+        chunkCallback = onAudioChunk
+        firstAudioBufferCallback = onFirstAudioBuffer
+        accumulatedPCM = Data()
+        accumulatedPCM.reserveCapacity(64 * 1024)
+        accumulatedPCMOffset = 0
+        bufferedPCMData = Data()
+        bufferedPCMData.reserveCapacity(320 * 1024)
+        currentPower = -160.0
+        hasDeliveredInitialStreamingChunk = false
+        startTime = CFAbsoluteTimeGetCurrent()
+        activeTapCallbacks = DispatchGroup()
+        deliveryGeneration &+= 1
+        cancelledDeliveryGeneration = nil
+        MicrophoneBoostProcessor.shared.reset()
+
+        converterLock.lock()
+        audioConverter?.reset()
+        converterLock.unlock()
+
+        // İlk donanım callback'i engine.start() dönmeden gelebilir. Durumu önce
+        // etkinleştirip lock'u start boyunca tuttuğumuzda callback doğru oturuma
+        // bağlanır ve dönüşten hemen sonra ilerler; ilk tampon boşa atılmaz.
+        recordingState = true
         do {
             try engine.start()
-            isRecording = true
-            print("[AudioRecorder] ✅ Mikrofon başarıyla aktif edildi (Örnekleme: \(hwFormat.sampleRate)Hz, Kanal: \(hwFormat.channelCount)).")
+            let mode = reusedWarmPipeline ? "warm" : "cold"
+            print("[AudioRecorder] ✅ Mikrofon başarıyla aktif edildi [\(mode)] (Örnekleme: \(hwFormat.sampleRate)Hz, Kanal: \(hwFormat.channelCount)).")
             return true
         } catch {
+            recordingState = false
+            chunkCallback = nil
+            firstAudioBufferCallback = nil
+            accumulatedPCM = Data()
+            accumulatedPCMOffset = 0
+            bufferedPCMData = Data()
+            currentPower = -160.0
+            processingModeForRecording = .none
             print("[AudioRecorder] ❌ Mikrofon motoru başlatılamadı: \(error.localizedDescription)")
-            inputNode.removeTap(onBus: 0)
-            self.audioEngine = nil
-            self.audioConverter = nil
-            isRecording = false
             return false
         }
     }
@@ -209,92 +507,203 @@ public class AudioRecorder: NSObject {
     public func averagePower() -> Float {
         lock.lock()
         defer { lock.unlock() }
-        guard isRecording else { return -160.0 }
+        guard recordingState else { return -160.0 }
         return currentPower
+    }
+
+    /// Çift eşikli konuşma kapısının anlık durumu.
+    ///
+    /// HUD'nin "Henüz ses algılanmadı" / "Dinliyor" ayrımı buradan beslenir;
+    /// tek bir dB eşiği yerine gerçek konuşma segmenti durumu kullanılır.
+    public func speechGateState() -> SpeechGateState {
+        lock.lock()
+        defer { lock.unlock() }
+        guard recordingState else { return .silent }
+        return speechGate.state
+    }
+
+    /// Adaptif gürültü tabanı (dBFS). Ayarlar ekranında tanılama için.
+    public func noiseFloorDB() -> Float {
+        lock.lock()
+        defer { lock.unlock() }
+        return speechGate.noiseFloorDB
+    }
+
+    /// Konuşma kapısını yeni bir kayıt oturumu için sıfırlar.
+    /// Gürültü tabanı korunur (oda gürültüsü oturumlar arası değişmez).
+    public func resetSpeechGate() {
+        lock.lock()
+        defer { lock.unlock() }
+        speechGate.reset()
     }
 
     // MARK: - Kayıt Durdurma ve Donanımı Anında Serbest Bırakma
 
     public func stop() -> (data: Data?, duration: Double) {
         lock.lock()
-        guard isRecording, let engine = audioEngine else {
+        guard recordingState, !isStopping else {
             lock.unlock()
             return (nil, 0.0)
         }
 
         let duration = CFAbsoluteTimeGetCurrent() - startTime
-        isRecording = false
-        let remainingCallback = chunkCallback
-        let remainingChunk = accumulatedPCM
-        let fullPCM = bufferedPCMData
-
-        chunkCallback = nil
-        accumulatedPCM = Data()
-        bufferedPCMData = Data()
-        currentPower = -160.0
-
-        // Mikrofonu ve ses motorunu hemen kapat (macOS turuncu gizlilik ikonu anında söner)
-        self.audioEngine = nil
-        self.audioConverter = nil
+        recordingState = false
+        isStopping = true
+        let engine = audioEngine
+        let callbackGroup = activeTapCallbacks
+        let generation = deliveryGeneration
         lock.unlock()
 
-        engine.stop()
-        engine.inputNode.removeTap(onBus: 0)
+        // Motor durur ve mikrofon donanımı serbest kalır; hazırlanmış graph/tap
+        // bir sonraki kayıt için korunur. Aktif callback'ler yine eksiksiz beklenir.
+        stopEngine(engine, removeTap: false)
+        callbackGroup.wait()
+        flushChunkDeliveryQueue()
 
-        // Varsa kalan son PCM parçasını da callback'e ilet
-        if let cb = remainingCallback, !remainingChunk.isEmpty {
-            cb(remainingChunk)
+        lock.lock()
+        let remainingCallback = chunkCallback
+        let remainingChunk = unconsumedAccumulatedPCM()
+        let fullPCM = bufferedPCMData
+        let processingMode = processingModeForRecording
+
+        chunkCallback = nil
+        firstAudioBufferCallback = nil
+        accumulatedPCM = Data()
+        accumulatedPCMOffset = 0
+        bufferedPCMData = Data()
+        currentPower = -160.0
+        processingModeForRecording = .none
+        hasDeliveredInitialStreamingChunk = false
+        activeTapCallbacks = DispatchGroup()
+        isStopping = false
+        cancelledDeliveryGeneration = nil
+        lock.unlock()
+
+        // Hazır bloklar flush edildikten sonra kalan son parçayı ilet.
+        if let cb = remainingCallback {
+            deliverRemainingChunk(remainingChunk, callback: cb, generation: generation)
         }
 
-        let wavData = AudioRecorder.createWavData(pcmData: fullPCM, sampleRate: 16000, channels: 1, bitDepth: 16)
+        // Stop graph'ı uninitialize eder; sonraki tuş basışından önce arka planda
+        // yeniden prepare ederek warm-start durumunu geri kur.
+        warm()
 
-        // Akıllı sessizlik ve mikrofonsuzluk kontrolü (PCM 16-bit tepe genlik)
-        if AudioRecorder.isAudioSilent(data: wavData) {
-            return (nil, duration)
+        let preparation = Self.prepareRecordingPCM(
+            fullPCM,
+            processingMode: processingMode
+        )
+        let finalizedPCM = preparation.data
+        if let report = preparation.report {
+            print(
+                "[AudioClarity] RMPN quality=\(report.quality.rawValue) " +
+                "decision=\(report.decision.rawValue) " +
+                "snr=\(String(format: "%.1f", report.estimatedSNRDB))dB " +
+                "speechRMS=\(String(format: "%.5f", report.robustSpeechRMS)) " +
+                "gain=\(String(format: "%.2f", report.appliedGain))x " +
+                "clip=\(String(format: "%.3f", report.outputClippingRatio * 100))%"
+            )
         }
 
-        return (wavData, duration)
+        // Tamamlanmış kayıt, sessiz olsa bile geçerli bir WAV sonucudur.
+        // Gönderim/sessizlik kararı kullanıcı akışını yöneten AppDelegate'e aittir.
+        return (Self.finalizeRecordingPCM(finalizedPCM), duration)
     }
 
     public func cancel() {
         lock.lock()
-        guard isRecording else {
+        guard recordingState, !isStopping else {
             lock.unlock()
             return
         }
 
-        isRecording = false
-        chunkCallback = nil
-        accumulatedPCM = Data()
-        bufferedPCMData = Data()
-        currentPower = -160.0
+        recordingState = false
+        isStopping = true
+        cancelledDeliveryGeneration = deliveryGeneration
         let engine = audioEngine
-        self.audioEngine = nil
-        self.audioConverter = nil
+        let callbackGroup = activeTapCallbacks
         lock.unlock()
 
-        if let eng = engine {
-            eng.stop()
-            eng.inputNode.removeTap(onBus: 0)
-        }
+        stopEngine(engine, removeTap: false)
+        callbackGroup.wait()
+        // Cancel edilen oturumun daha önce kuyruğa alınmış blokları teslim
+        // edilmez; kuyruk yine de boşaltılarak yeni oturuma sarkmaları engellenir.
+        flushChunkDeliveryQueue()
+
+        lock.lock()
+        chunkCallback = nil
+        firstAudioBufferCallback = nil
+        accumulatedPCM = Data()
+        accumulatedPCMOffset = 0
+        bufferedPCMData = Data()
+        currentPower = -160.0
+        processingModeForRecording = .none
+        hasDeliveredInitialStreamingChunk = false
+        activeTapCallbacks = DispatchGroup()
+        isStopping = false
+        cancelledDeliveryGeneration = nil
+        lock.unlock()
+        warm()
     }
 
     /// Ses motorunu tamamen kapatır, donanım tap'ini söker ve kaynakları serbest bırakır.
     public func cleanTeardown() {
         lock.lock()
-        isRecording = false
+        warmupGeneration &+= 1
+        guard !isStopping else {
+            lock.unlock()
+            return
+        }
+
         let engine = audioEngine
-        audioEngine = nil
-        audioConverter = nil
-        chunkCallback = nil
-        accumulatedPCM = Data()
-        bufferedPCMData = Data()
-        currentPower = -160.0
+        let hasResources = recordingState || engine != nil
+        guard hasResources else {
+            audioConverter = nil
+            conversionBuffer = nil
+            preparedHardwareFormat = nil
+            inputTapInstalled = false
+            chunkCallback = nil
+            firstAudioBufferCallback = nil
+            accumulatedPCM = Data()
+            accumulatedPCMOffset = 0
+            bufferedPCMData = Data()
+            currentPower = -160.0
+            processingModeForRecording = .none
+            hasDeliveredInitialStreamingChunk = false
+            lock.unlock()
+            return
+        }
+
+        recordingState = false
+        isStopping = true
+        cancelledDeliveryGeneration = deliveryGeneration
+        let callbackGroup = activeTapCallbacks
+        let removeTap = inputTapInstalled
+        inputTapInstalled = false
         lock.unlock()
 
-        if let eng = engine {
-            eng.stop()
-            eng.inputNode.removeTap(onBus: 0)
+        stopEngine(engine, removeTap: removeTap)
+        callbackGroup.wait()
+        flushChunkDeliveryQueue()
+
+        lock.lock()
+        audioEngine = nil
+        audioConverter = nil
+        conversionBuffer = nil
+        preparedHardwareFormat = nil
+        chunkCallback = nil
+        firstAudioBufferCallback = nil
+        accumulatedPCM = Data()
+        accumulatedPCMOffset = 0
+        bufferedPCMData = Data()
+        currentPower = -160.0
+        processingModeForRecording = .none
+        hasDeliveredInitialStreamingChunk = false
+        activeTapCallbacks = DispatchGroup()
+        isStopping = false
+        cancelledDeliveryGeneration = nil
+        lock.unlock()
+
+        if engine != nil {
             print("[AudioRecorder] 💤 Ses motoru ve donanım serbest bırakıldı.")
         }
     }
@@ -304,42 +713,65 @@ public class AudioRecorder: NSObject {
         let frameCount = Int(buffer.frameLength)
         guard frameCount > 0 else { return -160.0 }
 
-        var sum: Float = 0.0
-        let channel = floatData[0]
-        for i in 0..<frameCount {
-            let sample = channel[i]
-            sum += sample * sample
-        }
-        let rms = sqrt(sum / Float(frameCount))
+        var rms: Float = 0
+        vDSP_rmsqv(floatData[0], 1, &rms, vDSP_Length(frameCount))
         let db = 20.0 * log10(max(rms, 0.00001))
         return max(-160.0, min(0.0, db))
     }
 
     // MARK: - WAV ve Ses Yardımcıları
 
-    /// 16kHz 16-bit PCM WAV verisindeki örneklerin tepe genliğini kontrol eder.
-    /// Tüm ses boyunca en yüksek genlik minAmplitude'tan düşükse dijital sessizliktir.
-    public static func isAudioSilent(data: Data, minAmplitude: Int16 = 35) -> Bool {
-        guard data.count > 44 else { return true }
-        return data.withUnsafeBytes { rawBuffer -> Bool in
-            guard let base = rawBuffer.baseAddress else { return true }
-            let pcmOffset = 44
-            guard data.count > pcmOffset else { return true }
-            let samplesPtr = base.advanced(by: pcmOffset).assumingMemoryBound(to: Int16.self)
-            let sampleCount = (data.count - pcmOffset) / MemoryLayout<Int16>.size
-            var maxAmp: Int16 = 0
+    /// Başlıksız 16-bit PCM bloğunun tepe genliğini kontrol eder. Yerel kayıt
+    /// korunurken yalnızca gerçek zamanlı sağlayıcı sınırında dijital sessizliği
+    /// göndermemek için de kullanılır.
+    public static func isPCM16Silent(data: Data, minAmplitude: Int16 = 24) -> Bool {
+        isPCM16Silent(data: data, byteOffset: 0, minAmplitude: minAmplitude)
+    }
 
-            for i in 0..<sampleCount {
-                let amp = abs(samplesPtr[i])
-                if amp > maxAmp {
-                    maxAmp = amp
-                    if maxAmp >= minAmplitude {
-                        return false // Konuşma veya ses bulundu!
-                    }
+    /// 16kHz 16-bit PCM WAV verisindeki örneklerin tepe genliğini kontrol eder.
+    public static func isAudioSilent(data: Data, minAmplitude: Int16 = 24) -> Bool {
+        guard data.count > 44 else { return true }
+        return isPCM16Silent(data: data, byteOffset: 44, minAmplitude: minAmplitude)
+    }
+
+    private static func isPCM16Silent(data: Data, byteOffset: Int, minAmplitude: Int16) -> Bool {
+        guard data.count > byteOffset else { return true }
+        return data.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) -> Bool in
+            let sampleCount = (data.count - byteOffset) / MemoryLayout<Int16>.size
+            let threshold = Int32(minAmplitude)
+
+            for index in 0..<sampleCount {
+                let rawSample = rawBuffer.loadUnaligned(
+                    fromByteOffset: byteOffset + index * MemoryLayout<Int16>.size,
+                    as: Int16.self
+                )
+                // Int16.min için abs(Int16) taşabilir; önce Int32'e genişlet.
+                if abs(Int32(Int16(littleEndian: rawSample))) >= threshold {
+                    return false
                 }
             }
-            return true // Saf dijital sessizlik
+            return true
         }
+    }
+
+    /// Offline netlik yalnız ham kayıt zaten gönderim eşiğini geçiyorsa uygulanır.
+    /// Böylece hiçbir gain/VAD formülü dijital sessizliği sağlayıcıya gönderilecek
+    /// bir kayda dönüştüremez.
+    static func prepareRecordingPCM(
+        _ pcmData: Data,
+        processingMode: RecordingAudioProcessingMode
+    ) -> (data: Data, report: ClarityReport?) {
+        guard processingMode == .utteranceClarity,
+              !isPCM16Silent(data: pcmData) else {
+            return (pcmData, nil)
+        }
+        let result = UtteranceClarityEnhancer().enhancePCM16(pcmData)
+        return (result.data, result.report)
+    }
+
+    /// stop() finalizasyonuyla aynı saf dönüşümü test ve çağrı noktaları için sunar.
+    static func finalizeRecordingPCM(_ pcmData: Data) -> Data {
+        createWavData(pcmData: pcmData, sampleRate: 16000, channels: 1, bitDepth: 16)
     }
 
     /// Ham PCM verisini standart 44 baytlık RIFF/WAVE kapsayıcısına sarar.

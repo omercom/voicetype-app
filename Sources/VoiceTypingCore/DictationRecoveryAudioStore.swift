@@ -45,8 +45,9 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
         }
     }
 
-    /// Tamamlanan son ses kaydını kurtarma deposuna geçici olarak yazar
-    public func saveLastRecording(wavData: Data) {
+    /// Tamamlanan son ses kaydını kurtarma deposuna geçici olarak yazar.
+    @discardableResult
+    public func saveLastRecording(wavData: Data) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
@@ -59,22 +60,24 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
                 isFailed: false,
                 lastError: nil
             )
-            if let metaData = try? JSONEncoder().encode(metadata) {
-                try? metaData.write(to: latestMetadataURL, options: .atomic)
-            }
+            let metaData = try JSONEncoder().encode(metadata)
+            try metaData.write(to: latestMetadataURL, options: .atomic)
+            return true
         } catch {
             print("[RecoveryAudioStore] ⚠️ Ses kurtarma dosyası yazılamadı: \(error.localizedDescription)")
+            return false
         }
     }
 
-    /// Deşifre başarısız olduğunda kaydı 'kurtarılabilir başarısız kayıt' olarak işaretler
-    public func markFailed(error: String) {
+    /// Deşifre başarısız olduğunda kaydı 'kurtarılabilir başarısız kayıt' olarak işaretler.
+    @discardableResult
+    public func markFailed(error: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
 
         guard fileManager.fileExists(atPath: latestAudioURL.path),
               let data = try? Data(contentsOf: latestAudioURL) else {
-            return
+            return false
         }
 
         let metadata = DictationRecoveryMetadata(
@@ -83,13 +86,32 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
             isFailed: true,
             lastError: error
         )
-        if let metaData = try? JSONEncoder().encode(metadata) {
-            try? metaData.write(to: latestMetadataURL, options: .atomic)
+        do {
+            let metaData = try JSONEncoder().encode(metadata)
+            try metaData.write(to: latestMetadataURL, options: .atomic)
+            print("[RecoveryAudioStore] 🛡️ Başarısız deşifre sesi kurtarma deposunda güvenle saklandı (\(data.count) bayt).")
+            return true
+        } catch {
+            print("[RecoveryAudioStore] ⚠️ Kurtarma metadata'sı yazılamadı: \(error.localizedDescription)")
+            return data.count > 44
         }
-        print("[RecoveryAudioStore] 🛡️ Başarısız deşifre sesi kurtarma deposunda güvenle saklandı (\(data.count) bayt).")
     }
 
-    /// Başarısız veya kurtarılabilir bir kayıt olup olmadığını döner
+    /// Kurtarılabilir bir ses kaydının mevcut olup olmadığını döner.
+    /// Uygulama deşifre sırasında kapanmışsa metadata henüz failed olarak
+    /// işaretlenmemiş olabilir; bu kayıt da kullanıcıya sunulmalıdır.
+    public func hasRecovery() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard fileManager.fileExists(atPath: latestAudioURL.path),
+              let data = try? Data(contentsOf: latestAudioURL) else {
+            return false
+        }
+        return data.count > 44
+    }
+
+    /// Son kaydın teknik hata sonrası tutulduğunu döner.
     public func hasFailedRecovery() -> Bool {
         lock.lock()
         defer { lock.unlock() }
