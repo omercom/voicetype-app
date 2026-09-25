@@ -1,6 +1,6 @@
 # Release benchmark kabul protokolü
 
-Bu belge bir **ölçüm protokolüdür, gerçek benchmark sonucu değildir**. Henüz gerçek donanım kabulü iddia edilmez. `tools/release_benchmark.py` yalnızca kullanıcının sağladığı yerel metin ve süreleri değerlendirir: Python 3 stdlib, ağ/API/anahtar/üçüncü taraf paket, mikrofon, medya kontrolü veya kayıt başlatma yoktur. `run_benchmark.py` çalıştırılmaz veya import edilmez; o betik ağ üzerinden modelleri karşılaştırır, saniye cinsinden istek süresi ölçer ve transkript yayımlar. Bu süreler HUD/ilk interim/release-to-final yerine kullanılamaz.
+Bu belge bir **ölçüm protokolüdür, gerçek benchmark sonucu değildir**. Henüz gerçek donanım kabulü iddia edilmez. `experiments/benchmark/tools/release_benchmark.py` yalnızca kullanıcının sağladığı yerel metin ve süreleri değerlendirir: Python 3 stdlib, ağ/API/anahtar/üçüncü taraf paket, mikrofon, medya kontrolü veya kayıt başlatma yoktur. `experiments/benchmark/run_benchmark.py` çalıştırılmaz veya import edilmez; o betik ağ üzerinden modelleri karşılaştırır, saniye cinsinden istek süresi ölçer ve transkript yayımlar. Bu süreler HUD/ilk interim/release-to-final yerine kullanılamaz.
 
 ## Bu turdaki doğrulama — 2.1 / build 10
 
@@ -16,7 +16,7 @@ Tekrarlanabilir otomatik kontroller:
 
 ```sh
 swift test --filter 'GeminiModelCatalogTests|AppleSpeechFinalizationTests|RecordingStartAndTranscriptRegressionTests|HUDTransitionTests|VoiceTypingTests/testGeminiLiveModelConfiguration'
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Tests/BenchmarkTests -p 'test_*.py' -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s experiments/benchmark/tests -p 'test_*.py' -v
 ```
 
 Bu filtreler gerçek ses doğruluğu yerine deterministik regresyonları sınar; tüm proje testlerinin veya manuel donanım kabulünün geçtiği anlamına gelmez.
@@ -103,7 +103,7 @@ Threshold JSON:
 Gerçek dosyalar hazırlanıp denetlendikten sonra, kullanıcı tarafından:
 
 ```sh
-python3 tools/release_benchmark.py --manifest /private/tmp/release-manifest.json --speech /private/tmp/release-speech.jsonl --latency /private/tmp/release-latency.json --thresholds /private/tmp/release-thresholds.json --min-per-category 20 --attest-real-measurements > /private/tmp/release-report.json
+python3 experiments/benchmark/tools/release_benchmark.py --manifest /private/tmp/release-manifest.json --speech /private/tmp/release-speech.jsonl --latency /private/tmp/release-latency.json --thresholds /private/tmp/release-thresholds.json --min-per-category 20 --attest-real-measurements > /private/tmp/release-report.json
 ```
 
 `--attest-real-measurements` açık kullanıcı beyanıdır, aracın ölçümlerin gerçekliğini teknik olarak doğruladığı anlamına gelmez. Sentetik verilere bu bayrağı vermeyin. Bayrak yoksa sayılar raporlanır ama sonuç `not-ready` olur. CLI yalnızca stdout'a rapor basar; girdileri değiştirmez. Shell yönlendirmesinde rapor yolunu girdi dosyalarından farklı seçin.
@@ -136,7 +136,7 @@ Bu rapor nicel benchmark kapısıdır; bütün uygulama release onayının yerin
 
 ## CPU ve bellek ölçümü
 
-`tools/performance_probe.py` yalnızca açıkça verilen PID'yi macOS `ps` ile okur. Mikrofonu açmaz, uygulama/medya başlatmaz, ağ kullanmaz. `python3 tools/performance_probe.py --help` parametreleri gösterir. Çalışan uygulamanın PID'sini `launchctl list com.antigravity.VoiceTyping` ile doğrulayın; sonra `--pid`, `--duration 30` ve `--interval 1` vererek ölçün. PID her kurulumda değişebilir; eski PID kullanmayın.
+`experiments/benchmark/tools/performance_probe.py` yalnızca açıkça verilen PID'yi macOS `ps` ile okur. Mikrofonu açmaz, uygulama/medya başlatmaz, ağ kullanmaz. `python3 experiments/benchmark/tools/performance_probe.py --help` parametreleri gösterir. Çalışan uygulamanın PID'sini `launchctl list com.antigravity.VoiceTyping` ile doğrulayın; sonra `--pid`, `--duration 30` ve `--interval 1` vererek ölçün. PID her kurulumda değişebilir; eski PID kullanmayın.
 
 Boşta, aktif konuşma ve sonuç bekleme dönemlerini ayrı ölçün. Araç yaşam boyu `%cpu` yerine ardışık CPU zamanı farkı / monoton duvar saati farkından tek çekirdek yüzdesi hesaplar (100% = bir çekirdek; çok iş parçacığında aşılabilir). p50/p95 ve örneklenen en büyük RSS KiB raporlanır. Apple'ın ayrı servis süreçleri, GPU ve çocuk süreçler dahil değildir. `complete` yalnızca örneklemenin tamamlandığını söyler, yayın kabulü değildir. Süreç kapanır veya yürütülebilir dosya değişirse `incomplete` olur; aynı executable ile PID yeniden kullanımını her durumda saptayamaz.
 
@@ -165,11 +165,11 @@ printf '%s\n' '{"devices":["dahili"],"cases":[{"id":"demo","device":"dahili","ca
 printf '%s\n' '{"id":"demo","reference":"IŞIK, İYİ!","hypothesis":"ışık iyi"}' > /private/tmp/release-benchmark-synthetic/speech.jsonl
 printf '%s\n' '[{"id":"demo","hudMs":100,"firstInterimMs":600,"releaseToFinalMs":1100}]' > /private/tmp/release-benchmark-synthetic/latency.json
 printf '%s\n' '{"hudMs":150,"firstInterimMs":1200,"releaseToFinalMs":2000,"werPercent":10}' > /private/tmp/release-benchmark-synthetic/thresholds.json
-python3 tools/release_benchmark.py --manifest /private/tmp/release-benchmark-synthetic/manifest.json --speech /private/tmp/release-benchmark-synthetic/speech.jsonl --latency /private/tmp/release-benchmark-synthetic/latency.json --thresholds /private/tmp/release-benchmark-synthetic/thresholds.json
+python3 experiments/benchmark/tools/release_benchmark.py --manifest /private/tmp/release-benchmark-synthetic/manifest.json --speech /private/tmp/release-benchmark-synthetic/speech.jsonl --latency /private/tmp/release-benchmark-synthetic/latency.json --thresholds /private/tmp/release-benchmark-synthetic/thresholds.json
 ```
 
 Offline deterministik testler (fixture değerleri sentetiktir; pass dalındaki beyan da yalnızca testtir):
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Tests/BenchmarkTests -p 'test_*.py' -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s experiments/benchmark/tests -p 'test_*.py' -v
 ```
