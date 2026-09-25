@@ -285,35 +285,27 @@ public class TextInjector {
             print("[TextInjector] ⚠️ Güvenli Giriş (Secure Event Input) devrede. Sistem parola alanında olabilir, sentetik Cmd+V kısıtlanabilir.")
         }
 
-        let field = TargetInputManager.shared.focusedElement()
-        let before = Self.snapshot(of: field)
-
-        // 3. Doğrudan alana yazma → karakter olarak yazma → pano + Cmd+V.
+        // 3. Karakter olarak yazma → (yazılamıyorsa) pano + Cmd+V.
         guard typeDirectly else {
             return pasteViaClipboard(
                 text: text, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
                 autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
-                field: field, before: before, finish: finish
+                finish: finish
             )
         }
         insertWithoutInputMethod(
             text: text, target: targetContext, typeDirectly: typeDirectly,
             restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
             autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
-            field: field, before: before, finish: finish
+            finish: finish
         )
         return true
     }
 
     // MARK: - Panosuz yazma yöntemleri
 
-    /// Sırayla dener, her adımda alanın gerçekten değiştiğini doğrular:
-    /// 1. Doğrudan alana yazma (AX `kAXSelectedText`) — yalnızca Mac'in kendi
-    ///    uygulamalarında; web/Electron alanlarında JS olayları tetiklenmediği
-    ///    için sayfa metni "görmeyebilir", orada kullanılmaz.
-    /// 2. Karakter olarak yazma (Unicode klavye olayları) — her yerde çalışır,
-    ///    klavye düzeninden bağımsızdır.
-    /// 3. Pano + Cmd+V — son çare.
+    /// Önce karakter olarak yazar (panosuz, klavye düzeninden bağımsız); metin
+    /// yazılamayacak türdeyse (satır sonu/sekme) pano + Cmd+V kullanılır.
     private func insertWithoutInputMethod(
         text: String,
         target: TargetContext?,
@@ -322,8 +314,6 @@ public class TextInjector {
         pasteDelayMs: Int,
         autoSubmit: Bool,
         autoSubmitKey: String,
-        field: AXUIElement?,
-        before: FieldSnapshot,
         finish: @escaping (InjectionOutcome) -> Void
     ) {
         queue.async { [weak self] in
@@ -337,63 +327,23 @@ public class TextInjector {
                 finish(outcome)
             }
 
-            // KURAL: Metni teslim etmiş olabilecek bir yöntemden sonra ASLA başka
-            // yöntem denenmez. Bazı uygulamalar (özellikle Chrome) alan içeriğini
-            // erişilebilirlik ağacına geç yansıtır; "değişmedi" sanıp Cmd+V'ye
-            // düşmek aynı metni iki kez yazıyordu. Sonraki yönteme yalnızca
-            // mevcut yöntem kesin olarak hiçbir şey yapmadıysa geçilir.
-
-            if typeDirectly, let field, Self.canInsertViaAccessibility(target: target, before: before) {
-                let status = AXUIElementSetAttributeValue(field, kAXSelectedTextAttribute as CFString, text as CFString)
-                if status == .success {
-                    return succeed(Self.settledOutcome(field: field, before: before), "doğrudan alana yazma")
-                }
-                print("[TextInjector] ↩️ Doğrudan yazma reddedildi (AX \(status.rawValue)); karakter olarak yazılacak.")
-            }
-
+            // Karakter olarak yazma her uygulamada (Mac, Electron, tarayıcı) çalışır.
+            // Teslim edildikten sonra ASLA başka yöntem denenmez: bazı uygulamalar
+            // değişikliği geç bildirir ve yeniden deneme metni iki kez yazar.
+            // Doğrulama için beklenmez; kullanıcıya hemen geri bildirim verilir.
             if typeDirectly, Self.canTypeAsCharacters(text) {
                 self.typeCharacters(text)
-                return succeed(Self.settledOutcome(field: field, before: before), "karakter olarak yazma")
+                return succeed(.unverifiable, "karakter olarak yazma")
             }
 
             DispatchQueue.main.async {
                 _ = self.pasteViaClipboard(
                     text: text, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
                     autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
-                    field: field, before: before, finish: finish
+                    finish: finish
                 )
             }
         }
-    }
-
-    /// Metin teslim edildikten sonra sonucu yalnızca RAPORLAMAK için bakar.
-    /// "Değişmedi" görünse bile metin gecikmeli yansımış olabilir; bu yüzden
-    /// hata sayılmaz ve yeniden deneme yapılmaz.
-    static func settledOutcome(field: AXUIElement?, before: FieldSnapshot) -> InjectionOutcome {
-        let outcome = waitForChange(field: field, before: before)
-        if outcome == .notInserted {
-            print("[TextInjector] ℹ️ Alan değişikliği henüz görünmüyor (gecikmeli olabilir); tekrar denenmiyor.")
-            return .unverifiable
-        }
-        return outcome
-    }
-
-    /// Doğrudan alana yazma yalnızca içeriği okunabilen (sonucu doğrulanabilen)
-    /// Mac uygulaması alanlarında kullanılır.
-    static func canInsertViaAccessibility(target: TargetContext?, before: FieldSnapshot) -> Bool {
-        guard before.value != nil else { return false }
-        guard let target else { return false }
-        if target.pageURL != nil { return false }
-        let category = AppProfileFormatter.shared.detectCategory(
-            bundleIdentifier: target.bundleIdentifier, appName: target.appName
-        )
-        if category == .terminal || category == .codeEditor { return false }
-        let webHosts: Set<String> = [
-            "com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser", "com.brave.Browser",
-            "org.mozilla.firefox", "com.microsoft.edgemac", "com.operasoftware.Opera",
-            "com.tinyspeck.slackmacgap", "com.hnc.Discord", "notion.id", "net.whatsapp.WhatsApp",
-        ]
-        return !webHosts.contains(target.bundleIdentifier)
     }
 
     /// Satır sonu ve sekme karakterleri tuş olarak gönderilirse sohbet
@@ -455,10 +405,12 @@ public class TextInjector {
         pasteDelayMs: Int,
         autoSubmit: Bool,
         autoSubmitKey: String,
-        field: AXUIElement?,
-        before: FieldSnapshot,
         finish: @escaping (InjectionOutcome) -> Void
     ) -> Bool {
+        // Yalnızca Cmd+V yolunda alan içeriği okunur (doğrulama için);
+        // büyük belgelerde bu okuma pahalı olduğundan yazma yolunda yapılmaz.
+        let field = TargetInputManager.shared.focusedElement()
+        let before = Self.snapshot(of: field)
         let pb = NSPasteboard.general
         let snapshot = restoreClipboard ? captureClipboardSnapshot() : []
         let vKeyCode = Self.keyCodeForCharacter("v", fallback: 0x09)
