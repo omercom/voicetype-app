@@ -14,6 +14,18 @@ final class NotchWaveView: NSView {
 
     private let primary = CAShapeLayer()
     private let echo = CAShapeLayer()
+    /// Ana dalgayı renklendiren geçiş (dalga şekli maske olarak kullanılır).
+    private let primaryColor = CAGradientLayer()
+    /// Dalganın arkasında sesle nefes alan yumuşak ışık.
+    private let glow = CAGradientLayer()
+    private var glowOpacity: CGFloat = 0
+
+    /// Siri benzeri, koyu zeminde okunaklı palet: turkuaz → mor → pembe.
+    static let palette: [NSColor] = [
+        NSColor(calibratedRed: 0.35, green: 0.85, blue: 1.00, alpha: 1),
+        NSColor(calibratedRed: 0.66, green: 0.45, blue: 1.00, alpha: 1),
+        NSColor(calibratedRed: 1.00, green: 0.38, blue: 0.62, alpha: 1),
+    ]
     private var phase: CGFloat = 0
     private var lastTick: TimeInterval?
 
@@ -21,19 +33,43 @@ final class NotchWaveView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.masksToBounds = false
-        for (shape, alpha, width) in [(echo, 0.32, 1.2), (primary, 0.95, 1.7)] {
+
+        // Işık dalgadan büyüktür ve metnin altına doğru taşar; kenarları saydamdır.
+        glow.type = .radial
+        glow.startPoint = CGPoint(x: 0.5, y: 0.5)
+        glow.endPoint = CGPoint(x: 1, y: 1)
+        glow.colors = [
+            Self.palette[1].withAlphaComponent(0.75).cgColor,
+            Self.palette[2].withAlphaComponent(0.22).cgColor,
+            NSColor.clear.cgColor,
+        ]
+        glow.locations = [0, 0.45, 1]
+        glow.frame = CGRect(x: -22, y: -12, width: Self.size.width + 44, height: Self.size.height + 24)
+        glow.opacity = 0
+        glow.actions = ["opacity": NSNull(), "frame": NSNull()]
+        layer?.addSublayer(glow)
+
+        for (shape, alpha, width) in [(echo, 0.32, 1.2), (primary, 1.0, 1.8)] {
             shape.fillColor = nil
             shape.strokeColor = NSColor(calibratedWhite: 1, alpha: alpha).cgColor
             shape.lineWidth = width
             shape.lineCap = .round
             shape.lineJoin = .round
             shape.actions = ["path": NSNull(), "strokeColor": NSNull()]
-            layer?.addSublayer(shape)
+            if shape !== primary { layer?.addSublayer(shape) }
         }
-        primary.shadowColor = NSColor.white.cgColor
-        primary.shadowOpacity = 0.35
-        primary.shadowRadius = 2.5
-        primary.shadowOffset = .zero
+        // Ana dalga: renk geçişi, dalga çizgisiyle maskelenir.
+        primaryColor.startPoint = CGPoint(x: 0, y: 0.5)
+        primaryColor.endPoint = CGPoint(x: 1, y: 0.5)
+        primaryColor.colors = Self.palette.map(\.cgColor)
+        primaryColor.frame = CGRect(origin: .zero, size: Self.size)
+        primaryColor.mask = primary
+        primaryColor.shadowColor = Self.palette[1].cgColor
+        primaryColor.shadowOpacity = 0.6
+        primaryColor.shadowRadius = 3
+        primaryColor.shadowOffset = .zero
+        primaryColor.actions = ["colors": NSNull(), "shadowOpacity": NSNull()]
+        layer?.addSublayer(primaryColor)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) kullanılmaz") }
@@ -41,6 +77,7 @@ final class NotchWaveView: NSView {
     func reset() {
         phase = 0
         lastTick = nil
+        glowOpacity = 0
     }
 
     /// - Parameters:
@@ -64,9 +101,23 @@ final class NotchWaveView: NSView {
         }
         if animated { phase += speed * dt }
 
+        // Işık: sessizlikte görünmez, sesle hızla açılır, yavaşça söner.
+        // Yazılırken hafifçe nefes alır.
+        let targetGlow: CGFloat
+        switch mode {
+        case .listening:
+            targetGlow = min(1, pow(max(0, level), 0.7) * 1.3)
+        case .processing:
+            targetGlow = animated ? 0.35 + 0.2 * sin(phase * 0.5) : 0.35
+        }
+        let tau: CGFloat = targetGlow > glowOpacity ? 0.05 : 0.35
+        glowOpacity += (targetGlow - glowOpacity) * (dt > 0 ? min(1, 1 - exp(-dt / tau)) : 1)
+
         let bounds = CGRect(origin: .zero, size: Self.size)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        glow.opacity = Float(glowOpacity)
+        primaryColor.shadowOpacity = Float(0.35 + 0.5 * glowOpacity)
         primary.frame = bounds
         echo.frame = bounds
         primary.path = Self.wavePath(size: Self.size, amplitude: amplitude, phase: phase)
