@@ -42,25 +42,6 @@ public struct TargetContext: Equatable {
 public class TargetInputManager {
     public static let shared = TargetInputManager()
 
-    private let terminalBundleIDs: Set<String> = [
-        "com.apple.Terminal",
-        "com.googlecode.iterm2",
-        "dev.warp.Warp-Stable",
-        "net.kovidgoyal.kitty",
-        "io.alacritty",
-        "com.github.wez.wezterm",
-        "co.zeit.hyper"
-    ]
-
-    private let codeEditorBundleIDs: Set<String> = [
-        "com.microsoft.VSCode",
-        "com.todesktop.230313mzl4w4u92", // Cursor
-        "com.apple.dt.Xcode",
-        "com.sublimetext.4",
-        "com.sublimetext.3",
-        "com.trae.app",
-        "com.panic.Nova"
-    ]
 
     private let browserBundleIDs: Set<String> = [
         "com.google.Chrome",
@@ -85,8 +66,17 @@ public class TargetInputManager {
 
     private init() {}
 
-    /// Verilen bir UI öğesinin düzenlenebilir bir metin alanı veya girdi kabul eden bir pencere olup olmadığını doğrular.
-    public func isTextInputElement(_ element: AXUIElement, pid: pid_t, bundleID: String) -> (isTextInput: Bool, role: String) {
+    /// AX API'sinden gelen genel CF değerini yalnızca gerçekten AXUIElement
+    /// olduğunda dönüştürür. Bozuk/eksik AX yanıtları uygulamayı düşürmemeli.
+    private func axElement(from value: CFTypeRef?) -> AXUIElement? {
+        guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return unsafeBitCast(value, to: AXUIElement.self)
+    }
+
+    /// AX ağacındaki bir öğenin kendisinde veya üst öğelerinde metin girişi sinyali arar.
+    /// Bazı editörler (özellikle özel/native render motorları) odağı bir AXGroup'a verir,
+    /// ancak düzenlenebilirlik bilgisini üstteki öğede yayınlar.
+    private func textInputCapability(in element: AXUIElement) -> String? {
         var roleRef: CFTypeRef?
         _ = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
         let role = (roleRef as? String) ?? ""
@@ -95,7 +85,81 @@ public class TargetInputManager {
         _ = AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &subroleRef)
         let subrole = (subroleRef as? String) ?? ""
 
-        // 1. Kesin Olarak Yazı Alanı Olmayan Denetimler (Butonlar, Menüler, Sürgüler, Resimler vb.)
+        if role == kAXTextFieldRole || role == kAXTextAreaRole || role == kAXComboBoxRole || role == "AXSearchField" {
+            return role
+        }
+        if subrole == "AXSearchField" || subrole == "AXStandardTextField" || subrole == "AXSecureTextField" {
+            return subrole
+        }
+
+        var rangeRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+           rangeRef != nil {
+            return "AXTextRange"
+        }
+
+        var markerRangeRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, "AXSelectedTextMarkerRange" as CFString, &markerRangeRef) == .success,
+           markerRangeRef != nil {
+            return "AXTextMarkerRange"
+        }
+
+        // AXEditable, macOS'un tüm SDK sürümlerinde sabit olarak dışa aktarılmadığı
+        // için öznitelik adıyla okunur.
+        var editableRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, "AXEditable" as CFString, &editableRef) == .success,
+           (editableRef as? NSNumber)?.boolValue == true {
+            return "AXEditable"
+        }
+
+        var isValueSettable: DarwinBoolean = false
+        if AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &isValueSettable) == .success,
+           isValueSettable.boolValue {
+            return "AXSettableValue"
+        }
+
+        var isSelectionSettable: DarwinBoolean = false
+        if AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &isSelectionSettable) == .success,
+           isSelectionSettable.boolValue {
+            return "AXSettableSelection"
+        }
+
+        return nil
+    }
+
+    private func textInputCapabilityInHierarchy(from element: AXUIElement, maxDepth: Int = 6) -> String? {
+        var current: AXUIElement? = element
+
+        for _ in 0..<maxDepth {
+            guard let element = current else { break }
+            if let capability = textInputCapability(in: element) {
+                return capability
+            }
+
+            var parentRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parentRef) == .success,
+                  let parent = axElement(from: parentRef) else {
+                break
+            }
+            guard !CFEqual(element, parent) else { break }
+            current = parent
+        }
+
+        return nil
+    }
+
+    /// Verilen bir UI öğesinin düzenlenebilir bir metin alanı veya girdi kabul eden bir pencere olup olmadığını doğrular.
+    public func isTextInputElement(
+        _ element: AXUIElement,
+        pid: pid_t,
+        bundleID: String,
+        appName: String? = nil
+    ) -> (isTextInput: Bool, role: String) {
+        var roleRef: CFTypeRef?
+        _ = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+        let role = (roleRef as? String) ?? ""
+
+        // 1. Kesin olarak yazı alanı olmayan denetimler (butonlar, menüler, sürgüler vb.)
         let nonInputRoles: Set<String> = [
             "AXButton", "AXCheckBox", "AXRadioButton", "AXSlider", "AXTabGroup",
             "AXMenu", "AXMenuBar", "AXMenuItem", "AXImage", "AXColorWell", "AXPopUpButton",
@@ -105,53 +169,35 @@ public class TargetInputManager {
             return (false, role)
         }
 
-        // 2. Standart Metin Rolleri (Native macOS)
-        if role == kAXTextFieldRole || role == kAXTextAreaRole || role == kAXComboBoxRole || role == "AXSearchField" {
-            return (true, role)
-        }
-        if subrole == "AXSearchField" || subrole == "AXStandardTextField" || subrole == "AXSecureTextField" {
-            return (true, subrole)
-        }
-
-        // 3. Seçim Aralığı / Metin İşaretçisi Kontrolü (Web & Electron editörleri)
-        // Chrome, Safari, Slack, Notion, Google Docs vb. imleç bir yazı alanındaysa bu öznitelik mevcuttur
-        var rangeRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success, rangeRef != nil {
-            return (true, "AXTextRange")
-        }
-
-        var markerRangeRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, "AXSelectedTextMarkerRange" as CFString, &markerRangeRef) == .success, markerRangeRef != nil {
-            return (true, "AXTextMarkerRange")
-        }
-
-        // 4. Değiştirilebilir Metin Değeri Kontrolü (Settable)
-        var isValueSettable: DarwinBoolean = false
-        if AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &isValueSettable) == .success, isValueSettable.boolValue {
-            return (true, "AXSettableValue")
-        }
-
-        var isSelectionSettable: DarwinBoolean = false
-        if AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &isSelectionSettable) == .success, isSelectionSettable.boolValue {
-            return (true, "AXSettableSelection")
-        }
-
-        // 5. Terminal ve Kod Editörleri (Her zaman klavye girdisi kabul eden pencereler)
-        if terminalBundleIDs.contains(bundleID) {
+        // Özel render motorlu terminal/editörlerde sonuç zaten merkezi uygulama
+        // profiliyle kabul ediliyordu. Bu kesin sonucu pahalı üst-öğe taramasından
+        // önce kullanmak Zed/Electron hot path'inde onlarca senkron AX IPC'sini önler.
+        let category = AppProfileFormatter.shared.detectCategory(
+            bundleIdentifier: bundleID,
+            appName: appName
+        )
+        if category == .terminal {
             return (true, "AXTerminal")
         }
-        if codeEditorBundleIDs.contains(bundleID) || bundleID.contains("jetbrains") {
+        if category == .codeEditor {
             return (true, "AXCodeEditor")
         }
 
-        // 6. Web Tarayıcı Alanı (Chrome, Safari, Arc, Firefox vb. web sayfaları)
+        // 2. Uygulamadan bağımsız AX metin sinyalleri. Üst öğe taraması,
+        // özel render motoru kullanan bilinmeyen uygulamalarda statik listeye
+        // ihtiyaç duymadan düzenlenebilirliği doğrular.
+        if let capability = textInputCapabilityInHierarchy(from: element) {
+            return (true, capability)
+        }
+
+        // 3. Web Tarayıcısı / web tabanlı uygulama alanları
         if role == "AXWebArea" || role == "AXGroup" || role == "AXScrollArea" {
             if browserBundleIDs.contains(bundleID) || chatAndNoteBundleIDs.contains(bundleID) {
                 return (true, "AXWebArea")
             }
         }
 
-        // 7. İletişim ve Not Uygulamaları (Slack, WhatsApp, Discord, Telegram, Notes, Mail, Messages)
+        // 5. İletişim ve not uygulamaları
         if chatAndNoteBundleIDs.contains(bundleID) {
             return (true, "AXMessagingApp")
         }
@@ -181,21 +227,21 @@ public class TargetInputManager {
         var candidateElement: AXUIElement?
         var focusedElementRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(appRef, kAXFocusedUIElementAttribute as CFString, &focusedElementRef) == .success {
-            candidateElement = (focusedElementRef as! AXUIElement?)
+            candidateElement = axElement(from: focusedElementRef)
         }
 
         // İlgili pencereyi (Window) bul
         var targetWindow: AXUIElement?
         var windowRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(appRef, kAXFocusedWindowAttribute as CFString, &windowRef) == .success {
-            targetWindow = (windowRef as! AXUIElement?)
+            targetWindow = axElement(from: windowRef)
         }
 
         // Eğer doğrudan odaklı öğe yoksa, pencere içindeki odaklı öğeyi dene
         if candidateElement == nil, let win = targetWindow {
             var winFocusedRef: CFTypeRef?
             if AXUIElementCopyAttributeValue(win, kAXFocusedUIElementAttribute as CFString, &winFocusedRef) == .success {
-                candidateElement = (winFocusedRef as! AXUIElement?)
+                candidateElement = axElement(from: winFocusedRef)
             }
         }
 
@@ -220,7 +266,12 @@ public class TargetInputManager {
         let elemToInspect = candidateElement ?? targetWindow ?? appRef
 
         // Metin alanı doğrulaması
-        let (isInput, detectedRole) = isTextInputElement(elemToInspect, pid: targetPID, bundleID: bundleID)
+        let (isInput, detectedRole) = isTextInputElement(
+            elemToInspect,
+            pid: targetPID,
+            bundleID: bundleID,
+            appName: appName
+        )
         guard isInput else {
             return nil
         }
@@ -240,8 +291,8 @@ public class TargetInputManager {
     /// odağı ilk konuşulan yazı alanına kilitler.
     @discardableResult
     public func restoreTargetFocus(to target: TargetContext) -> Bool {
-        // 1. AppleScript ile System Events üzerinden hedef işlemi %100 kesinlikle öne çek
-        // (macOS 14 Sonoma ve macOS 15 Sequoia güvenlik kısıtlarını aşan endüstri standardı yöntem)
+        // 1. AppleScript ile System Events üzerinden hedef işlemi öne çekmeyi dene.
+        // macOS'un izinleri veya hedef uygulamanın davranışı nedeniyle bu adım başarısız olabilir; Cocoa ve AX yolları aşağıda yedeklenir.
         let script = "tell application \"System Events\" to set frontmost of (first process whose unix id is \(target.pid)) to true"
         var scriptError: NSDictionary?
         NSAppleScript(source: script)?.executeAndReturnError(&scriptError)

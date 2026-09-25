@@ -86,9 +86,19 @@ public final class TextPolisher {
             processed = applyCustomVocabulary(text: processed, vocabularyString: config.custom_vocabulary)
         }
 
-        // 4. Kod ve CLI Komutları Algılama
-        for regex in Self.codeCommandPatterns {
-            processed = replaceRegex(regex, in: processed, with: "`$1`")
+        // 4. Kod ve CLI Komutları Algılama (Terminal ve kod editörü hariç; markdown/sohbet/belge için)
+        let isCodeOrTerminalTarget: Bool
+        if let target = targetContext {
+            let cat = AppProfileFormatter.shared.detectCategory(bundleIdentifier: target.bundleIdentifier, appName: target.appName)
+            isCodeOrTerminalTarget = (cat == .terminal || cat == .codeEditor)
+        } else {
+            isCodeOrTerminalTarget = false
+        }
+
+        if !isCodeOrTerminalTarget {
+            for regex in Self.codeCommandPatterns {
+                processed = replaceRegex(regex, in: processed, with: "`$1`")
+            }
         }
 
         // 5. Temel boşluk ve noktalama temizliği
@@ -102,7 +112,17 @@ public final class TextPolisher {
             }
         }
 
-        // 7. Uygulamaya Özel Akıllı Biçimlendirme (Target App Profile Formatter)
+        // 7. Dikte Modu Katmanı (Dictation Mode: Direct / Formal / Bullet)
+        switch config.dictation_mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "formal", "resmi":
+            processed = formatFormal(text: processed)
+        case "bullet", "madde", "not":
+            processed = formatBulletPoints(text: processed)
+        default:
+            break // "direct" veya varsayılan: doğrudan saf deşifre akışı korunur
+        }
+
+        // 8. Uygulamaya Özel Akıllı Biçimlendirme (Target App Profile Formatter - Tag Stacking)
         if config.enable_app_profiles {
             processed = AppProfileFormatter.shared.format(text: processed, targetContext: targetContext)
         }
@@ -191,6 +211,12 @@ public final class TextPolisher {
         for token in tokens {
             let normalized = token.trimmingCharacters(in: CharacterSet(charactersIn: ".,!?:;\"'()[]{}")).lowercased(with: Locale(identifier: "tr_TR"))
             if !normalized.isEmpty && normalized == prevNormalized && normalized.count > 1 {
+                // Türkçe CLI diktesinde "tire tire" (--) meşru bayrak belirtecidir; kekeleme değildir
+                if normalized == "tire" {
+                    cleaned.append(token)
+                    prevNormalized = ""
+                    continue
+                }
                 continue // Mükerrer kekeleme kelimesini atla
             }
             cleaned.append(token)

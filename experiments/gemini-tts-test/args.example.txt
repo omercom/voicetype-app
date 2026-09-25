@@ -1,0 +1,3 @@
+--model gemini-3.8-flash-tts
+--voice Fola
+--out out/ornek.wav

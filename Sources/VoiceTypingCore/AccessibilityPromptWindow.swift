@@ -10,15 +10,18 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
     private var actionButton: NSButton!
     private var statusLabel: NSTextField!
     private var progressIndicator: NSProgressIndicator!
+    private var introLabel: NSTextField!
+    private var usageLabel: NSTextField!
+    private var privacyLabel: NSTextField!
 
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 255),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 430),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Voice Typing - Kurulum & İzin"
+        window.title = "Voice Typing - İzin Açıklaması"
         window.isReleasedWhenClosed = false
         window.level = .floating
         window.hidesOnDeactivate = false
@@ -35,7 +38,7 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
         guard let window = window, let contentView = window.contentView else { return }
 
         // 1. İkon
-        let iconView = NSImageView(frame: NSRect(x: 28, y: 155, width: 64, height: 64))
+        let iconView = NSImageView(frame: NSRect(x: 28, y: 329, width: 64, height: 64))
         if let appIcon = NSImage(named: NSImage.applicationIconName) {
             iconView.image = appIcon
         } else if #available(macOS 11.0, *), let symbol = NSImage(systemSymbolName: "hand.raised.fill", accessibilityDescription: nil) {
@@ -45,54 +48,79 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
         iconView.imageScaling = .scaleProportionallyUpOrDown
         contentView.addSubview(iconView)
 
-        // 2. Başlık
-        let titleLabel = NSTextField(labelWithString: "Erişilebilirlik İzni Gerekli")
-        titleLabel.frame = NSRect(x: 108, y: 190, width: 345, height: 24)
+        // 2. Başlık ve kısa bağlam
+        let titleLabel = NSTextField(labelWithString: "Erişilebilirlik izni neden gerekli?")
+        titleLabel.frame = NSRect(x: 108, y: 374, width: 420, height: 24)
         titleLabel.font = NSFont.systemFont(ofSize: 16, weight: .bold)
         titleLabel.textColor = .labelColor
         contentView.addSubview(titleLabel)
 
-        // 3. Açıklama
-        let descLabel = NSTextField(wrappingLabelWithString: "Voice Typing'in klavye kısayolunu (Sağ ⌘) dinleyebilmesi ve konuşmanızı doğrudan aktif metin alanına yazabilmesi için macOS Erişilebilirlik iznine ihtiyacı vardır.\n\nLütfen Sistem Ayarları'nda VoiceTyping yanındaki anahtarı açın.")
-        descLabel.frame = NSRect(x: 108, y: 110, width: 345, height: 75)
-        descLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
-        descLabel.textColor = .secondaryLabelColor
-        contentView.addSubview(descLabel)
+        introLabel = NSTextField(wrappingLabelWithString: "")
+        introLabel.frame = NSRect(x: 108, y: 315, width: 420, height: 48)
+        introLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        introLabel.textColor = .secondaryLabelColor
+        contentView.addSubview(introLabel)
 
-        // 4. Durum Kutusu / Canlı Bilgi
-        statusLabel = NSTextField(labelWithString: "Sistem Ayarları'nı açmak için aşağıdaki butona tıklayın.")
-        statusLabel.frame = NSRect(x: 108, y: 78, width: 315, height: 20)
-        statusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        statusLabel.textColor = .systemOrange
-        contentView.addSubview(statusLabel)
+        let usageHeading = NSTextField(labelWithString: "İzin yoksa kısayol ve otomatik yazma çalışmaz. İzin şunları sağlar:")
+        usageHeading.frame = NSRect(x: 32, y: 286, width: 480, height: 20)
+        usageHeading.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        usageHeading.textColor = .labelColor
+        contentView.addSubview(usageHeading)
 
-        progressIndicator = NSProgressIndicator(frame: NSRect(x: 82, y: 77, width: 18, height: 18))
+        usageLabel = NSTextField(wrappingLabelWithString: "")
+        usageLabel.frame = NSRect(x: 44, y: 145, width: 480, height: 134)
+        usageLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .regular)
+        usageLabel.textColor = .secondaryLabelColor
+        usageLabel.maximumNumberOfLines = 0
+        contentView.addSubview(usageLabel)
+
+        privacyLabel = NSTextField(wrappingLabelWithString: "")
+        privacyLabel.frame = NSRect(x: 32, y: 82, width: 496, height: 52)
+        privacyLabel.font = NSFont.systemFont(ofSize: 10.5, weight: .regular)
+        privacyLabel.textColor = .tertiaryLabelColor
+        privacyLabel.maximumNumberOfLines = 0
+        contentView.addSubview(privacyLabel)
+
+        // 3. Durum ve canlı izin algılama
+        progressIndicator = NSProgressIndicator(frame: NSRect(x: 32, y: 56, width: 16, height: 16))
         progressIndicator.style = .spinning
         progressIndicator.controlSize = .small
         progressIndicator.isDisplayedWhenStopped = false
         contentView.addSubview(progressIndicator)
 
-        // 5. Ayırıcı Çizgi
-        let separator = NSBox(frame: NSRect(x: 20, y: 64, width: 440, height: 1))
+        statusLabel = NSTextField(labelWithString: "")
+        statusLabel.frame = NSRect(x: 54, y: 55, width: 470, height: 20)
+        statusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        statusLabel.textColor = .systemOrange
+        contentView.addSubview(statusLabel)
+
+        // 4. Ayırıcı çizgi ve butonlar
+        let separator = NSBox(frame: NSRect(x: 20, y: 45, width: 520, height: 1))
         separator.boxType = .separator
         contentView.addSubview(separator)
 
-        // 6. Butonlar
         let cancelButton = NSButton(title: "Daha Sonra", target: self, action: #selector(cancelAction))
-        cancelButton.frame = NSRect(x: 235, y: 16, width: 110, height: 32)
+        cancelButton.frame = NSRect(x: 320, y: 11, width: 105, height: 32)
         cancelButton.bezelStyle = .rounded
         cancelButton.keyEquivalent = "\u{1b}" // Escape
         contentView.addSubview(cancelButton)
 
-        actionButton = NSButton(title: "Sistem Ayarlarını Aç", target: self, action: #selector(openSettingsAction))
-        actionButton.frame = NSRect(x: 350, y: 16, width: 115, height: 32)
+        actionButton = NSButton(title: "Erişilebilirliği Aç", target: self, action: #selector(openSettingsAction))
+        actionButton.frame = NSRect(x: 435, y: 11, width: 112, height: 32)
         actionButton.bezelStyle = .rounded
         actionButton.keyEquivalent = "\r" // Enter
         contentView.addSubview(actionButton)
+
+        updateCopy()
     }
 
     public func showPrompt(onGranted: (() -> Void)? = nil) {
-        self.onGranted = onGranted
+        let wasVisible = window?.isVisible ?? false
+        if let onGranted {
+            self.onGranted = onGranted
+        } else if !wasVisible {
+            self.onGranted = nil
+        }
 
         // Zaten izin verilmişse pencere açmaya gerek yok
         if AXIsProcessTrusted() {
@@ -101,6 +129,10 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
         }
 
         guard let window = window else { return }
+        updateCopy()
+        if !wasVisible {
+            resetForPresentation()
+        }
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -110,7 +142,7 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
     @objc private func openSettingsAction() {
         actionButton.isEnabled = false
         actionButton.title = "Bekleniyor..."
-        statusLabel.stringValue = "Sistem Ayarları açıldı. 'VoiceTyping' anahtarını açın..."
+        statusLabel.stringValue = "Sistem Ayarları açıldı: VoiceTyping anahtarını açın."
         statusLabel.textColor = .systemBlue
         progressIndicator.startAnimation(nil)
 
@@ -133,6 +165,21 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
     @objc private func cancelAction() {
         stopPolling()
         window?.close()
+    }
+
+    private func updateCopy() {
+        let triggerKeyName = AccessibilityPermissionInfo.currentTriggerKeyName
+        introLabel?.stringValue = "Bu izin, VoiceTyping'in Zed, tarayıcı veya mesajlaşma uygulamasında siz yazarken çalışmasını sağlar. Ses kaydı için Mikrofon izni ayrı olarak kullanılır."
+        usageLabel?.stringValue = AccessibilityPermissionInfo.usageDescription(triggerKeyName: triggerKeyName)
+        privacyLabel?.stringValue = AccessibilityPermissionInfo.privacyNotice
+    }
+
+    private func resetForPresentation() {
+        actionButton?.isEnabled = true
+        actionButton?.title = "Erişilebilirliği Aç"
+        statusLabel?.stringValue = "İzin vermek için Erişilebilirliği Aç'a tıklayın."
+        statusLabel?.textColor = .systemOrange
+        progressIndicator?.stopAnimation(nil)
     }
 
     public func windowWillClose(_ notification: Notification) {
@@ -160,7 +207,8 @@ public class AccessibilityPromptController: NSWindowController, NSWindowDelegate
         statusLabel.stringValue = "✅ Yetki verildi! Voice Typing hazır."
         statusLabel.textColor = .systemGreen
 
-        // Sistem Ayarları'nı otomatik kapat
+        // Sistem Ayarları'nı kapatmak yerine gizle; kullanıcının başka bir
+        // ayar penceresindeki çalışması korunur.
         PermissionManager.shared.closeSystemSettings()
 
         // 0.3 saniye sonra pencereyi kapat ve callback'i çalıştır

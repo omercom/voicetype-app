@@ -1,0 +1,15 @@
+Türkçe ses sentezi testi. Bu cümle, dilin gerçek zorluklarını ölçmek için seçildi.
+
+Öncelikle temel bir cümle: Merhaba, bugün hava çok güzel. Ses sentezinin doğallığını duymak istiyorum.
+
+Şimdi Türkçeye özgü harfler: ç, ğ, ı, İ, ö, ş, ü. Ağaç, değil, ırmak, İstanbul, öğretmen, şeker, üzüm. Bu harfler yanlış telaffuz edilirse ses sentezi hemen belli olur.
+
+Sayılar ve tarihler: 2026 yılında, 15 Mart saat 14:30'da, yüzde 42, üç milyon beş yüz bin lira, 1.250,75.
+
+Kısaltmalar: TÜBİTAK, NATO, ABD, TC, vb., vs., Dr., Prof.
+
+Noktalama ve tonlama: Bir soru soruyorum, değil mi? Ünlem! Üç nokta... Tire - işareti ve noktalı virgül; sonra devam.
+
+Türkçe'de uzun kelimeler birleşerek gider: yapabileceklerimizdenmişsinizcesine, evlendirilemeyenlerden. Ekler üst üste gelir: araştırmacılarımızdakilerden.
+
+Son olarak hız ve duygu testi: Yavaş ve sakin bir sesle söylüyorum. Şimdi biraz daha hızlı ve enerjik: Hadi gidelim, geç kalıyoruz!

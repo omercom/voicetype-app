@@ -5,7 +5,7 @@ import AppKit
 public class KeyListener {
     public static let shared = KeyListener()
 
-    public var onStart: (() -> Void)?
+    public var onStart: ((TimeInterval) -> Void)?
     public var onStop: ((Double) -> Void)?
     public var onCancel: (() -> Void)?
     public var isBusy: (() -> Bool)?
@@ -121,11 +121,25 @@ public class KeyListener {
             return listener.handleEvent(proxy: proxy, type: type, event: event)
         }
 
+        var waitTicks = 0
         while isRunning {
             guard AXIsProcessTrusted() else {
-                // Erişilebilirlik izni henüz yoksa arka planda sessizce iznin verilmesini bekle
+                // Erişilebilirlik izni yoksa iznin verilmesini bekle.
+                //
+                // Sessiz beklemek teşhis edilemez bir durum yaratıyordu:
+                // uygulama çalışıyor görünür ama hiçbir tuşu duymaz ve
+                // nedenini söylemez. Bu yüzden beklemeyi ARALIKLI olarak
+                // bildiriyoruz (her 10 sn'de bir, günlüğü doldurmadan).
+                if waitTicks % 20 == 0 {
+                    print("[KeyListener] ⏳ Erişilebilirlik izni bekleniyor — kısayol şu an devre dışı. "
+                          + "Sistem Ayarları → Gizlilik ve Güvenlik → Erişilebilirlik bölümünden VoiceTyping'i etkinleştirin.")
+                }
+                waitTicks += 1
                 Thread.sleep(forTimeInterval: 0.5)
                 continue
+            }
+            if waitTicks > 0 {
+                print("[KeyListener] ✅ Erişilebilirlik izni alındı; dinleyici kuruluyor.")
             }
 
             // Önce kullanıcı oturumu tap'ini (.cgSessionEventTap - root gerektirmez), ardından HID tap'ini dene
@@ -255,7 +269,10 @@ public class KeyListener {
     }
 
     private func handleKeyDown() {
+        let triggerUptime = ProcessInfo.processInfo.systemUptime
+        #if DEBUG
         print("[KeyListener] 🎙️ Tetikleyici tuşa basıldı! (Kayıt tetikleniyor)")
+        #endif
         lock.lock()
         let config = ConfigManager.shared.config
         let mode = config.trigger_mode.lowercased()
@@ -275,7 +292,7 @@ public class KeyListener {
                 recordingStartTime = CFAbsoluteTimeGetCurrent()
                 lock.unlock()
                 DispatchQueue.main.async { [weak self] in
-                    self?.onStart?()
+                    self?.onStart?(triggerUptime)
                 }
                 return
             }
@@ -294,7 +311,7 @@ public class KeyListener {
             recordingStartTime = CFAbsoluteTimeGetCurrent()
             lock.unlock()
             DispatchQueue.main.async { [weak self] in
-                self?.onStart?()
+                self?.onStart?(triggerUptime)
             }
         } else {
             // "hold" (Push-to-Talk)
@@ -303,7 +320,7 @@ public class KeyListener {
                 recordingStartTime = CFAbsoluteTimeGetCurrent()
                 lock.unlock()
                 DispatchQueue.main.async { [weak self] in
-                    self?.onStart?()
+                    self?.onStart?(triggerUptime)
                 }
             } else {
                 lock.unlock()
@@ -312,7 +329,9 @@ public class KeyListener {
     }
 
     private func handleKeyUp() {
+        #if DEBUG
         print("[KeyListener] ⏹️ Tetikleyici tuş bırakıldı!")
+        #endif
         lock.lock()
         let config = ConfigManager.shared.config
         let mode = config.trigger_mode.lowercased()

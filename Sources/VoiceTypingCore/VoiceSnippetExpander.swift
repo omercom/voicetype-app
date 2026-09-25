@@ -3,7 +3,7 @@ import Foundation
 /// Kullanıcı tanımlı sesli kısayolları (Voice Snippets) tespit edip
 /// deşifre edilmiş metindeki ilgili ifadeyi tam metinle değiştiren metin genişletici.
 /// 
-/// Türkçe konuşma ve ses tanıma özelliklerine tam uyumludur:
+/// Türkçe konuşma ve ses tanıma varyasyonlarına uyumludur:
 /// 1. "kısayol" ve "kısa yol" (ayrı veya bitişik) eşdeğerliğini otomatik tanır.
 /// 2. Türkçe I/İ/ı/i büyük-küçük harf ve ASCII uyumsuzluklarını (örn: "IBAN" -> "ıban") normalleştirir.
 /// 3. Kullanıcının konuşma sırasındaki eklerini ("kısayol ibanı", "kısayol ibanım", "kısayol mailime") tolere eder.

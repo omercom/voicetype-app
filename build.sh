@@ -1,40 +1,47 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 echo "🔨 Building VoiceTyping native macOS binary with Swift Package Manager..."
 swift build -c release
-cp .build/release/VoiceTyping ./VoiceTyping
+BIN_DIR="$(swift build -c release --show-bin-path)"
+cp "$BIN_DIR/VoiceTyping" ./VoiceTyping
 
 # macOS .app Paketi Oluştur (TCC Mikrofon & Erişilebilirlik Desteği)
 APP_BUNDLE="VoiceTyping.app"
+rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp ./VoiceTyping "$APP_BUNDLE/Contents/MacOS/VoiceTyping"
 cp Info.plist "$APP_BUNDLE/Contents/Info.plist"
 
 # Ses ve kaynak dosyalarını kopyala
-BUNDLE_DIR=$(find .build -name "VoiceTyping_VoiceTypingCore.bundle" | head -n 1)
-if [ -n "$BUNDLE_DIR" ] && [ -d "$BUNDLE_DIR" ]; then
-    cp -R "$BUNDLE_DIR" ./VoiceTyping_VoiceTypingCore.bundle
-    cp -R "$BUNDLE_DIR" "$APP_BUNDLE/Contents/Resources/"
-fi
+BUNDLE_DIR="$BIN_DIR/VoiceTyping_VoiceTypingCore.bundle"
+test -d "$BUNDLE_DIR"
+rm -rf ./VoiceTyping_VoiceTypingCore.bundle
+cp -R "$BUNDLE_DIR" ./VoiceTyping_VoiceTypingCore.bundle
+cp -R "$BUNDLE_DIR" "$APP_BUNDLE/Contents/Resources/"
 if [ -d "Sources/VoiceTypingCore/Resources" ]; then
     cp -R Sources/VoiceTypingCore/Resources/Sounds/*.wav "$APP_BUNDLE/Contents/Resources/" 2>/dev/null || true
     if [ -f "Sources/VoiceTypingCore/Resources/AppIcon.icns" ]; then
         cp "Sources/VoiceTypingCore/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
     fi
 fi
-if [ -f "config.json" ]; then
-    cp "config.json" "$APP_BUNDLE/Contents/Resources/config.json" 2>/dev/null || true
-fi
+# Kullanıcı yapılandırması/API anahtarları .app paketine taşınmaz.
+# Önceki bir build'den kalmış kaynak dosyasını da temizle.
+rm -f "$APP_BUNDLE/Contents/Resources/config.json"
 
 # Güvenlik İmzası (macOS TCC izinlerinin yeniden derlemede kaybolmaması için sabit kimlik kullanılır)
 SIGN_IDENTITY="VoiceTyping Local Certificate"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
-    codesign --force --deep -s "$SIGN_IDENTITY" "$APP_BUNDLE" 2>/dev/null || codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+    codesign --force --deep -s "$SIGN_IDENTITY" "$APP_BUNDLE"
 else
-    codesign --force --deep --sign - "$APP_BUNDLE" 2>/dev/null || true
+    codesign --force --deep --sign - "$APP_BUNDLE"
 fi
+codesign --verify --deep --strict "$APP_BUNDLE"
+plutil -lint "$APP_BUNDLE/Contents/Info.plist"
 
 # macOS LaunchServices önbelleğini yenile (LSUIElement / Dinamik Dock için)
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_BUNDLE" 2>/dev/null || true

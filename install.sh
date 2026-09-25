@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 APP_NAME="${1:-VoiceTyping}"
+case "$APP_NAME" in
+    ''|*[!a-zA-Z0-9_-]*) echo "Invalid app name" >&2; exit 1 ;;
+esac
 TARGET_APP="/Applications/${APP_NAME}.app"
 
 echo "============================================================"
@@ -19,10 +22,41 @@ echo "🔨 1/5. Native Swift binary ve .app paketi derleniyor..."
 
 # 2. Çalışan eski süreçleri durdur
 echo "🛑 2/5. Varsa önceki süreçler durduruluyor..."
-./stop.sh 2>/dev/null || true
-pkill -x "$APP_NAME" 2>/dev/null || true
-pkill -x "VoiceTyping" 2>/dev/null || true
-sleep 1
+launchctl unload "$HOME/Library/LaunchAgents/com.antigravity.VoiceTyping.plist" 2>/dev/null || true
+# Never trust a stale PID file or terminate an unrelated process by name.
+python3 - "$TARGET_APP" <<'PY_STOP'
+import ctypes, os, pathlib, signal, subprocess, sys, time
+root = pathlib.Path.cwd()
+allowed = {str(p.resolve()) for p in [
+    pathlib.Path(sys.argv[1]) / "Contents/MacOS/VoiceTyping",
+    pathlib.Path("/Applications/VoiceTyping.app/Contents/MacOS/VoiceTyping"),
+    root / "VoiceTyping", root / "VoiceTyping.app/Contents/MacOS/VoiceTyping",
+    root / ".build/release/VoiceTyping", root / ".build/debug/VoiceTyping",
+]}
+libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+def executable(pid):
+    buf = ctypes.create_string_buffer(4096)
+    if libproc.proc_pidpath(pid, buf, len(buf)) <= 0:
+        return None
+    return os.path.realpath(os.fsdecode(buf.value))
+result = subprocess.run(["pgrep", "-x", "VoiceTyping"], capture_output=True, text=True)
+for pid in map(int, result.stdout.split()):
+    path = executable(pid)
+    if path not in allowed:
+        print(f"Leaving unrecognized VoiceTyping PID {pid} untouched")
+        continue
+    print(f"Stopping VoiceTyping PID {pid}: {path}")
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        continue
+    for _ in range(50):
+        if executable(pid) != path:
+            break
+        time.sleep(0.1)
+    else:
+        raise SystemExit("VoiceTyping did not exit; installation aborted safely")
+PY_STOP
 
 # 3. /Applications dizinine yükle
 echo "📁 3/5. Uygulama /Applications klasörüne kopyalanıyor..."
@@ -37,12 +71,27 @@ fi
 
 # 4. Güvenlik imzası uygula (macOS TCC izinlerinin yeniden derlemede kaybolmaması için sabit kimlik kullanılır)
 echo "🔏 4/5. Güvenlik imzası uygulanıyor (codesign)..."
+# SABİT KİMLİKLE İMZALA — her kurulumda, koşulsuz.
+#
+# Neden: macOS TCC izinlerini (Erişilebilirlik, Girdi İzleme, Konuşma Tanıma)
+# imzaya bağlar. Ad-hoc imzada (`--sign -`) imza özeti binary her değiştiğinde
+# değişir; bu yüzden her yeniden kurulum kullanıcının VERDİĞİ izinleri sessizce
+# sıfırlar ve uygulama bir daha kısayolu duymaz. Sabit sertifika bu özeti
+# korur, böylece izin bir kez verilir ve sonraki kurulumlarda ayakta kalır.
 SIGN_IDENTITY="VoiceTyping Local Certificate"
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
-    codesign --force --deep -s "$SIGN_IDENTITY" "$TARGET_APP" 2>/dev/null || codesign --force --deep --sign - "$TARGET_APP"
+    codesign --force --deep --sign "$SIGN_IDENTITY" "$TARGET_APP" \
+        || { echo "❌ Sabit sertifika ile imzalama başarısız."; exit 1; }
 else
+    # Sertifika yoksa ad-hoc imzaya düş ama kullanıcıyı UYAR: izinler
+    # her kurulumda sıfırlanacaktır.
+    echo "⚠️  '$SIGN_IDENTITY' bulunamadı; geçici (ad-hoc) imza kullanılıyor."
+    echo "    Bu durumda macOS izinleri her kurulumda sıfırlanır."
+    echo "    Kalıcı izin için README'deki sertifika adımını uygulayın."
     codesign --force --deep --sign - "$TARGET_APP"
 fi
+codesign --verify --deep --strict "$TARGET_APP"
+plutil -lint "$TARGET_APP/Contents/Info.plist"
 
 # macOS LaunchServices önbelleğini yenile (LSUIElement / Dinamik Dock için)
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$TARGET_APP" 2>/dev/null || true
@@ -84,7 +133,7 @@ if os.path.exists(project_cfg):
             if not data:
                 data = pdata
             else:
-                for k in ["groq_api_key", "gemini_api_key", "provider", "gemini_model", "groq_model"]:
+                for k in ["groq_api_key", "gemini_api_key", "assemblyai_api_key", "provider", "gemini_model", "groq_model"]:
                     if not data.get(k) and pdata.get(k):
                         data[k] = pdata[k]
     except Exception:
@@ -99,6 +148,8 @@ if os.path.exists(project_env):
                     data["groq_api_key"] = line.split("=", 1)[1].strip("\"' ")
                 elif line.startswith("GEMINI_API_KEY=") and not data.get("gemini_api_key"):
                     data["gemini_api_key"] = line.split("=", 1)[1].strip("\"' ")
+                elif line.startswith("ASSEMBLYAI_API_KEY=") and not data.get("assemblyai_api_key"):
+                    data["assemblyai_api_key"] = line.split("=", 1)[1].strip("\"' ")
     except Exception:
         pass
 
@@ -113,7 +164,16 @@ if data:
         json.dump(data, f, indent=2, ensure_ascii=False)
     groq_ok = "✅" if data.get("groq_api_key") else "⚪"
     gemini_ok = "✅" if data.get("gemini_api_key") else "⚪"
-    print(f"   ➔ API Anahtarları korundu ve eşitlendi (Groq: {groq_ok}, Gemini: {gemini_ok})")
+    assembly_ok = "✅" if data.get("assemblyai_api_key") else "⚪"
+    print(f"   ➔ API Anahtarları korundu ve eşitlendi (Groq: {groq_ok}, Gemini: {gemini_ok}, AssemblyAI: {assembly_ok})")
+
+# API anahtarlarının bulunduğu dosyaları yalnızca kullanıcı hesabına aç.
+for protected_path in (user_cfg, legacy_cfg):
+    if os.path.exists(protected_path):
+        try:
+            os.chmod(protected_path, 0o600)
+        except OSError:
+            pass
 PY_EOF
 
 # 5. LaunchAgent oluştur (Mac açıldığında otomatik başlama)
@@ -138,6 +198,15 @@ cat <<PLIST_EOF > "$LAUNCH_AGENT_PLIST"
     </array>
     <key>RunAtLoad</key>
     <true/>
+    <!-- Uygulama kasıtlı olarak kapatılmadığı sürece çökme sonrası geri gelmelidir.
+         SuccessfulExit=false: yalnızca hatalı çıkışta yeniden başlat, temiz çıkışta başlatma. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
     <key>ProcessType</key>
     <string>Interactive</string>
 </dict>
@@ -145,13 +214,12 @@ cat <<PLIST_EOF > "$LAUNCH_AGENT_PLIST"
 PLIST_EOF
 
 # Servisi yükle (Mac açıldığında otomatik çalışması için)
-launchctl load "$LAUNCH_AGENT_PLIST" 2>/dev/null || true
+plutil -lint "$LAUNCH_AGENT_PLIST"
+launchctl load "$LAUNCH_AGENT_PLIST"
 
-# Servis başlatılmadıysa uygulamayı doğrudan aç
+# Başlatılan servisi göster; sessizce başka bir kopyayı açma.
 sleep 0.5
-if ! pgrep -x "VoiceTyping" > /dev/null 2>&1; then
-    open "$TARGET_APP"
-fi
+launchctl list com.antigravity.VoiceTyping
 
 echo ""
 echo "============================================================"

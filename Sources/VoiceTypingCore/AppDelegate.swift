@@ -1,6 +1,45 @@
 import Foundation
 import AppKit
 
+private struct DictationPermissionSnapshot {
+    let accessibilityGranted: Bool
+    let microphoneStatus: PermissionStatus
+    let speechStatus: PermissionStatus
+
+    func readinessMessage(for config: AppConfig) -> String? {
+        guard accessibilityGranted else {
+            return "Erişilebilirlik izni gerekli"
+        }
+
+        switch microphoneStatus {
+        case .authorized:
+            break
+        case .restricted:
+            return "Mikrofon erişimi kısıtlı"
+        default:
+            return "Mikrofon izni gerekli"
+        }
+
+        // Sağlayıcı gereksinimleri kayıt defterindeki yeteneklerden türetilir:
+        // yerel (onDevice) sağlayıcılar Konuşma Tanıma izni ister, bulut
+        // sağlayıcıları ise API anahtarı. Kullanıcıya gösterilen metinler
+        // önceki sürümle birebir aynı tutulmuştur.
+        let descriptor = TranscriptionProviderRegistry.descriptor(for: config.provider)
+
+        if descriptor.capabilities.contains(.onDevice) {
+            guard speechStatus == .authorized else {
+                return speechStatus == .restricted
+                    ? "Apple Speech erişimi kısıtlı"
+                    : "Apple Speech izni gerekli"
+            }
+        } else if descriptor.isMissingAPIKey(in: config) {
+            return "\(descriptor.readinessShortName) API anahtarı gerekli"
+        }
+
+        return nil
+    }
+}
+
 public class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var statusMenuItem: NSMenuItem?
@@ -8,6 +47,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var appleMenuItem: NSMenuItem!
     private var groqMenuItem: NSMenuItem!
     private var geminiMenuItem: NSMenuItem!
+    private var assemblyAIMenuItem: NSMenuItem!
     private var holdModeMenuItem: NSMenuItem!
     private var smartModeMenuItem: NSMenuItem!
     private var toggleModeMenuItem: NSMenuItem!
@@ -36,6 +76,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastRecordedAudioData: Data?
     private var revertStatusTimer: Timer?
     private var isExplicitQuit: Bool = false
+    private let recordingStartCoordinator = RecordingStartCoordinator()
+    private var activeStartLatencyTrace: RecordingStartLatencyTrace?
+    private var isPreparingRecord = false
+    private var pendingRecordStartGeneration: UInt64 = 0
+    private var permissionSnapshot: DictationPermissionSnapshot?
 
     public override init() {
         super.init()
@@ -49,6 +94,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var readyToolTip: String {
         let keyName = TriggerKeyOption.shortName(for: ConfigManager.shared.config.trigger_key)
         return "Voice Typing (\(keyName) ile Sesle Yazma)"
+    }
+
+    /// Recorder tamamlanan her oturum için WAV döndürür; ağ/yerel deşifreye
+    /// yalnızca gerçek PCM içeren ve dijital sessizlik olmayan kayıt gönderilir.
+    static func shouldSubmitRecording(_ data: Data?) -> Bool {
+        guard let data = data, data.count > 44 else { return false }
+        return !AudioRecorder.isAudioSilent(data: data)
+    }
+
+    /// Canlı oturumda sessizlik dahil her PCM bloğu süre ve sıra korunarak iletilir.
+    static func livePCMChunkForForwarding(_ data: Data) -> Data {
+        data
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
@@ -68,9 +125,21 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         buildMenu()
 
+        // First-use AppKit layer creation and procedural sound synthesis must not
+        // sit on the dictation keydown path. This does not open the microphone.
+        RecordingHUD.shared.warm()
+        _ = SoundManager.shared
+        _ = AudioRecorder.shared
+
         // Ayarlar güncellendiğinde menüyü yenile
         SettingsWindowController.shared.onConfigUpdated = { [weak self] in
             KeyListener.shared.updateTriggerKeyConfiguration()
+            self?.refreshPermissionSnapshot()
+            if TranscriptionProviderRegistry.supports(.onDevice, providerID: ConfigManager.shared.config.provider),
+               self?.permissionSnapshot?.speechStatus == .authorized {
+                Transcriber.shared.warmAppleSpeech(language: ConfigManager.shared.config.language)
+            }
+            self?.refreshHistoryMenu()
             self?.refreshMenuStates()
         }
 
@@ -83,17 +152,40 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         startPermissionsFlow()
     }
 
-    private func startPermissionsFlow() {
-        // 1. Önce Mikrofon İzni: Eğer henüz sorulmadıysa, doğrudan native macOS sistem diyaloğu açılır.
-        // Kullanıcı "İzin Ver" (Allow) dediğinde otomatik onaylanır, ayarlar penceresi açılmaz.
-        PermissionManager.shared.requestMicrophonePermission { [weak self] micGranted in
-            print("[AppDelegate] Mikrofon izni durumu: \(micGranted)")
+    public func applicationDidBecomeActive(_ notification: Notification) {
+        // Kullanıcı Sistem Ayarları'ndan döndüğünde izin cache'i güncellenir.
+        // Kayıt hot path'i bu sayede TCC IPC'si çalıştırmadan karar verebilir.
+        refreshPermissionSnapshot()
+        refreshMenuStates()
+    }
 
-            // 2. İkinci Olarak Konuşma Tanıma İzni (Apple Speech): İlk kurulumda mikrofon hemen ardından istenir
+    private func startPermissionsFlow() {
+        // Mikrofon her sağlayıcı için gereklidir. Apple Speech izni ise yalnızca
+        // Apple sağlayıcısı seçiliyken istenir; bulut sağlayıcı kullanan kişiye
+        // gereksiz bir sistem izin penceresi göstermeyiz.
+        PermissionManager.shared.requestMicrophonePermission { [weak self] micGranted in
+            let provider = TranscriptionProviderRegistry.normalize(ConfigManager.shared.config.provider)
+            let needsSpeechPermission = TranscriptionProviderRegistry.supports(.onDevice, providerID: provider)
+            print("[AppDelegate] Mikrofon izni durumu: \(micGranted)")
+            if micGranted {
+                AudioRecorder.shared.warm()
+            }
+
+            guard needsSpeechPermission, micGranted else {
+                if !needsSpeechPermission {
+                    print("[AppDelegate] Apple Speech izni atlandı (aktif sağlayıcı: \(provider)).")
+                }
+                DispatchQueue.main.async {
+                    self?.checkAccessibilityAndActivate()
+                }
+                return
+            }
+
             PermissionManager.shared.requestSpeechRecognitionPermission { speechGranted in
                 print("[AppDelegate] Konuşma tanıma izni durumu: \(speechGranted)")
-
-                // 3. Erişilebilirlik İzni Kontrolü
+                if speechGranted {
+                    Transcriber.shared.warmAppleSpeech(language: ConfigManager.shared.config.language)
+                }
                 DispatchQueue.main.async {
                     self?.checkAccessibilityAndActivate()
                 }
@@ -102,9 +194,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func checkAccessibilityAndActivate() {
-        if AXIsProcessTrusted() {
-            // Her iki izin de tam! Sıfır pencere açılarak sessizce ve hızla hazır moda geçilir
-            print("[AppDelegate] ✅ Tüm izinler onaylı. Voice Typing aktif edildi.")
+        refreshPermissionSnapshot()
+        if permissionSnapshot?.accessibilityGranted == true {
+            // Erişilebilirlik hazır olduğunda tuş dinleyicisi kurulabilir. Mikrofon
+            // veya sağlayıcı izni eksikse kullanıcıya kayıt anında anlamlı bilgi verilir.
+            print("[AppDelegate] ✅ Erişilebilirlik hazır. Voice Typing aktif edildi.")
             setupKeyListener()
             SoundManager.shared.playStartup()
             refreshMenuStates()
@@ -113,6 +207,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             print("[AppDelegate] ⚠️ Erişilebilirlik izni bekleniyor, yönlendirici açılıyor...")
             AccessibilityPromptController.shared.showPrompt { [weak self] in
                 print("[AppDelegate] 🎉 Erişilebilirlik izni verildi! Sistem başlatılıyor.")
+                self?.refreshPermissionSnapshot()
                 self?.setupKeyListener()
                 SoundManager.shared.playStartup()
                 self?.refreshMenuStates()
@@ -128,6 +223,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildMenu() {
         let menu = NSMenu()
+
+        // Durum ve menüden hızlı kayıt kontrolü. Bu öğeler daha önce yalnızca
+        // değişken olarak tutuluyordu; kullanıcı menüden kayıt başlatamıyordu.
+        statusMenuItem = NSMenuItem(title: readyMenuText, action: nil, keyEquivalent: "")
+        statusMenuItem?.isEnabled = false
+        if let statusMenuItem {
+            menu.addItem(statusMenuItem)
+        }
+
+        toggleRecordMenuItem = NSMenuItem(title: "🎙️ Sesle Yazmayı Başlat (Kayıt)", action: #selector(toggleRecordAction), keyEquivalent: "")
+        toggleRecordMenuItem?.target = self
+        if let toggleRecordMenuItem {
+            menu.addItem(toggleRecordMenuItem)
+        }
+
+        menu.addItem(NSMenuItem.separator())
 
         // 1. Ayarlar Penceresi (Temiz Apple HIG standardı, çift ikon önlendi)
         let settingsItem = NSMenuItem(title: "Ayarlar...", action: #selector(openSettings), keyEquivalent: ",")
@@ -195,6 +306,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         groqMenuItem.target = self
         providerMenu.addItem(groqMenuItem)
 
+        assemblyAIMenuItem = NSMenuItem(title: "🎙 AssemblyAI Dictation API (Universal-3.5 Pro)", action: #selector(selectAssemblyAIProvider), keyEquivalent: "")
+        assemblyAIMenuItem.target = self
+        providerMenu.addItem(assemblyAIMenuItem)
+
         let providerParent = NSMenuItem(title: "Sağlayıcı", action: nil, keyEquivalent: "")
         providerParent.submenu = providerMenu
         menu.addItem(providerParent)
@@ -261,11 +376,47 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         refreshMenuStates()
     }
 
+    private func refreshPermissionSnapshot() {
+        // Konuşma Tanıma izni yalnızca cihaz üzerinde çalışan sağlayıcılar için
+        // anlamlıdır; bulut sağlayıcılarında gereksiz TCC sorgusu yapılmaz.
+        let requiresSpeechPermission = TranscriptionProviderRegistry
+            .descriptor(for: ConfigManager.shared.config.provider)
+            .capabilities
+            .contains(.onDevice)
+        let speechStatus: PermissionStatus = requiresSpeechPermission
+            ? PermissionManager.shared.getSpeechRecognitionStatus().status
+            : .authorized
+
+        permissionSnapshot = DictationPermissionSnapshot(
+            accessibilityGranted: AXIsProcessTrusted(),
+            microphoneStatus: PermissionManager.shared.getMicrophoneStatus().status,
+            speechStatus: speechStatus
+        )
+    }
+
+    private func dictationReadinessMessage(config: AppConfig? = nil) -> String? {
+        if permissionSnapshot == nil {
+            refreshPermissionSnapshot()
+        }
+        return permissionSnapshot?.readinessMessage(for: config ?? ConfigManager.shared.config)
+    }
+
+    private func showPrerequisiteNotice(_ message: String) {
+        SoundManager.shared.playCancel()
+        HapticManager.shared.playCancel()
+        RecordingHUD.shared.showNotice(message: message, autoDismissDelay: 2.4)
+        setStatus(title: "ℹ️", menuText: message, revertAfter: 2.4)
+    }
+
     private func refreshMenuStates() {
         let cfg = ConfigManager.shared.config
-        appleMenuItem.state = (cfg.provider.lowercased() == "apple") ? .on : .off
-        geminiMenuItem.state = (cfg.provider.lowercased() == "gemini") ? .on : .off
-        groqMenuItem.state = (cfg.provider.lowercased() == "groq") ? .on : .off
+        // Menü işaretleri gerçekte kullanılacak sağlayıcıyı yansıtmalı; tanınmayan
+        // bir kimlik varsayılana düştüğü için menü de onu işaretler.
+        let activeProvider = TranscriptionProviderRegistry.normalize(cfg.provider)
+        appleMenuItem.state = (activeProvider == "apple") ? .on : .off
+        geminiMenuItem.state = (activeProvider == "gemini") ? .on : .off
+        groqMenuItem.state = (activeProvider == "groq") ? .on : .off
+        assemblyAIMenuItem.state = (activeProvider == "assemblyai") ? .on : .off
 
         holdModeMenuItem.state = (cfg.trigger_mode.lowercased() == "hold") ? .on : .off
         smartModeMenuItem.state = (cfg.trigger_mode.lowercased() == "smart") ? .on : .off
@@ -292,13 +443,30 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             button.image = getWaveformIcon()
             button.title = ""
         }
-        statusMenuItem?.title = readyMenuText
-        toggleRecordMenuItem?.title = (AudioRecorder.shared.isRecording || isFinishingRecord) ? "Kaydı Bitir ve Deşifre Et" : "Sesle Yazmayı Başlat"
+
+        let isRecording = AudioRecorder.shared.isRecording
+        if isTranscribing || isFinishingRecord {
+            toggleRecordMenuItem?.title = "⏳ Deşifre ediliyor..."
+            toggleRecordMenuItem?.isEnabled = false
+        } else if isRecording {
+            toggleRecordMenuItem?.title = "⏹️ Kaydı Bitir ve Deşifre Et"
+            toggleRecordMenuItem?.isEnabled = true
+        } else {
+            toggleRecordMenuItem?.title = "🎙️ Sesle Yazmayı Başlat (Kayıt)"
+            toggleRecordMenuItem?.isEnabled = true
+        }
+
+        if !isRecording && !isTranscribing && !isFinishingRecord && revertStatusTimer == nil {
+            statusMenuItem?.title = dictationReadinessMessage().map { "Durum: \($0)" } ?? readyMenuText
+        }
+        recoverAudioMenuItem?.isHidden = !DictationRecoveryAudioStore.shared.hasRecovery()
     }
 
     @objc private func toggleRecordAction() {
-        if AudioRecorder.shared.isRecording || isFinishingRecord {
-            handleRecordStop(duration: 1.0)
+        if isPreparingRecord {
+            cancelPendingRecordStart(reason: "menuStop")
+        } else if AudioRecorder.shared.isRecording || isFinishingRecord {
+            handleRecordStop(duration: AudioRecorder.shared.currentRecordingDuration())
         } else {
             handleRecordStart()
         }
@@ -314,7 +482,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: "Tamam")
             alert.runModal()
         } else {
-            RecordingHUD.shared.showError(message: "Kurtarılacak Ses Yok")
+            RecordingHUD.shared.showNotice(message: "Kurtarılacak ses yok")
+            setStatus(title: "ℹ️", menuText: "Kurtarılacak ses yok", revertAfter: 1.8)
         }
     }
 
@@ -323,11 +492,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         listener.isBusy = { [weak self] in
             guard let self = self else { return false }
-            return self.isTranscribing || self.isFinishingRecord
+            return self.isPreparingRecord || self.isTranscribing || self.isFinishingRecord || AudioRecorder.shared.isRecording
         }
 
-        listener.onStart = { [weak self] in
-            self?.handleRecordStart()
+        listener.onStart = { [weak self] triggeredAt in
+            self?.handleRecordStart(triggeredAt: triggeredAt)
         }
 
         listener.onStop = { [weak self] duration in
@@ -342,22 +511,41 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setStatus(title: String, menuText: String, revertAfter: TimeInterval? = nil) {
-        DispatchQueue.main.async { [weak self] in
+        let update = { [weak self] in
             guard let self = self else { return }
             self.revertStatusTimer?.invalidate()
             self.revertStatusTimer = nil
 
             // Menü çubuğundaki sabit premium waveform ikonu bozulmaz.
             self.statusMenuItem?.title = menuText
-            self.toggleRecordMenuItem?.title = (AudioRecorder.shared.isRecording || self.isFinishingRecord) ? "⏹️ Kaydı Bitir ve Deşifre Et" : "🎙️ Sesle Yazmayı Başlat (Kayıt)"
+            if self.isTranscribing || self.isFinishingRecord {
+                self.toggleRecordMenuItem?.title = "⏳ Deşifre ediliyor..."
+                self.toggleRecordMenuItem?.isEnabled = false
+            } else if AudioRecorder.shared.isRecording {
+                self.toggleRecordMenuItem?.title = "⏹️ Kaydı Bitir ve Deşifre Et"
+                self.toggleRecordMenuItem?.isEnabled = true
+            } else {
+                self.toggleRecordMenuItem?.title = "🎙️ Sesle Yazmayı Başlat (Kayıt)"
+                self.toggleRecordMenuItem?.isEnabled = true
+            }
 
             if let delay = revertAfter {
                 self.revertStatusTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
                     guard let self = self else { return }
-                    self.statusMenuItem?.title = self.readyMenuText
+                    self.revertStatusTimer = nil
+                    self.statusMenuItem?.title = self.dictationReadinessMessage().map { "Durum: \($0)" } ?? self.readyMenuText
                     self.toggleRecordMenuItem?.title = "🎙️ Sesle Yazmayı Başlat (Kayıt)"
+                    self.toggleRecordMenuItem?.isEnabled = true
                 }
             }
+        }
+
+        // Kayıt başarılı olduktan sonra UI güncellemesi, ana thread'i
+        // bloklayabilecek medya/CoreAudio işlerinden önce görünür hale gelir.
+        if Thread.isMainThread {
+            update()
+        } else {
+            DispatchQueue.main.async(execute: update)
         }
     }
 
@@ -394,100 +582,232 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Kayıt ve Deşifre Döngüsü
 
-    private func handleRecordStart() {
-        guard !isTranscribing, !isFinishingRecord else { return }
+    /// Gecikme izlerinde ve günlüklerde gösterilen etkin model adını döndürür.
+    /// Sağlayıcı kimliği zaten normalize edilmiş olarak beklenir.
+    private static func effectiveModelName(for provider: String, config: AppConfig) -> String {
+        switch provider {
+        case "apple":
+            return "SFSpeechRecognizer"
+        case "gemini":
+            return config.gemini_model
+        case "assemblyai":
+            return AssemblyAIDictation.model
+        default:
+            return config.groq_model
+        }
+    }
+
+    private func handleRecordStart(triggeredAt: TimeInterval? = nil) {
+        let handlerEnteredAt = ProcessInfo.processInfo.systemUptime
+        guard !isPreparingRecord, !isTranscribing, !isFinishingRecord, !AudioRecorder.shared.isRecording else { return }
 
         let config = ConfigManager.shared.config
+        let provider = TranscriptionProviderRegistry.normalize(config.provider)
+        let effectiveModel = Self.effectiveModelName(for: provider, config: config)
 
-        // 0. Hedef Metin Alanı Doğrulaması ve Kilidi (Target-Lock)
-        if let target = TargetInputManager.shared.captureTargetContext() {
-            self.activeTargetContext = target
-            print("[AppDelegate] 🎯 Hedef yazı alanı kilitlendi: \(target.appName) (\(target.role)) [PID: \(target.pid)]")
-        } else if config.only_in_text_fields {
-            print("[AppDelegate] ⚠️ Odakta geçerli bir yazı alanı bulunamadı. Kural gereği kayıt başlatılmadı.")
+        let trace = RecordingStartLatencyTrace(
+            provider: provider,
+            model: effectiveModel,
+            now: triggeredAt ?? handlerEnteredAt
+        )
+        trace.mark(.mainHandlerEntry, now: handlerEnteredAt)
+        activeStartLatencyTrace = trace
+
+        isPreparingRecord = true
+        pendingRecordStartGeneration &+= 1
+        let generation = pendingRecordStartGeneration
+
+        // Görsel tepki tüm TCC, AX ve CoreAudio işlerinden önce gelir. Devamı bir
+        // sonraki main-run-loop turuna bırakılır; WindowServer hazırlık kapsülünü
+        // gerçekten sunabilir ve spinner ağır başlangıç boyunca donmuş görünmez.
+        RecordingHUD.shared.showPreparing()
+        trace.mark(.preparingPresented)
+
+        if provider == "assemblyai" {
+            // DNS/TCP/TLS el sıkışmasını kullanıcı konuşurken tamamla; gerçek
+            // transkripsiyon aynı URLSession bağlantı havuzunu yeniden kullanır.
+            Transcriber.shared.warmAssemblyAIDictation()
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.continueRecordStart(
+                config: config,
+                provider: provider,
+                effectiveModel: effectiveModel,
+                generation: generation,
+                trace: trace
+            )
+        }
+    }
+
+    private func continueRecordStart(
+        config: AppConfig,
+        provider: String,
+        effectiveModel: String,
+        generation: UInt64,
+        trace: RecordingStartLatencyTrace
+    ) {
+        guard isPreparingRecord, pendingRecordStartGeneration == generation else {
+            trace.finish(reason: "cancelledBeforeStart")
+            return
+        }
+        trace.mark(.hudRunLoopYield)
+
+        if permissionSnapshot == nil {
+            refreshPermissionSnapshot()
+        }
+        if let readinessMessage = dictationReadinessMessage(config: config) {
+            isPreparingRecord = false
+            if readinessMessage.contains("Erişilebilirlik") {
+                AccessibilityPromptController.shared.showPrompt()
+            } else if permissionSnapshot?.microphoneStatus == .notDetermined {
+                PermissionManager.shared.requestMicrophonePermission { [weak self] granted in
+                    if granted { AudioRecorder.shared.warm() }
+                    self?.refreshPermissionSnapshot()
+                }
+            } else if provider == "apple", permissionSnapshot?.speechStatus == .notDetermined {
+                PermissionManager.shared.requestSpeechRecognitionPermission { [weak self] granted in
+                    if granted {
+                        Transcriber.shared.warmAppleSpeech(language: config.language)
+                    }
+                    self?.refreshPermissionSnapshot()
+                }
+            }
+            KeyListener.shared.resetState()
+            showPrerequisiteNotice(readinessMessage)
+            trace.finish(reason: "prerequisite")
+            activeStartLatencyTrace = nil
+            return
+        }
+        trace.mark(.preflightCompleted)
+
+        let isApple = provider == "apple"
+        let geminiModel = config.gemini_model.lowercased()
+        let isGeminiLive = provider == "gemini" &&
+                           (geminiModel.isEmpty || ConfigManager.isGeminiLiveModel(geminiModel)) &&
+                           !config.gemini_api_key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let audioProcessingMode = RecordingAudioProcessingMode.resolve(config: config)
+
+        let outcome = recordingStartCoordinator.start(
+            prepare: { _ in },
+            captureTarget: { [self] in
+                trace.mark(.targetCaptureStarted)
+                if let target = TargetInputManager.shared.captureTargetContext() {
+                    activeTargetContext = target
+                    print("[AppDelegate] 🎯 Hedef yazı alanı kilitlendi: \(target.appName) (\(target.role)) [PID: \(target.pid)]")
+                } else if config.only_in_text_fields {
+                    print("[AppDelegate] ⚠️ Odakta geçerli bir yazı alanı bulunamadı. Kural gereği kayıt başlatılmadı.")
+                    activeTargetContext = nil
+                    return false
+                } else if let frontApp = NSWorkspace.shared.frontmostApplication {
+                    let appRef = AXUIElementCreateApplication(frontApp.processIdentifier)
+                    activeTargetContext = TargetContext(
+                        pid: frontApp.processIdentifier,
+                        bundleIdentifier: frontApp.bundleIdentifier ?? "",
+                        appName: frontApp.localizedName ?? "",
+                        runningApp: frontApp,
+                        element: appRef,
+                        window: nil,
+                        role: "AXFallbackApp"
+                    )
+                } else {
+                    activeTargetContext = nil
+                }
+                trace.mark(.targetCaptured)
+                return true
+            },
+            startRecorder: { [self] in
+                // Her dikte oturumu kapıyı sıfırlar: yeni oturumun ilk anları
+                // ortam gürültüsünü yeniden kalibre eder.
+                AudioRecorder.shared.resetSpeechGate()
+                let firstAudio: () -> Void = { trace.mark(.firstAudioCallback) }
+                let forwardAudio: (Data) -> Void = { [weak self] chunk in
+                    trace.mark(.firstProviderAudio)
+                    self?.currentLiveSession?.sendAudioChunk(Self.livePCMChunkForForwarding(chunk))
+                }
+                let started: Bool
+                if isApple {
+                    print("[AppDelegate] Sağlayıcı: Apple Speech (Yerel Canlı Akış) başlatılıyor...")
+                    let session = Transcriber.shared.startLiveAppleSpeechSession(
+                        config: config,
+                        authorizationAlreadyValidated: true,
+                        onInterim: { interimText in
+                            trace.mark(.firstInterim)
+                            trace.finish(reason: "firstInterim")
+                            RecordingHUD.shared.updateInterimText(interimText)
+                        },
+                        completion: { [weak self] result in
+                            trace.finish(reason: "completion")
+                            self?.handleTranscriptionResult(result: result, config: config)
+                        }
+                    )
+                    currentLiveSession = session
+                    trace.mark(.speechSessionStarted)
+                    trace.mark(.recorderStartEntered)
+                    started = AudioRecorder.shared.start(
+                        onAudioChunk: forwardAudio,
+                        onFirstAudioBuffer: firstAudio,
+                        processingMode: audioProcessingMode
+                    )
+                } else if isGeminiLive {
+                    print("[AppDelegate] Sağlayıcı: Google Gemini Live (\(config.gemini_model)) canlı akış oturumu başlatılıyor...")
+                    let session = Transcriber.shared.startLiveGeminiSession(
+                        config: config,
+                        targetContext: activeTargetContext,
+                        onInterim: { interimText in
+                            trace.mark(.firstInterim)
+                            trace.finish(reason: "firstInterim")
+                            RecordingHUD.shared.updateInterimText(interimText)
+                        },
+                        completion: { [weak self] result in
+                            trace.finish(reason: "completion")
+                            self?.handleTranscriptionResult(result: result, config: config)
+                        }
+                    )
+                    currentLiveSession = session
+                    trace.mark(.speechSessionStarted)
+                    trace.mark(.recorderStartEntered)
+                    started = AudioRecorder.shared.start(
+                        onAudioChunk: forwardAudio,
+                        onFirstAudioBuffer: firstAudio,
+                        processingMode: audioProcessingMode
+                    )
+                } else {
+                    print("[AppDelegate] Sağlayıcı: \(config.provider) (\(effectiveModel)) ses kaydı başlatılıyor...")
+                    currentLiveSession = nil
+                    trace.mark(.recorderStartEntered)
+                    started = AudioRecorder.shared.start(
+                        onFirstAudioBuffer: firstAudio,
+                        processingMode: audioProcessingMode
+                    )
+                }
+                if started {
+                    trace.mark(.recorderStarted)
+                }
+                return started
+            }
+        )
+
+        isPreparingRecord = false
+        switch outcome {
+        case .ignored:
+            KeyListener.shared.resetState()
+            RecordingHUD.shared.showNotice(message: "Kayıt başlatılamadı · Tekrar deneyin")
+            recordingStartCoordinator.finish()
+            trace.finish(reason: "ignored")
+            activeStartLatencyTrace = nil
+            return
+        case .targetRejected:
+            KeyListener.shared.resetState()
             SoundManager.shared.playCancel()
             HapticManager.shared.playCancel()
-            RecordingHUD.shared.showError(message: "Yazı alanı seçili değil")
-            setStatus(title: "⚠️", menuText: "Durum: Yazı Alanı Seçili Değil", revertAfter: 2.0)
+            RecordingHUD.shared.showNotice(message: "Yazı alanı seçili değil")
+            setStatus(title: "ℹ️", menuText: "Yazı alanı seçili değil", revertAfter: 2.0)
+            trace.finish(reason: "targetRejected")
+            activeStartLatencyTrace = nil
             return
-        } else {
-            if let frontApp = NSWorkspace.shared.frontmostApplication {
-                let appRef = AXUIElementCreateApplication(frontApp.processIdentifier)
-                self.activeTargetContext = TargetContext(
-                    pid: frontApp.processIdentifier,
-                    bundleIdentifier: frontApp.bundleIdentifier ?? "",
-                    appName: frontApp.localizedName ?? "",
-                    runningApp: frontApp,
-                    element: appRef,
-                    window: nil,
-                    role: "AXFallbackApp"
-                )
-            } else {
-                self.activeTargetContext = nil
-            }
-        }
-
-        let isApple = (config.provider.lowercased() == "apple")
-        let geminiModel = config.gemini_model.lowercased()
-        let isGeminiLive = (config.provider.lowercased() == "gemini") &&
-                           (geminiModel.isEmpty || geminiModel.contains("gemini-3.5-transcribe-live")) &&
-                           !config.gemini_api_key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-
-        var started = false
-        if isApple {
-            print("[AppDelegate] Sağlayıcı: Apple Speech (Yerel Canlı Akış) başlatılıyor...")
-            let session = Transcriber.shared.startLiveAppleSpeechSession(
-                config: config,
-                onInterim: { interimText in
-                    RecordingHUD.shared.updateInterimText(interimText)
-                },
-                completion: { [weak self] result in
-                    self?.handleTranscriptionResult(result: result, config: config)
-                }
-            )
-            self.currentLiveSession = session
-            started = AudioRecorder.shared.start { [weak self] chunk in
-                self?.currentLiveSession?.sendAudioChunk(chunk)
-            }
-        } else if isGeminiLive {
-            print("[AppDelegate] Sağlayıcı: Google Gemini Live (gemini-3.5-transcribe-live) canlı akış oturumu başlatılıyor...")
-            let session = Transcriber.shared.startLiveGeminiSession(
-                config: config,
-                onInterim: { interimText in
-                    RecordingHUD.shared.updateInterimText(interimText)
-                },
-                completion: { [weak self] result in
-                    self?.handleTranscriptionResult(result: result, config: config)
-                }
-            )
-            self.currentLiveSession = session
-            started = AudioRecorder.shared.start { [weak self] chunk in
-                self?.currentLiveSession?.sendAudioChunk(chunk)
-            }
-        } else {
-            let modelInfo: String = (config.provider.lowercased() == "gemini") ? config.gemini_model : config.groq_model
-            print("[AppDelegate] Sağlayıcı: \(config.provider) (\(modelInfo)) ses kaydı başlatılıyor...")
-            self.currentLiveSession = nil
-            started = AudioRecorder.shared.start()
-        }
-
-        if let target = activeTargetContext {
-            activeAccessibilityLease = ChromiumAccessibilityController.shared.beginObservation(
-                processIdentifier: target.pid,
-                bundleIdentifier: target.bundleIdentifier
-            )
-        }
-
-        if started {
-            SoundManager.shared.playStart()
-            HapticManager.shared.playStart()
-            BackgroundAudioController.shared.handleDictationStarted(config: config)
-            if config.mute_system_audio {
-                SystemAudioManager.shared.muteForDictation(delay: 0.15)
-            }
-            setStatus(title: "🔴 Dinliyor...", menuText: "Durum: Dinleniyor (Konuşun)...")
-            RecordingHUD.shared.showRecording()
-        } else {
+        case .recorderFailed:
+            KeyListener.shared.resetState()
             activeAccessibilityLease?.end()
             activeAccessibilityLease = nil
             currentLiveSession?.cancel()
@@ -499,13 +819,59 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             HapticManager.shared.playCancel()
             setStatus(title: "⚠️ Hata", menuText: "Durum: Mikrofon Başlatılamadı!", revertAfter: 2.0)
             RecordingHUD.shared.showError(message: "Mikrofon Başlatılamadı")
+            trace.finish(reason: "recorderFailed")
+            activeStartLatencyTrace = nil
+            return
+        case .started:
+            break
         }
+
+        // Recorder başarıyla açıldıktan sonra kullanıcıya geri bildirim ver;
+        // aşağıdaki medya/CoreAudio işlemleri ana thread'i bekletmemelidir.
+        setStatus(title: "🔴 Dinliyor...", menuText: "Durum: Dinleniyor (Konuşun)...")
+        RecordingHUD.shared.showRecording()
+
+        SoundManager.shared.playStart()
+        HapticManager.shared.playStart()
+        BackgroundAudioController.shared.handleDictationStarted(config: config)
+        if config.mute_system_audio {
+            SystemAudioManager.shared.muteForDictation(delay: 0.15)
+        }
+
+        if let target = activeTargetContext {
+            activeAccessibilityLease = ChromiumAccessibilityController.shared.beginObservation(
+                processIdentifier: target.pid,
+                bundleIdentifier: target.bundleIdentifier
+            )
+        }
+    }
+
+    private func cancelPendingRecordStart(reason: String) {
+        guard isPreparingRecord else { return }
+        pendingRecordStartGeneration &+= 1
+        isPreparingRecord = false
+        recordingStartCoordinator.finish()
+        activeStartLatencyTrace?.finish(reason: reason)
+        activeStartLatencyTrace = nil
+        activeTargetContext = nil
+        KeyListener.shared.resetState()
+        RecordingHUD.shared.showNotice(message: "Kayıt başlamadan bırakıldı", autoDismissDelay: 1.1)
+        setStatus(title: "ℹ️", menuText: "Kayıt başlamadan bırakıldı", revertAfter: 1.1)
     }
 
     private func handleRecordStop(duration: Double) {
         let config = ConfigManager.shared.config
 
+        if isPreparingRecord {
+            cancelPendingRecordStart(reason: "releasedBeforeStart")
+            return
+        }
+
         guard AudioRecorder.shared.isRecording, !isFinishingRecord, !isTranscribing else { return }
+
+        recordingStartCoordinator.finish()
+        activeStartLatencyTrace?.finish(reason: "stop")
+        activeStartLatencyTrace = nil
 
         // Çok kısa basma - kazara dokunma
         guard duration >= config.min_record_duration else {
@@ -518,8 +884,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             SystemAudioManager.shared.restoreAfterDictation()
             BackgroundAudioController.shared.handleDictationEnded(config: config)
             _ = AudioRecorder.shared.stop()
-            RecordingHUD.shared.dismiss(animated: true)
-            setStatus(title: "🎙️", menuText: readyMenuText)
+            RecordingHUD.shared.showNotice(message: "Kayıt çok kısa")
+            setStatus(title: "ℹ️", menuText: "Kayıt çok kısa — tekrar deneyin", revertAfter: 1.5)
             return
         }
 
@@ -540,21 +906,24 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             SystemAudioManager.shared.restoreAfterDictation()
             SoundManager.shared.playStop()
 
-            guard actualDuration >= config.min_record_duration, let audioData = data, !audioData.isEmpty else {
-                // Sessizlik veya ses alınamadı
+            guard actualDuration >= config.min_record_duration,
+                  let audioData = data,
+                  Self.shouldSubmitRecording(audioData) else {
+                // Tamamlanmış fakat gerçek konuşma içermeyen kayıt sağlayıcıya gönderilmez.
                 self.activeAccessibilityLease?.end()
                 self.activeAccessibilityLease = nil
                 self.currentLiveSession?.cancel()
                 self.currentLiveSession = nil
+                self.activeTargetContext = nil
                 self.lastRecordedAudioData = nil
                 BackgroundAudioController.shared.handleDictationEnded(config: config)
-                RecordingHUD.shared.dismiss(animated: true)
-                self.setStatus(title: "🎙️", menuText: self.readyMenuText)
+                RecordingHUD.shared.showNotice(message: "Ses algılanmadı · Tekrar deneyin")
+                self.setStatus(title: "🔇", menuText: "Ses algılanmadı — tekrar deneyin", revertAfter: 1.8)
                 return
             }
 
             self.lastRecordedAudioData = audioData
-            DictationRecoveryAudioStore.shared.saveLastRecording(wavData: audioData)
+            _ = DictationRecoveryAudioStore.shared.saveLastRecording(wavData: audioData)
 
             if let liveSession = self.currentLiveSession {
                 self.isTranscribing = true
@@ -563,7 +932,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             self.isTranscribing = true
-            Transcriber.shared.transcribe(audioData: audioData, config: config) { [weak self] result in
+            Transcriber.shared.transcribe(
+                audioData: audioData,
+                config: config,
+                targetContext: self.activeTargetContext
+            ) { [weak self] result in
                 self?.handleTranscriptionResult(result: result, config: config)
             }
         }
@@ -571,9 +944,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         // Akustik ve Nöromüsküler Uzatma Penceresi (Post-Roll Grace Period):
         // Kullanıcı konuşmayı bitirdiği anda tuşu bıraksa dahi, son hecelerin / son kelimelerin
         // ve CoreAudio donanım tamponundaki seslerin eksiksiz alınması için mikrofon kısa bir süre daha dinler.
-        // Canlı akışta (Gemini Live) ses anlık aktarıldığı için 100ms fazlasıyla yeterlidir.
-        // Groq Whisper ve REST modellerinde ise son hecelerin tamponda kalmaması için 180ms uygulanır.
-        let postRollDelay: Double = (self.currentLiveSession != nil) ? 0.10 : 0.18
+        // Streaming transport does not eliminate the acoustic tail at key release.
+        let postRollDelay: Double = 0.18
         self.postRollWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + postRollDelay, execute: workItem)
     }
@@ -582,6 +954,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
+            // Canlı sağlayıcı, post-roll penceresinde bile sonucu mikrofon
+            // kapanmadan bildirebilir. Hedefe erken metin yapıştırmamak için
+            // mikrofon tamamen durana kadar her canlı sonucu fallback'e bırak.
+            if AudioRecorder.shared.isRecording {
+                print("[AppDelegate] ⚠️ Canlı deşifre mikrofon kapanmadan sonlandı; kayıt bitince WAV fallback kullanılacak.")
+                self.currentLiveSession = nil
+                return
+            }
+
             self.activeAccessibilityLease?.end()
             self.activeAccessibilityLease = nil
 
@@ -589,67 +970,106 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self.isTranscribing = false
                 self.currentLiveSession = nil
                 self.lastRecordedAudioData = nil
-                DictationRecoveryAudioStore.shared.clear()
-                self.recoverAudioMenuItem?.isHidden = true
 
                 print("[Deşifre Başarılı] [\(result.provider.uppercased()) - \(result.model)] (\(String(format: "%.2f", result.latency))s): \"\(result.text)\"")
 
-                if !result.text.isEmpty {
+                let recognizedText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !recognizedText.isEmpty {
                     let target = self.activeTargetContext
                     self.activeTargetContext = nil
 
-                    let polishedText = TextPolisher.shared.polish(text: result.text, config: config, targetContext: target)
+                    let polishedText = TextPolisher.shared.polish(text: recognizedText, config: config, targetContext: target)
                     guard !polishedText.isEmpty else {
+                        let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: "Metin oluşturulamadı")
+                        self.recoverAudioMenuItem?.isHidden = !recoveryAvailable
                         BackgroundAudioController.shared.handleDictationEnded(config: config)
-                        RecordingHUD.shared.dismiss(animated: true)
-                        self.setStatus(title: "🎙️", menuText: self.readyMenuText)
+                        let message = recoveryAvailable ? "Metin oluşturulamadı · Ses korundu" : "Metin oluşturulamadı · Ses kurtarılamadı"
+                        RecordingHUD.shared.showNotice(message: message)
+                        self.setStatus(title: "ℹ️", menuText: message, revertAfter: 2.2)
                         return
                     }
 
                     DictationHistoryManager.shared.addEntry(
                         text: polishedText,
                         provider: result.provider,
-                        model: result.model
+                        model: result.model,
+                        appName: target?.appName
                     )
 
                     // Akıllı Boşluk (Smart Spacing): Ardışık diktelerde kelimelerin birbirine yapışmasını önler
                     let textToInject = TextPolisher.applySmartSpacing(polishedText)
 
-                    TextInjector.shared.inject(
+                    let injectionSucceeded = TextInjector.shared.inject(
                         text: textToInject,
                         targetContext: target,
                         pasteDelayMs: config.paste_delay_ms
                     )
-                    SoundManager.shared.playSuccess()
-                    HapticManager.shared.playSuccess()
                     BackgroundAudioController.shared.handleDictationEnded(config: config)
-                    RecordingHUD.shared.showSuccess(text: "Yapıştırıldı")
-                    self.setStatus(
-                        title: "✅",
-                        menuText: "Durum: Yapıştırıldı (\(String(format: "%.2f", result.latency))s)",
-                        revertAfter: 1.5
-                    )
+
+                    if injectionSucceeded {
+                        DictationRecoveryAudioStore.shared.clear()
+                        self.recoverAudioMenuItem?.isHidden = true
+                        SoundManager.shared.playSuccess()
+                        HapticManager.shared.playSuccess()
+                        RecordingHUD.shared.showSuccess(text: "Yapıştırma gönderildi")
+                        self.setStatus(
+                            title: "✅",
+                            menuText: "Durum: Yapıştırma gönderildi (\(String(format: "%.2f", result.latency))s)",
+                            revertAfter: 1.5
+                        )
+                    } else {
+                        let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: "Metin hedef alana yapıştırılamadı")
+                        self.recoverAudioMenuItem?.isHidden = !recoveryAvailable
+                        SoundManager.shared.playCancel()
+                        HapticManager.shared.playCancel()
+                        let message = recoveryAvailable ? "Yapıştırılamadı · Ses korundu" : "Yapıştırılamadı · Ses kurtarılamadı"
+                        RecordingHUD.shared.showError(message: message, autoDismissDelay: 2.4)
+                        self.setStatus(title: "⚠️", menuText: message, revertAfter: 2.4)
+                    }
                 } else {
+                    self.activeTargetContext = nil
+                    DictationRecoveryAudioStore.shared.clear()
+                    self.recoverAudioMenuItem?.isHidden = true
                     BackgroundAudioController.shared.handleDictationEnded(config: config)
-                    RecordingHUD.shared.dismiss(animated: true)
-                    self.setStatus(title: "🎙️", menuText: self.readyMenuText)
+                    RecordingHUD.shared.showNotice(message: "Ses algılanmadı · Tekrar deneyin")
+                    self.setStatus(title: "🔇", menuText: "Ses algılanmadı — tekrar deneyin", revertAfter: 1.8)
                 }
             } else {
                 let err = result.error ?? ""
-                let isQuota = err.contains("quota") || err.contains("exceeded") || err.contains("429")
+                if Transcriber.isNoSpeechMessage(err) {
+                    self.isTranscribing = false
+                    self.currentLiveSession = nil
+                    self.activeTargetContext = nil
+                    self.lastRecordedAudioData = nil
+                    DictationRecoveryAudioStore.shared.clear()
+                    self.recoverAudioMenuItem?.isHidden = true
+                    BackgroundAudioController.shared.handleDictationEnded(config: config)
+                    RecordingHUD.shared.showNotice(message: "Ses algılanmadı · Tekrar deneyin")
+                    self.setStatus(title: "🔇", menuText: "Ses algılanmadı — tekrar deneyin", revertAfter: 1.8)
+                    return
+                }
+
+                let normalizedError = err.lowercased()
+                let isQuota = normalizedError.contains("quota") || normalizedError.contains("exceeded") || normalizedError.contains("429")
                 if !isQuota, let fallbackAudio = self.lastRecordedAudioData {
                     self.lastRecordedAudioData = nil
                     self.currentLiveSession = nil
-                    if config.provider.lowercased() == "apple" {
+                    let fallbackProvider = TranscriptionProviderRegistry.normalize(config.provider)
+                    if fallbackProvider == "apple" {
                         print("[AppleSpeech] Canlı akış tamamlanamadı, yerel dosya motoru ile kurtarılıyor...")
+                        self.setStatus(title: "⏳ Tamamlanıyor...", menuText: "Durum: Kaydedilen ses yeniden çözümleniyor...")
                         Transcriber.shared.transcribeAppleSpeech(audioData: fallbackAudio, config: config) { [weak self] appleResult in
                             self?.handleTranscriptionResult(result: appleResult, config: config)
                         }
                         return
-                    } else if config.provider.lowercased() == "gemini" {
+                    } else if fallbackProvider == "gemini" {
                         print("[GeminiLive] WebSocket bağlantısı kesildi, REST API ile kurtarılıyor...")
                         self.setStatus(title: "⏳ Yeniden deneniyor...", menuText: "Durum: REST ile deneniyor...")
-                        Transcriber.shared.transcribeGemini(audioData: fallbackAudio, config: config) { [weak self] restResult in
+                        Transcriber.shared.transcribeGemini(
+                            audioData: fallbackAudio,
+                            config: config,
+                            targetContext: self.activeTargetContext
+                        ) { [weak self] restResult in
                             self?.handleTranscriptionResult(result: restResult, config: config)
                         }
                         return
@@ -658,32 +1078,50 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
                 self.isTranscribing = false
                 self.currentLiveSession = nil
+                self.activeTargetContext = nil
                 self.lastRecordedAudioData = nil
-                DictationRecoveryAudioStore.shared.markFailed(error: result.error ?? "Deşifre Hatası")
-                self.recoverAudioMenuItem?.isHidden = false
+                let rawError = result.error?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let errMsg = rawError.isEmpty ? "Bilinmeyen hata" : rawError
+                let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: errMsg)
+                self.recoverAudioMenuItem?.isHidden = !recoveryAvailable
                 BackgroundAudioController.shared.handleDictationEnded(config: config)
                 SoundManager.shared.playCancel()
                 HapticManager.shared.playCancel()
-                RecordingHUD.shared.showError(message: "Deşifre Hatası (Ses Korundu)")
-                let errMsg = result.error ?? "Bilinmeyen hata"
-                self.setStatus(title: "⚠️ Hata", menuText: "Hata: \(errMsg)", revertAfter: 3.0)
+                let compactError = errMsg.replacingOccurrences(of: "\n", with: " ")
+                let visibleError = compactError.count > 96
+                    ? String(compactError.prefix(93)) + "..."
+                    : compactError
+                let failureMessage = recoveryAvailable ? "Deşifre başarısız · Ses korundu" : "Deşifre başarısız · Ses kurtarılamadı"
+                RecordingHUD.shared.showError(message: failureMessage, autoDismissDelay: 3.0)
+                self.setStatus(title: "⚠️ Hata", menuText: "Hata: \(visibleError)", revertAfter: 3.0)
             }
         }
     }
 
     private func handleCancel() {
+        recordingStartCoordinator.finish()
+        activeStartLatencyTrace?.finish(reason: "cancelled")
+        activeStartLatencyTrace = nil
+        if isPreparingRecord {
+            cancelPendingRecordStart(reason: "cancelledPreparing")
+            return
+        }
+
         activeAccessibilityLease?.end()
         activeAccessibilityLease = nil
         activeTargetContext = nil
         postRollWorkItem?.cancel()
         postRollWorkItem = nil
         isFinishingRecord = false
+        // Recorder cancel önce tamamlanır; böylece tap'ten üretilmiş ve sıraya
+        // alınmış son PCM blokları, canlı oturum kapatılmadan önce güvenle
+        // tüketilir (cancel akışında teslim edilmez ama yarışamaz).
+        AudioRecorder.shared.cancel()
         currentLiveSession?.cancel()
         currentLiveSession = nil
         lastRecordedAudioData = nil
         SystemAudioManager.shared.restoreAfterDictation()
         BackgroundAudioController.shared.handleDictationEnded(config: ConfigManager.shared.config)
-        AudioRecorder.shared.cancel()
         Transcriber.shared.cancel()
         isTranscribing = false
         SoundManager.shared.playCancel()
@@ -700,18 +1138,31 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func selectAppleProvider() {
         ConfigManager.shared.update { $0.provider = "apple" }
+        refreshPermissionSnapshot()
+        if permissionSnapshot?.speechStatus == .authorized {
+            Transcriber.shared.warmAppleSpeech(language: ConfigManager.shared.config.language)
+        }
         refreshMenuStates()
         SettingsWindowController.shared.loadValues()
     }
 
     @objc private func selectGroqProvider() {
         ConfigManager.shared.update { $0.provider = "groq" }
+        refreshPermissionSnapshot()
         refreshMenuStates()
         SettingsWindowController.shared.loadValues()
     }
 
     @objc private func selectGeminiProvider() {
         ConfigManager.shared.update { $0.provider = "gemini" }
+        refreshPermissionSnapshot()
+        refreshMenuStates()
+        SettingsWindowController.shared.loadValues()
+    }
+
+    @objc private func selectAssemblyAIProvider() {
+        ConfigManager.shared.update { $0.provider = "assemblyai" }
+        refreshPermissionSnapshot()
         refreshMenuStates()
         SettingsWindowController.shared.loadValues()
     }
@@ -781,6 +1232,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleSaveHistory() {
         let current = ConfigManager.shared.config.save_history
         ConfigManager.shared.update { $0.save_history = !current }
+        refreshHistoryMenu()
         refreshMenuStates()
         SettingsWindowController.shared.loadValues()
     }
@@ -796,6 +1248,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         guard let menu = historyMenu else { return }
         menu.removeAllItems()
 
+        guard ConfigManager.shared.config.save_history else {
+            historyParentMenuItem?.title = "Son Dikteler (Kapalı)"
+            let disabledItem = NSMenuItem(title: "(Geçmiş kaydı kapalı)", action: nil, keyEquivalent: "")
+            disabledItem.isEnabled = false
+            menu.addItem(disabledItem)
+            return
+        }
+
+        historyParentMenuItem?.title = "Son Dikteler"
         let entries = DictationHistoryManager.shared.getEntries()
         if entries.isEmpty {
             let emptyItem = NSMenuItem(title: "(Henüz dikte geçmişi yok)", action: nil, keyEquivalent: "")
@@ -810,6 +1271,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 menu.addItem(item)
             }
             menu.addItem(NSMenuItem.separator())
+            let exportItem = NSMenuItem(title: "Markdown Olarak Dışa Aktar", action: #selector(exportHistoryAction), keyEquivalent: "")
+            exportItem.target = self
+            menu.addItem(exportItem)
             let clearItem = NSMenuItem(title: "Geçmişi Temizle", action: #selector(clearHistoryAction), keyEquivalent: "")
             clearItem.target = self
             menu.addItem(clearItem)
@@ -822,6 +1286,16 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let entry = entries[sender.tag]
         DictationHistoryManager.shared.copyToClipboard(entry: entry)
         setStatus(title: "📋", menuText: "Panoya kopyalandı", revertAfter: 1.5)
+    }
+
+    @objc private func exportHistoryAction() {
+        do {
+            let url = try DictationHistoryManager.shared.exportToFile()
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            setStatus(title: "📝", menuText: "Geçmiş Markdown olarak aktarıldı", revertAfter: 2.0)
+        } catch {
+            setStatus(title: "⚠️", menuText: "Dışa aktarma hatası: \(error.localizedDescription)", revertAfter: 2.0)
+        }
     }
 
     @objc private func clearHistoryAction() {
@@ -847,22 +1321,34 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsWindowController.shared.showWindow(nil)
     }
 
+    private func cleanupActiveDictationForTermination() {
+        postRollWorkItem?.cancel()
+        postRollWorkItem = nil
+        activeAccessibilityLease?.end()
+        activeAccessibilityLease = nil
+        currentLiveSession?.cancel()
+        currentLiveSession = nil
+        Transcriber.shared.cancel()
+        AudioRecorder.shared.cleanTeardown()
+        SystemAudioManager.shared.restoreAfterDictation()
+        BackgroundAudioController.shared.handleDictationEnded(config: ConfigManager.shared.config)
+        BackgroundAudioController.shared.waitForPendingWork()
+        RecordingHUD.shared.dismiss(animated: false)
+        isFinishingRecord = false
+        isTranscribing = false
+    }
+
     @objc private func quitApp() {
         isExplicitQuit = true
         KeyListener.shared.stop()
         GlobeKeySuppressor.shared.restoreOriginal()
-        AudioRecorder.shared.cleanTeardown()
-        SystemAudioManager.shared.restoreAfterDictation()
-        BackgroundAudioController.shared.handleDictationEnded(config: ConfigManager.shared.config)
-        RecordingHUD.shared.dismiss(animated: false)
+        cleanupActiveDictationForTermination()
         NSApplication.shared.terminate(nil)
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
         GlobeKeySuppressor.shared.restoreOriginal()
-        AudioRecorder.shared.cleanTeardown()
-        SystemAudioManager.shared.restoreAfterDictation()
-        BackgroundAudioController.shared.handleDictationEnded(config: ConfigManager.shared.config)
+        cleanupActiveDictationForTermination()
     }
 
     // MARK: - Dock & Görev Çubuğu Yönetimi
@@ -875,16 +1361,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if isExplicitQuit {
-            return .terminateNow
-        }
-
-        // Kullanıcı Dock ikonuna sağ tıklayıp "Çıkış" dediğinde veya Cmd+Q yaptığında:
-        // Menü çubuğundaki (taskbar) arka plan servisinin kesilmemesi için
-        // yalnızca açık pencereleri kapat, uygulamayı sonlandırma.
+        // Cmd+Q ve Dock > Çıkış, macOS kullanıcı beklentisine uygun olarak
+        // uygulamayı gerçekten kapatır. Menü çubuğu uygulaması olduğu için
+        // ayar penceresini kapatmak uygulamayı sonlandırmaz; bu callback yalnızca
+        // gerçek terminate isteği geldiğinde çalışır.
+        isExplicitQuit = true
         SettingsWindowController.shared.window?.close()
         AccessibilityPromptController.shared.window?.close()
-        return .terminateCancel
+        return .terminateNow
     }
 
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
