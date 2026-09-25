@@ -261,7 +261,7 @@ public class RecordingHUD: NSObject {
     private var waveformBars: [NSView] = []
     /// Çentik moduna özel ekolayzır (alt kapsülünkinden bağımsız).
     private var notchMeterContainer: NSView!
-    private var notchWaveformBars: [NSView] = []
+    private var notchWave: NotchWaveView!
     /// Çentik moduna özel arka plan (gerçek çentik formu: konkav üst + konveks alt).
     private var notchShapeView: NotchShapeView!
     private var spinner: NSProgressIndicator!
@@ -441,23 +441,10 @@ public class RecordingHUD: NSObject {
         notchShapeView.isHidden = true
         contentView.addSubview(notchShapeView, positioned: .below, relativeTo: notchMeterContainer)
 
-        let notchBarWidth = NotchAudioMeter.barWidth
-        let origins = NotchAudioMeter.barOriginsX()
-        for (i, weight) in NotchAudioMeter.barWeights.enumerated() {
-            let bar = NSView()
-            bar.wantsLayer = true
-            bar.layer?.cornerRadius = notchBarWidth / 2.0
-            bar.layer?.backgroundColor = NSColor.systemGray.cgColor
-            let h = NotchAudioMeter.barHeight(level: 0, weight: weight)
-            bar.frame = NSRect(
-                x: origins[i],
-                y: NotchAudioMeter.barOriginY(height: h),
-                width: notchBarWidth,
-                height: h
-            )
-            notchMeterContainer.addSubview(bar)
-            notchWaveformBars.append(bar)
-        }
+        // Çentik ses göstergesi: çubuklar yerine akışkan dalga çizgisi.
+        notchMeterContainer.setFrameSize(NotchWaveView.size)
+        notchWave = NotchWaveView(frame: NSRect(origin: .zero, size: NotchWaveView.size))
+        notchMeterContainer.addSubview(notchWave)
 
         // 4. Spinner (Deşifre Ediliyor Durumu - 14x14)
         spinner = NSProgressIndicator(frame: NSRect(x: 14, y: (hudHeight - 14) / 2.0, width: 14, height: 14))
@@ -694,6 +681,7 @@ public class RecordingHUD: NSObject {
         static let rowHeight: CGFloat = 24
         static let bottomInset: CGFloat = 10
         static let iconSlot: CGFloat = 20
+        static let meterSlot: CGFloat = 36
         static let iconTextGap: CGFloat = 8
         static let fontSize: CGFloat = 14
         static let minimumWidth: CGFloat = 300
@@ -766,8 +754,10 @@ public class RecordingHUD: NSObject {
     }
 
     private func layoutNotchContent(island: CGSize) {
+        // Simge yuvası dalga genişliğindedir; ✓ / ! simgeleri içinde ortalanır,
+        // böylece metin hangi durumda olursa olsun aynı hizada kalır.
         let slotY = NotchMetrics.bottomInset + (NotchMetrics.rowHeight - NotchMetrics.iconSlot) / 2
-        let slot = NSRect(x: NotchMetrics.sideInset, y: slotY, width: NotchMetrics.iconSlot, height: NotchMetrics.iconSlot)
+        let slot = NSRect(x: NotchMetrics.sideInset, y: slotY, width: NotchMetrics.meterSlot, height: NotchMetrics.iconSlot)
 
         // Pill moduna ait öğeler çentikte hiç görünmez.
         pulsingDot.isHidden = true
@@ -775,7 +765,7 @@ public class RecordingHUD: NSObject {
         waveformContainer.isHidden = true
 
         notchMeterContainer.setFrameOrigin(slot.origin)
-        spinner.frame = slot.insetBy(dx: 2, dy: 2)
+        spinner.frame = NSRect(x: slot.midX - 8, y: slot.midY - 8, width: 16, height: 16)
         for icon in [checkmarkLabel, errorIconLabel, noticeIconLabel] {
             icon?.frame = NSRect(x: slot.minX, y: slot.minY + 1, width: slot.width, height: 18)
         }
@@ -836,25 +826,7 @@ public class RecordingHUD: NSObject {
     }
 
     private func animateProcessingBars() {
-        let t = ProcessInfo.processInfo.systemUptime - processingStartedAt
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        for (i, bar) in notchWaveformBars.enumerated() {
-            let level: CGFloat
-            if reduceMotion {
-                level = 0.45
-            } else {
-                // 1.3 Hz, çubuklar arası faz kayması: dalga soldan sağa akar.
-                let phase = t * 2 * .pi * 1.3 - Double(i) * 0.7
-                level = CGFloat(0.28 + 0.52 * (0.5 + 0.5 * sin(phase)))
-            }
-            let h = NotchAudioMeter.barHeight(level: level, weight: 1.0)
-            bar.layer?.backgroundColor = NSColor(calibratedWhite: 1.0, alpha: 0.9).cgColor
-            bar.layer?.setAffineTransform(.identity)
-            bar.frame = NSRect(x: bar.frame.origin.x, y: NotchAudioMeter.barOriginY(height: h),
-                               width: bar.frame.width, height: h)
-        }
-        CATransaction.commit()
+        notchWave.render(level: 0, mode: .processing, animated: !reduceMotion)
     }
 
     private func setNotchContentAlpha(_ alpha: CGFloat) {
@@ -1047,6 +1019,7 @@ public class RecordingHUD: NSObject {
             // önceki dikteden kalan seviyeyle açılırdı.
             self.notchSmoothedLevel = 0.0
             self.notchLastTick = nil
+            self.notchWave.reset()
             self.resetSpeakingIndicatorLayer()
             self.spinner.stopAnimation(nil)
             self.spinner.isHidden = true
@@ -1375,7 +1348,8 @@ public class RecordingHUD: NSObject {
 
     private func startMeterTimer() {
         meterTimer?.invalidate()
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        // 60 FPS: dalga sese gecikmesiz tepki versin (yumuşatma zamana bağlı).
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             self?.updateWaveform()
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -1571,20 +1545,7 @@ public class RecordingHUD: NSObject {
         )
         let notchLevel = notchSmoothedLevel
 
-        let barColor = (NotchAudioMeter.isActive(level: notchLevel)
-                        ? NSColor.white : NSColor(calibratedWhite: 0.45, alpha: 1)).cgColor
-        for (i, bar) in notchWaveformBars.enumerated() {
-            let weight = NotchAudioMeter.barWeights[i % NotchAudioMeter.barWeights.count]
-            let h = NotchAudioMeter.barHeight(level: notchLevel, weight: weight)
-            bar.layer?.backgroundColor = barColor
-            bar.layer?.setAffineTransform(.identity)
-            bar.frame = NSRect(
-                x: bar.frame.origin.x,
-                y: NotchAudioMeter.barOriginY(height: h),
-                width: bar.frame.width,
-                height: h
-            )
-        }
+        notchWave.render(level: notchLevel, mode: .listening, animated: !reduceMotion)
         CATransaction.commit()
     }
 }

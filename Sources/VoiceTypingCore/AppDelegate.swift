@@ -1094,7 +1094,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         recoverAudioMenuItem?.isHidden = true
         switch outcome {
         case .verified, .unverifiable:
-            SoundManager.shared.playSuccess()
+            // Başarı sesi çalınmaz: tuş bırakılınca "mikrofon kapandı" sesi zaten
+            // çalıyor; hızlanan akışta ikisi art arda "çift ses" gibi duyuluyordu.
             HapticManager.shared.playSuccess()
             RecordingHUD.shared.showSuccess(text: "Yapıştırıldı")
             setStatus(title: "✅", menuText: "Durum: Yapıştırıldı (\(String(format: "%.2f", latency))s)", revertAfter: 1.5)
