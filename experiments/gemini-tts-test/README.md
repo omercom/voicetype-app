@@ -25,8 +25,15 @@ gemini-2.5-pro-preview-tts      <- 429 (kota)
 
 ### Ses klonlama var mı?
 
-**Kısa cevap:** API'de `replicatedVoiceConfig` alanı **var ve çağrıyı kabul ediyor**,
-ancak kontrollü testte **ses gerçekten taklit edilmiyor** (iki farklı girdi benzer çıktı üretti).
+**Evet, çalışıyor** — resmi Voices API ile (referans kaydı + Türkçe onay kaydı).
+Adım adım yöntem, ölçümler ve hatalar: **[SES_KLONLAMA_REHBERI.md](SES_KLONLAMA_REHBERI.md)**
+
+```bash
+node src/speak.ts --text "Merhaba, bu benim sesim." --play   # kendi sesinle okut
+node src/list-voices.ts                                      # kayıtlı seslerin
+```
+
+> Aşağıdaki eski `replicatedVoiceConfig` notları tarihçedir; o yöntem güvenilir değil.
 
 Detaylı kanıt ve ölçümler: [VOICE_CLONING.md](VOICE_CLONING.md)
 

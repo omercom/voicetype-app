@@ -1,5 +1,11 @@
 # Ses Klonlama (Voice Cloning) — Deney Raporu
 
+> [!IMPORTANT]
+> **2026-09-25 güncellemesi:** Klonlama resmi Voices API ile **çalışıyor**.
+> Bu dosyadaki "çalışmıyor" sonucu eski `replicatedVoiceConfig` yöntemine aittir.
+> Çalışan yöntem: [SES_KLONLAMA_REHBERI.md](SES_KLONLAMA_REHBERI.md)
+
+
 **Tarih:** 2026-09-23
 **Model:** `gemini-3.8-flash-lite-tts` (klonlama için), `gemini-3.8-flash-tts`
 **Sonuç:** API çağrısı **kabul ediliyor** ama ses **gerçekten taklit edilmiyor** (aşağıda kanıtlı)

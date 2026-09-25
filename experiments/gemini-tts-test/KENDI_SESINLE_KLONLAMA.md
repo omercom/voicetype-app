@@ -1,5 +1,11 @@
 # Kendi Sesinle Klonlama — Deney Sonuçları
 
+> [!IMPORTANT]
+> **2026-09-25 güncellemesi:** Klonlama resmi Voices API ile **çalışıyor**.
+> Bu dosyadaki "çalışmıyor" sonucu eski `replicatedVoiceConfig` yöntemine aittir.
+> Çalışan yöntem: [SES_KLONLAMA_REHBERI.md](SES_KLONLAMA_REHBERI.md)
+
+
 **Tarih:** 2026-09-23
 **Denek:** Omer'in kendi sesi (24.6 sn kayıt)
 **Modeller:** `gemini-3.8-flash-tts` (asıl hedef), `gemini-2.5-flash-preview-tts` (yedek)
