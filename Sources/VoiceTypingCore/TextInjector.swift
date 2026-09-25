@@ -404,9 +404,10 @@ public class TextInjector {
     /// Alan içeriği değişene kadar en fazla ~450 ms izler.
     static func waitForChange(field: AXUIElement?, before: FieldSnapshot) -> InjectionOutcome {
         guard before.isReadable else { return .unverifiable }
+        // Sık ama kısa aralıklarla bak: başarı ~25 ms'de fark edilir, üst sınır ~450 ms.
         var result = InjectionOutcome.notInserted
-        for _ in 0..<9 {
-            Thread.sleep(forTimeInterval: 0.05)
+        for _ in 0..<18 {
+            Thread.sleep(forTimeInterval: 0.025)
             result = outcome(before: before, after: snapshot(of: field))
             if result != .notInserted { break }
         }
