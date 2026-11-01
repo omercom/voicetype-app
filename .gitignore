@@ -15,9 +15,11 @@ venv/
 # Private release measurements (may contain user transcripts)
 release_measurements/
 
-# Benchmark artifacts / temp audio
-experiments/benchmark/samples/custom/
-!experiments/benchmark/samples/custom/.gitkeep
+# Local experiments and third-party reference source
+/experiments/
+/reference/
+
+# Temp audio
 test_*.mp3
 test_*.wav
 *.wav
@@ -28,9 +30,6 @@ test_*.wav
 .app.pid
 app.log
 config.json
-
-# Third-party reference source (cloned for design consultation only)
-reference/
 
 # Local agent work and planning notes
 .agents/teamwork/

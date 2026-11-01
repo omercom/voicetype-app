@@ -8,7 +8,7 @@ macOS wheel'i `sherpa-onnx-core` paketini de gerektirir; ONNX Runtime kütüphan
 
 - Cihaz: Apple M5, 10 CPU çekirdeği.
 - Tarih: 2026-10-10.
-- Örnek: `experiments/benchmark/samples/01_gunluk_konusma.mp3`, 16 kHz mono PCM16 WAV'a dönüştürüldü.
+- Örnek: Günlük konuşma içeren bir ses kaydı, 16 kHz mono PCM16 WAV'a dönüştürüldü.
 - Yöntem: Her motor için bir model yükleme ve beş deşifre; tabloda deşifre medyanı gösterilir.
 - Aynı int8 akustik model, beam 4, RNNLM ve LODR ayarları kullanıldı. Tüm motorlar aynı metni üretti.
 

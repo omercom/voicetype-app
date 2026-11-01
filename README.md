@@ -1,16 +1,15 @@
 # VoiceType 🎙️
 
-**Mac'inizde konuşarak yazın. İsterseniz konuşmanızı çevirin veya seçtiğiniz metni dinleyin.**
+**Mac'inizde konuşarak yazın. İsterseniz konuşmanızı başka bir dile çevirin.**
 
 VoiceType, macOS menü çubuğunda çalışan açık kaynaklı bir uygulamadır. Mesaj, e-posta veya belge yazarken konuşmanızı metne dönüştürür.
 
-![VoiceType ayarlar penceresi](docs/images/ayarlar.png)
+<img src="docs/images/ayarlar.png" alt="VoiceType ayarlar penceresi" width="520">
 
 ## Neler yapabilir?
 
 - **Konuşarak yazın:** Bir metin alanı seçin, Sağ Command tuşuna basılı tutun ve konuşun.
-- **Çevirerek yazın:** Sağ Option ile konuşun; metin seçtiğiniz dile çevrilsin.
-- **Metni dinleyin:** Seçili Türkçe metni Mac'inizde seslendirin.
+- **Çevirerek yazın:** Çeviriyi açın ve Sağ Option ile konuşun. Metin seçtiğiniz dile çevrilir.
 - **Motoru seçin:** Apple Speech, yerel Seda veya desteklenen bulut servislerini kullanın.
 - **Çalışmanıza devam edin:** VoiceType arka planda çalışır. Ayarları menü çubuğundan değiştirirsiniz.
 
@@ -42,7 +41,7 @@ Kurulum uygulamayı Uygulamalar klasörüne yerleştirir ve başlatır. Mac aç�
 
 VoiceType'ın simgesi ekranın **sağ üstündeki menü çubuğunda**, saat ve Wi-Fi simgelerinin bulunduğu alanda görünür.
 
-Simgeye tıklayarak **Ayarlar**, ses tanıma motoru, seslendirme ve diğer seçeneklere ulaşabilirsiniz. Ayarlarınızı değiştirdiğinizde ayrıca kaydetmeniz gerekmez.
+Simgeye tıklayarak **Ayarlar**, ses tanıma motoru ve diğer seçeneklere ulaşabilirsiniz. Ayarlarınızı değiştirdiğinizde ayrıca kaydetmeniz gerekmez.
 
 ### İzinleri açın
 
@@ -75,18 +74,6 @@ Kayıt sırasında vazgeçmek için **Esc** tuşuna basın. Kısayolu ve diğer 
 
 VoiceType, uygun canlı tanıma sonuçlarında cümleleri konuşma sırasında arka planda çevirmeye başlayabilir. Sonucu tek seferde yapıştırır. Çeviri başarısız olursa özgün metni korur ve sizi uyarır.
 
-### Seçili metni dinleyin
-
-Önce yerel Türkçe ses motorunu kurun. Bunun için [uv](https://docs.astral.sh/uv/getting-started/installation/) ve ilk kurulumda internet gerekir:
-
-```bash
-./setup-tts.sh
-```
-
-Ardından bir metin seçin ve **Option + Command + S** tuşlarına basın. Aynı kısayol veya **Esc** okumayı durdurur. Menü çubuğundaki **Metni Seslendir** menüsünden panodaki metni de seslendirebilirsiniz.
-
-Ses üretimi Mac'inizde yapılır. İlk kurulumdan sonra seslendirme için bulut API'si gerekmez. Ayrıntılar: [Antalia Mini](experiments/antalia-mini-demo/README.md).
-
 ### Türkçe dikteyi tamamen yerel çalıştırın
 
 Seda-v0.1 seçeneğini kullanmak için [uv](https://docs.astral.sh/uv/getting-started/installation/) kurun ve Terminal'de şu komutu çalıştırın:
@@ -97,16 +84,12 @@ Seda-v0.1 seçeneğini kullanmak için [uv](https://docs.astral.sh/uv/getting-st
 
 Ardından menü çubuğundan **Ses Tanıma → Harfiyen · Seda-v0.1** seçeneğini seçin. Dili **Türkçe (`tr`)** olarak ayarlayın. İlk kurulum model dosyalarını indirir; sonraki dikte işlemleri Mac'inizde çalışır. Tek kayıt en fazla 10 dakika sürer.
 
-Seda bir konuşma tanıma motorudur; metin seslendirme özelliği değildir. Model lisansları ve ayrıntılar için [Seda kurulumuna](runtime/seda/README.md) bakın.
-
-### Chrome'da metin dinleyin
-
-İsteğe bağlı Chrome eklentisi, seçtiğiniz metnin yanında **Oku** düğmesi gösterir. Aynı yerel ses motorunu kullanır. Kurulum ve kullanım adımları: [Chrome eklentisi](browser-extension/README.md).
+Model lisansları ve ayrıntılar için [Seda kurulumuna](runtime/seda/README.md) bakın.
 
 ## Gizlilik
 
 - **Apple Speech:** Desteklenen durumlarda konuşma cihazda işlenir. Diğer durumlarda Apple'ın konuşma tanıma koşulları geçerlidir.
-- **Seda ve Antalia Mini:** Kurulum tamamlandıktan sonra ilgili ses tanıma veya seslendirme işlemi Mac'inizde yapılır.
+- **Seda:** Kurulum tamamlandıktan sonra konuşma tanıma Mac'inizde yapılır.
 - **Groq, Gemini ve AssemblyAI:** Bu servislerden biri ses tanıma için seçilirse kayıt o servise gönderilir.
 - **Çeviri:** Metin Groq veya Gemini'ye gönderilir. Otomatik seçimde Groq başarısız olursa metin yapılandırılmış Gemini'ye de gönderilebilir. Ara cümleler konuşma sürerken gönderilebilir.
 - **İzinler:** Erişilebilirlik izni, kısayollar ve metni hedef alana yazmak için kullanılır. API anahtarları kullanıcı hesabındaki yerel ayarlarda saklanır.
@@ -128,8 +111,8 @@ Daha fazla kurulum, gizlilik ve sorun giderme bilgisi için [VoiceType kılavuzu
 swift test
 ```
 
-Canlı API ve mikrofon testleri varsayılan olarak kapalıdır. Bunları etkinleştirme koşulları [test kılavuzunda](VOICE_TYPING.md) açıklanır. Deneyler için [experiments](experiments/README.md) klasörüne bakın.
+Canlı API ve mikrofon testleri varsayılan olarak kapalıdır. Bunları etkinleştirme koşulları [test kılavuzunda](VOICE_TYPING.md) açıklanır.
 
 ## Lisans ve teşekkür
 
-VoiceType için MIT lisansı belirtilmiştir; depoda henüz ayrı bir lisans dosyası yoktur. Harfiyen, Seda-v0.1 ve Antalia Mini'nin kendi lisansları geçerlidir. Bazı tasarım yaklaşımları için [AlwaysWhisper](https://github.com/kzkhykw/AlwaysWhisper) projesinden yararlanılmıştır.
+VoiceType için MIT lisansı belirtilmiştir; depoda henüz ayrı bir lisans dosyası yoktur. Harfiyen ve Seda-v0.1'in kendi lisansları geçerlidir. Bazı tasarım yaklaşımları için [AlwaysWhisper](https://github.com/kzkhykw/AlwaysWhisper) projesinden yararlanılmıştır.

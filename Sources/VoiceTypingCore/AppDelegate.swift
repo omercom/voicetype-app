@@ -63,13 +63,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var launchAtLoginMenuItem: NSMenuItem!
     private var triggerKeyMenuItems: [NSMenuItem] = []
 
-    private let readAloud = ReadAloudController()
-    private let readAloudHotKey = ReadAloudHotKey()
-    private let readAloudBrowserBridge = ReadAloudBrowserBridge()
-    private var readAloudStatusItem: NSMenuItem?
-    private var readAloudStopItem: NSMenuItem?
-    private var readAloudShortcutItem: NSMenuItem?
-
     // Geçmiş & Gelişmiş Özellikler
     private var historyParentMenuItem: NSMenuItem!
     private var historyMenu: NSMenu!
@@ -114,15 +107,21 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         return "Durum: Hazır (\(keyName) Tuşuna Basın)"
     }
 
-    private var readyToolTip: String {
-        let config = ConfigManager.shared.config
+    static func updateStatusButtonAccessibility(_ button: NSStatusBarButton, config: AppConfig) {
         let keyName = TriggerKeyOption.shortName(for: config.trigger_key)
+        let help: String
         if config.enable_translation {
-            return config.trigger_key == 61
+            help = config.trigger_key == 61
                 ? "Sağ Option: Çeviri · Normal dikte için başka tuş seçin"
                 : "\(keyName): Dikte · Sağ Option: Çeviri"
+        } else {
+            help = "\(keyName) ile Sesle Yazma"
         }
-        return "Voice Typing (\(keyName) ile Sesle Yazma)"
+        // AppKit'in menü çubuğu açıklama balonu ekranda kalabildiğinden,
+        // kısayolu yalnızca erişilebilirlik yardımı ve menüde gösteriyoruz.
+        button.toolTip = nil
+        button.setAccessibilityLabel("Voice Typing")
+        button.setAccessibilityHelp(help)
     }
 
     /// Recorder tamamlanan her oturum için WAV döndürür; ağ/yerel deşifreye
@@ -163,11 +162,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             button.image = getWaveformIcon()
             button.imagePosition = .imageOnly
             button.title = ""
-            button.toolTip = readyToolTip
+            Self.updateStatusButtonAccessibility(button, config: ConfigManager.shared.config)
         }
 
         buildMenu()
-        setupReadAloud()
 
         // First-use AppKit layer creation and procedural sound synthesis must not
         // sit on the dictation keydown path. This does not open the microphone.
@@ -369,31 +367,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(historyParentMenuItem)
         refreshHistoryMenu()
 
-        let speechMenu = NSMenu()
-        speechMenu.autoenablesItems = false
-        readAloudStatusItem = NSMenuItem(title: "Seslendirme: Hazırlanıyor", action: nil, keyEquivalent: "")
-        readAloudStatusItem?.isEnabled = false
-        speechMenu.addItem(readAloudStatusItem!)
-        let selectedItem = NSMenuItem(title: "Seçili Metni Seslendir (⌥⌘S)", action: #selector(speakSelectedText), keyEquivalent: "")
-        selectedItem.target = self
-        speechMenu.addItem(selectedItem)
-        let clipboardItem = NSMenuItem(title: "Panoyu Seslendir", action: #selector(speakClipboardText), keyEquivalent: "")
-        clipboardItem.target = self
-        speechMenu.addItem(clipboardItem)
-        readAloudStopItem = NSMenuItem(title: "Okumayı Durdur (Esc)", action: #selector(stopReadAloud), keyEquivalent: "")
-        readAloudStopItem?.target = self
-        readAloudStopItem?.isEnabled = false
-        speechMenu.addItem(readAloudStopItem!)
-        readAloudShortcutItem = NSMenuItem(title: "Global Kısayol: ⌥⌘S", action: nil, keyEquivalent: "")
-        readAloudShortcutItem?.isEnabled = false
-        speechMenu.addItem(readAloudShortcutItem!)
-        let disclosure = NSMenuItem(title: "Yapay zekâ sesi · Türkçe · EMA Lightning", action: nil, keyEquivalent: "")
-        disclosure.isEnabled = false
-        speechMenu.addItem(disclosure)
-        let speechParent = NSMenuItem(title: "Metni Seslendir", action: nil, keyEquivalent: "")
-        speechParent.submenu = speechMenu
-        menu.addItem(speechParent)
-
         // Sade menü: yalnızca sık kullanılanlar. Tetikleyici tuş, mod
         // ve tüm tercihler Ayarlar penceresinde (öğeler durum takibi için
         // oluşturulur ama menüye eklenmez).
@@ -511,7 +484,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         SoundManager.shared.isEnabled = cfg.play_sounds
 
         if let button = statusItem.button {
-            button.toolTip = readyToolTip
+            Self.updateStatusButtonAccessibility(button, config: cfg)
             button.image = getWaveformIcon()
             button.title = ""
         }
@@ -563,45 +536,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         isPreparingRecord || isTranscribing || isFinishingRecord || AudioRecorder.shared.isRecording
     }
 
-    private func setupReadAloud() {
-        readAloud.isDictating = { [weak self] in self?.isDictationActive ?? false }
-        readAloud.onUpdate = { [weak self] message, busy in
-            self?.readAloudStatusItem?.title = "Seslendirme: \(message)"
-            self?.readAloudStopItem?.isEnabled = busy
-        }
-        readAloud.onError = { [weak self] message in
-            guard let self, !self.isDictationActive else { NSSound.beep(); return }
-            RecordingHUD.shared.showNotice(message: message, autoDismissDelay: 3)
-        }
-        NSApplication.shared.servicesProvider = readAloud
-        NSUpdateDynamicServices()
-        readAloudHotKey.onPressed = { [weak self] in self?.readAloud.toggleSelection() }
-        let result = readAloudHotKey.start()
-        if result != 0 {
-            readAloudShortcutItem?.title = "⌥⌘S kaydedilemedi (\(result)); Servisler veya menüyü kullanın"
-        }
-        readAloudBrowserBridge.onCommand = { [weak self] request in
-            self?.readAloud.browserCommand(request) ?? ["ok": false, "error": "VoiceType kapandı."]
-        }
-        do { try readAloudBrowserBridge.start() }
-        catch {
-            let item = NSMenuItem(title: "Chrome bağlantısı açılamadı", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            readAloudStatusItem?.menu?.addItem(item)
-        }
-        readAloud.prepare()
-    }
-
-    @objc private func speakSelectedText() { readAloud.toggleSelection() }
-    @objc private func speakClipboardText() { readAloud.speakClipboard() }
-    @objc private func stopReadAloud() { readAloud.cancel() }
-
     private func setupKeyListener() {
         let listener = KeyListener.shared
 
         listener.isBusy = { [weak self] in
-            guard let self = self else { return false }
-            return self.isPreparingRecord || self.isTranscribing || self.isFinishingRecord || AudioRecorder.shared.isRecording || self.readAloud.isBusy
+            self?.isDictationActive ?? false
         }
 
         listener.onShortcutStart = { [weak self] triggeredAt, kind in
@@ -613,10 +552,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         listener.onCancel = { [weak self] in
-            guard let self else { return }
-            if self.isDictationActive { self.handleCancel() }
-            else if self.readAloud.isBusy { self.readAloud.cancel() }
-            else { self.handleCancel() }
+            self?.handleCancel()
         }
 
         listener.start()
@@ -735,9 +671,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleRecordStart(triggeredAt: TimeInterval? = nil, shortcutKind: DictationShortcutKind = .normal) {
         let handlerEnteredAt = ProcessInfo.processInfo.systemUptime
         guard !isPreparingRecord, !isTranscribing, !isFinishingRecord, !AudioRecorder.shared.isRecording else { return }
-        // TTS must stop before the microphone starts to avoid transcribing our own voice.
-        readAloud.cancel()
-
         let config = Self.dictationConfig(ConfigManager.shared.config, shortcutKind: shortcutKind)
         activeDictationConfig = config
         liveTranslation?.cancel()
@@ -1640,9 +1573,6 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
-        readAloudBrowserBridge.stop()
-        readAloudHotKey.stop()
-        readAloud.shutdown()
         GlobeKeySuppressor.shared.restoreOriginal()
         cleanupActiveDictationForTermination()
     }

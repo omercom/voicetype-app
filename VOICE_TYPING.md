@@ -61,8 +61,6 @@ Normal dikte tuşu da Sağ Option olarak seçilirse, çeviri açıkken Sağ Opti
 
 Çeviri açıksa metin Groq veya Gemini'ye gönderilir ve sağlayıcı ücret uygulayabilir. Apple Speech, Seda ve Gemini Live ara sonuçlarındaki kararlı cümleler konuşma sürerken de gönderilebilir. Bu cümleler son metne uymuyorsa yeniden çevrilir. Noktalama içermeyen ara sonuçlar ve canlı olmayan sağlayıcılar, kayıt sonunda çevrilir. Uzun metinler bölünür ve çevirileri sırayla birleştirilir. Bir parça başarısız olursa uygulama tüm orijinal metni kullanır ve kullanıcıyı uyarır. `Esc`, bekleyen istekleri iptal etmeyi dener; daha önce sağlayıcıya gönderilmiş metin geri alınamaz.
 
-Seçili metni seslendirme kısayolu **⌥⌘S** olarak kalır; sistemdeki diğer seslendirme kısayolları değiştirilmez.
-
 ### Erişilebilirlik izni ne sağlar?
 
 macOS Erişilebilirlik izni, VoiceTyping'in başka bir uygulama öndeyken arka planda çalışmasını sağlar. Uygulama bu izni:

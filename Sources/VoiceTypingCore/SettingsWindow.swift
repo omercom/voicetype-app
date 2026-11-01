@@ -1452,19 +1452,19 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         featuresCard.titlePosition = .noTitle
 
         let featuresContent = FlippedContentView(frame: featuresCard.bounds)
-        let cardTitle = NSTextField(labelWithString: "✨ Öne Çıkan Yetenekler")
+        let cardTitle = NSTextField(labelWithString: "✨ Öne Çıkan Özellikler")
         cardTitle.frame = NSRect(x: 16, y: 10, width: 528, height: 18)
         cardTitle.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         cardTitle.textColor = .labelColor
         featuresContent.addSubview(cardTitle)
 
         let featureItems = [
-            "• Google Gemini 3.5 Transcribe Live (Gerçek Zamanlı WebSocket Akışı)",
-            "• Groq Whisper Large v3 (Düşük Gecikmeli Bulut Deşifre Motoru)",
-            "• Akustik Uzatma Penceresi (Son hece ve kelimelerin kesilmesini önler)",
-            "• Akıllı Metin Enjeksiyonu (Doğrudan imlece basma ve pano koruması)",
-            "• Konuşurken arka plan sesini/müziği akıllıca duraklatma",
-            "• Kararlı metin algılama (Settled Silence Debounce)"
+            "• Konuşarak yazın; dikte kısayolunu kendiniz seçin.",
+            "• İsteğe bağlı çevirili dikte için Sağ Option kullanın.",
+            "• Apple Speech ile API anahtarı olmadan dikte yapın.",
+            "• Seda ile Türkçe konuşmayı Mac'inizde işleyin.",
+            "• Groq, Gemini ve AssemblyAI motorlarını seçin.",
+            "• Panoyu koruyun ve kayıt sırasında arka plan sesini yönetin."
         ]
         let featuresText = NSTextField(wrappingLabelWithString: featureItems.joined(separator: "\n"))
         featuresText.frame = NSRect(x: 16, y: 32, width: 528, height: 112)
@@ -1490,7 +1490,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         tipTitle.textColor = .systemBlue
         tipContent.addSubview(tipTitle)
 
-        let tipText = NSTextField(wrappingLabelWithString: "Herhangi bir metin alanında imlecinizi konumlandırın. Tetikleyici tuşa (varsayılan Sağ Command ⌘) basılı tutarak konuşun ve bırakın. Konuştuğunuz metin anında imlecin bulunduğu yere yapıştırılır.")
+        let tipText = NSTextField(wrappingLabelWithString: "Bir metin alanı seçin. Varsayılan ayarda Sağ Command (⌘) tuşuna basılı tutup konuşun ve bırakın. Çevirili dikteyi açtıysanız Sağ Option (⌥) kullanın.")
         tipText.frame = NSRect(x: 16, y: 28, width: 528, height: 36)
         tipText.font = NSFont.systemFont(ofSize: 11)
         tipText.textColor = .secondaryLabelColor

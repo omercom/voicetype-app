@@ -16,11 +16,6 @@ echo "📦 macOS Voice Typing Kurulumu Başlatılıyor..."
 echo "📍 Hedef: $TARGET_APP"
 echo "============================================================"
 
-# Optional local TTS runtime; dictation-only installs stay lightweight.
-if [ "${VOICETYPE_SETUP_TTS:-0}" = "1" ]; then
-    ./setup-tts.sh
-fi
-
 # Optional local Turkish STT runtime.
 if [ "${VOICETYPE_SETUP_STT:-0}" = "1" ]; then
     ./setup-stt.sh
