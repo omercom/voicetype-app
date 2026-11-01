@@ -73,6 +73,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // Tab 2: Yapay Zeka & Modeller
     private var providerSegmentedControl: NSSegmentedControl!
     private var providerPopUp: NSPopUpButton!
+    private var selectableProviders = TranscriptionProviderRegistry.all
+    var sedaInstallationCheck: () -> Bool = { SedaTranscriber.isInstalled() }
     private var providerNoteLabel: NSTextField!
     private var appleStatusLabel: NSTextField!
     private var groqKeyField: NSTextField!
@@ -606,8 +608,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let provLabel = createSectionLabel(text: "Aktif Sağlayıcı", y: 16)
         container.addSubview(provLabel)
 
+        selectableProviders = TranscriptionProviderRegistry.selectable(sedaInstalled: sedaInstallationCheck())
         providerSegmentedControl = NSSegmentedControl(
-            labels: TranscriptionProviderRegistry.all.map(\.readinessShortName),
+            labels: selectableProviders.map(\.readinessShortName),
             trackingMode: .selectOne,
             target: self,
             action: #selector(providerSegmentedChanged(_:))
@@ -848,7 +851,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         case "assemblyai":
             providerNoteLabel.stringValue = "🎙 AssemblyAI Dictation API: Sesi gönderime hazır metne dönüştürür; dolgu ve öz-düzeltmeleri varsayılan olarak temizler."
         case "seda":
-            providerNoteLabel.stringValue = "Seda-v0.1: Yerel canlı Türkçe dikte ve HUD önizlemesi. Beam 4 + dil modeli; noktalama ve özel sözlük yoktur."
+            providerNoteLabel.stringValue = sedaInstallationCheck()
+                ? "Seda-v0.1: Yerel canlı Türkçe dikte ve HUD önizlemesi. Beam 4 + dil modeli; noktalama ve özel sözlük yoktur."
+                : "Seda-v0.1 kurulu değil. Yeniden kurun veya başka bir sağlayıcı seçin."
         default:
             providerNoteLabel.stringValue = "Sağlayıcı ayarını kontrol edin."
         }
@@ -1001,20 +1006,38 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         autoSave()
     }
 
-    /// Kayıt defterindeki sıraya göre segment indeksini döndürür.
-    /// Segment denetimi bu sırayla oluşturulur; bilinmeyen kimlik varsayılana düşer.
+    private func refreshSelectableProviders() {
+        let providers = TranscriptionProviderRegistry.selectable(sedaInstalled: sedaInstallationCheck())
+        guard providers != selectableProviders else { return }
+        selectableProviders = providers
+        providerSegmentedControl.segmentCount = providers.count
+        for (index, provider) in providers.enumerated() {
+            providerSegmentedControl.setLabel(provider.readinessShortName, forSegment: index)
+        }
+    }
+
+    /// Segment indeksini görünür sağlayıcılar üzerinden çözer.
+    /// Kurulumu kaldırılmış bir sağlayıcı seçiliyse hiçbir segment seçilmez.
     private func providerSegmentIndex(for providerID: String) -> Int {
         let normalized = TranscriptionProviderRegistry.normalize(providerID)
-        return TranscriptionProviderRegistry.all.firstIndex { $0.id == normalized } ?? 0
+        return selectableProviders.firstIndex { $0.id == normalized } ?? -1
     }
 
     @objc private func providerSegmentedChanged(_ sender: NSSegmentedControl) {
-        let providers = TranscriptionProviderRegistry.all
         let index = sender.selectedSegment
-        guard index >= 0, index < providers.count else { return }
+        guard index >= 0, index < selectableProviders.count else { return }
 
-        let provider = providers[index].id
-        providerPopUp.selectItem(at: index)
+        let provider = selectableProviders[index].id
+        if provider == "seda" && !sedaInstallationCheck() {
+            refreshSelectableProviders()
+            let selected = TranscriptionProviderRegistry.normalize(ConfigManager.shared.config.provider)
+            sender.selectedSegment = providerSegmentIndex(for: selected)
+            updateProviderNote(for: selected)
+            return
+        }
+        if let registryIndex = TranscriptionProviderRegistry.all.firstIndex(where: { $0.id == provider }) {
+            providerPopUp.selectItem(at: registryIndex)
+        }
         if provider == "seda" { languageField.stringValue = "tr" }
         updateProviderNote(for: provider)
         updateProviderStatusLabels()
@@ -1498,6 +1521,30 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         tipCard.contentView = tipContent
         container.addSubview(tipCard)
 
+        // 5. Raycast entegrasyonu için kısa kullanım notu
+        let raycastCard = NSBox(frame: NSRect(x: 45, y: 388, width: 560, height: 84))
+        raycastCard.boxType = .custom
+        raycastCard.cornerRadius = 8
+        raycastCard.borderWidth = 1
+        raycastCard.borderColor = NSColor.separatorColor.withAlphaComponent(0.22)
+        raycastCard.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.3)
+        raycastCard.titlePosition = .noTitle
+
+        let raycastContent = FlippedContentView(frame: raycastCard.bounds)
+        let raycastTitle = NSTextField(labelWithString: "🚀 Raycast ile kullanım")
+        raycastTitle.frame = NSRect(x: 16, y: 8, width: 528, height: 18)
+        raycastTitle.font = NSFont.systemFont(ofSize: 11.5, weight: .semibold)
+        raycastTitle.textColor = .systemBlue
+        raycastContent.addSubview(raycastTitle)
+
+        let raycastText = NSTextField(wrappingLabelWithString: "Eklentiyi README'deki adımlarla kurun. Raycast'te Start VoiceType Dictation ile başlatın; Stop VoiceType Dictation ile bitirin. Bağlantı henüz gerçek kullanımda doğrulanmadı.")
+        raycastText.frame = NSRect(x: 16, y: 28, width: 528, height: 48)
+        raycastText.font = NSFont.systemFont(ofSize: 11)
+        raycastText.textColor = .secondaryLabelColor
+        raycastContent.addSubview(raycastText)
+        raycastCard.contentView = raycastContent
+        container.addSubview(raycastCard)
+
         return container
     }
 
@@ -1722,12 +1769,15 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         let cfg = ConfigManager.shared.config
 
-        // Provider — segment sırası kayıt defterindeki sağlayıcı sırasıyla
-        // birebir aynıdır; arayüz bu listeyi tek kaynak olarak kullanır.
-        let providerIndex = providerSegmentIndex(for: cfg.provider)
-        providerPopUp.selectItem(at: providerIndex)
-        providerSegmentedControl.selectedSegment = providerIndex
-        updateProviderNote(for: TranscriptionProviderRegistry.normalize(cfg.provider))
+        // Provider — görünür segmentler kurulum durumuna göre yenilenir.
+        // Gizli yedek açılır menü, kayıt defterindeki tam sırayı korur.
+        refreshSelectableProviders()
+        let selectedProvider = TranscriptionProviderRegistry.normalize(cfg.provider)
+        if let registryIndex = TranscriptionProviderRegistry.all.firstIndex(where: { $0.id == selectedProvider }) {
+            providerPopUp.selectItem(at: registryIndex)
+        }
+        providerSegmentedControl.selectedSegment = providerSegmentIndex(for: selectedProvider)
+        updateProviderNote(for: selectedProvider)
 
         // Groq
         groqKeyField.stringValue = cfg.groq_api_key
@@ -2246,12 +2296,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     /// birbiriyle tutarsızdı ve canlı test akışı AssemblyAI'yi yanlış
     /// sağlayıcıya eşliyordu.
     private var selectedProviderID: String {
-        let providers = TranscriptionProviderRegistry.all
-        let index = providerSegmentedControl.selectedSegment
-        guard index >= 0, index < providers.count else {
-            return TranscriptionProviderRegistry.defaultProviderID
-        }
-        return providers[index].id
+        // Kurulumu sonradan kaldırılan seçimi sessizce başka sağlayıcıya çevirmeyin.
+        TranscriptionProviderRegistry.selectedID(
+            at: providerSegmentedControl.selectedSegment,
+            in: selectableProviders,
+            preserving: ConfigManager.shared.config.provider
+        )
     }
 
     @objc public func autoSave(showMessage: Bool = true) {

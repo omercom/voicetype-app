@@ -448,6 +448,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         setStatus(title: "ℹ️", menuText: message, revertAfter: 2.4)
     }
 
+    static func updateSedaMenuItem(_ item: NSMenuItem, installed: Bool, activeProvider: String) {
+        item.isHidden = !installed
+        item.state = activeProvider == "seda" ? .on : .off
+    }
+
     private func refreshMenuStates() {
         let cfg = ConfigManager.shared.config
         // Menü işaretleri gerçekte kullanılacak sağlayıcıyı yansıtmalı; tanınmayan
@@ -457,9 +462,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         geminiMenuItem.state = (activeProvider == "gemini") ? .on : .off
         groqMenuItem.state = (activeProvider == "groq") ? .on : .off
         assemblyAIMenuItem.state = (activeProvider == "assemblyai") ? .on : .off
-        sedaMenuItem.state = (activeProvider == "seda") ? .on : .off
+        let sedaInstalled = SedaTranscriber.isInstalled()
+        Self.updateSedaMenuItem(sedaMenuItem, installed: sedaInstalled, activeProvider: activeProvider)
         let providerNames = ["apple": "Apple", "gemini": "Gemini", "groq": "Groq", "assemblyai": "AssemblyAI", "seda": "Seda-v0.1"]
-        providerParentMenuItem?.title = "Ses Tanıma: \(providerNames[activeProvider] ?? activeProvider)"
+        let unavailable = activeProvider == "seda" && !sedaInstalled ? " (kurulu değil)" : ""
+        providerParentMenuItem?.title = "Ses Tanıma: \(providerNames[activeProvider] ?? activeProvider)\(unavailable)"
 
         holdModeMenuItem.state = (cfg.trigger_mode.lowercased() == "hold") ? .on : .off
         smartModeMenuItem.state = (cfg.trigger_mode.lowercased() == "smart") ? .on : .off
@@ -1425,6 +1432,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func selectSedaProvider() {
+        guard SedaTranscriber.isInstalled() else {
+            refreshMenuStates()
+            return
+        }
         ConfigManager.shared.update { $0.provider = "seda"; $0.language = "tr" }
         refreshPermissionSnapshot()
         refreshMenuStates()

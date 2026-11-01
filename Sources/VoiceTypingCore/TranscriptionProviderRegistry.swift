@@ -149,6 +149,16 @@ public enum TranscriptionProviderRegistry {
         )
     ]
 
+    /// Yerel motor kurulmadığında seçim listelerinde gösterilmez.
+    static func selectable(sedaInstalled: Bool) -> [TranscriptionProviderDescriptor] {
+        all.filter { $0.id != "seda" || sedaInstalled }
+    }
+
+    static func selectedID(at index: Int, in providers: [TranscriptionProviderDescriptor], preserving current: String) -> String {
+        guard index >= 0, index < providers.count else { return normalize(current) }
+        return providers[index].id
+    }
+
     /// Kimliğe göre sağlayıcı tanımı; bilinmeyen kimliklerde varsayılana düşer.
     public static func descriptor(for providerID: String) -> TranscriptionProviderDescriptor {
         let normalized = normalize(providerID)

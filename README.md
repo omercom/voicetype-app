@@ -39,17 +39,15 @@ Evet. VoiceType ücretsiz ve açık kaynaklıdır. **Normal dikte için ücretli
 
 İndirilen paket otomatik başlangıç kurmaz. İsterseniz macOS giriş öğelerine VoiceTyping'i ekleyebilirsiniz.
 
-### Kaynaktan kurun
+### Terminal ile kurun
 
-[Xcode Komut Satırı Araçları](https://developer.apple.com/xcode/resources/) gerekir. Terminal'i açın ve şu komutları çalıştırın:
+[Xcode Komut Satırı Araçları](https://developer.apple.com/xcode/resources/) gerekir. Terminal'e şu tek komutu yapıştırın:
 
 ```bash
-git clone https://github.com/omercom/voicetype-app.git
-cd voicetype-app
-./install.sh
+git clone --depth 1 --branch v1.0.1 https://github.com/omercom/voicetype-app.git && (cd voicetype-app && ./install.sh)
 ```
 
-Kurulum uygulamayı Uygulamalar klasörüne yerleştirir ve başlatır. Mac açıldığında da otomatik başlar.
+Komut kaynak kodunu indirir ve [kurulum betiğini](install.sh) çalıştırır. Uygulamayı derler, Uygulamalar klasörüne yerleştirir ve otomatik başlatmayı açar. `voicetype-app` klasörü zaten varsa komut mevcut dosyaları değiştirmez.
 
 ### Uygulama nerede?
 
@@ -77,6 +75,14 @@ Simgeye tıklayarak **Ayarlar**, ses tanıma motoru ve diğer seçeneklere ulaş
 
 Kayıt sırasında vazgeçmek için **Esc** tuşuna basın. Kısayolu ve diğer davranışları Ayarlar'dan değiştirebilirsiniz.
 
+### Dikte göstergesi
+
+| Notch View — MacBook çentiği | Kapsül — ekranın altı |
+|:---:|:---:|
+| <img src="docs/images/notch-view.png" alt="Notch View dikte göstergesi" width="320"> | <img src="docs/images/kapsul-view.png" alt="Kapsül dikte göstergesi" width="320"> |
+
+Görseller örnek metin ve temsili arka plan kullanır. **Ayarlar → Gelişmiş → Gösterge Stili** bölümünden görünümü seçebilirsiniz. Notch View, çentikli MacBook ekranlarında kullanılır; diğer ekranlarda kapsül görünür.
+
 ### Konuşmanızı çevirin
 
 1. Menü çubuğundan **Ayarlar** penceresini açın.
@@ -90,17 +96,19 @@ VoiceType, uygun canlı tanıma sonuçlarında cümleleri konuşma sırasında a
 
 ### Raycast ile kullanın
 
-Raycast için **Start VoiceType Dictation**, **Stop VoiceType Dictation** ve **Open VoiceType Settings** komutları eklendi. Eklentiyi kendi Mac'inize kurmanız gerekir; henüz Raycast Store'da değildir. Raycast ve macOS otomasyon bağlantısı gerçek kullanımda henüz doğrulanmadı. [Raycast kurulum adımlarına](integrations/raycast/README.md) bakın.
+Önce bir metin alanı seçin. Raycast'te **Start VoiceType Dictation** ile konuşmaya başlayın; **Stop VoiceType Dictation** ile bitirin. **Open VoiceType Settings**, ayarları açar.
+
+Eklentiyi kendi Mac'inize kurmanız gerekir; henüz Raycast Store'da değildir. Raycast ve macOS otomasyon bağlantısı gerçek kullanımda henüz doğrulanmadı. [Raycast kurulum adımlarına](integrations/raycast/README.md) bakın.
 
 ### Türkçe dikteyi tamamen yerel çalıştırın
 
-Seda-v0.1 seçeneğini kullanmak için [uv](https://docs.astral.sh/uv/getting-started/installation/) kurun ve Terminal'de şu komutu çalıştırın:
+Seda-v0.1 için [uv](https://docs.astral.sh/uv/getting-started/installation/) ve kaynak kodu gerekir. Terminal ile kurduysanız `voicetype-app` klasörüne geçin ve şu komutu çalıştırın:
 
 ```bash
 ./setup-stt.sh
 ```
 
-Ardından menü çubuğundan **Ses Tanıma → Harfiyen · Seda-v0.1** seçeneğini seçin. Dili **Türkçe (`tr`)** olarak ayarlayın. İlk kurulum model dosyalarını indirir; sonraki dikte işlemleri Mac'inizde çalışır. Tek kayıt en fazla 10 dakika sürer.
+Kurulum bitene kadar Seda, sağlayıcı listesinde görünmez. Kurulumdan sonra menüyü yeniden açın ve **Ses Tanıma → Harfiyen · Seda-v0.1** seçeneğini seçin. Dili **Türkçe (`tr`)** olarak ayarlayın. İlk kurulum model dosyalarını indirir; sonraki dikte işlemleri Mac'inizde çalışır. Tek kayıt en fazla 10 dakika sürer.
 
 Model lisansları ve ayrıntılar için [Seda kurulumuna](runtime/seda/README.md) bakın.
 

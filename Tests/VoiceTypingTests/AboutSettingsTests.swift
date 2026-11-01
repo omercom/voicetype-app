@@ -34,5 +34,10 @@ final class AboutSettingsTests: XCTestCase {
         let tip = try XCTUnwrap(labels.first { $0.stringValue.contains("Varsayılan ayarda Sağ Command") })
         XCTAssertTrue(tip.stringValue.contains("Sağ Option"))
         try assertTextFits(tip)
+
+        let raycast = try XCTUnwrap(labels.first { $0.stringValue.contains("Start VoiceType Dictation") })
+        XCTAssertTrue(raycast.stringValue.contains("Stop VoiceType Dictation"))
+        XCTAssertTrue(raycast.stringValue.contains("henüz gerçek kullanımda doğrulanmadı"))
+        try assertTextFits(raycast)
     }
 }

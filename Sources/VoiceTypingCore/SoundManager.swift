@@ -198,14 +198,12 @@ public class SoundManager {
     }
 
     private func findSoundURL(named name: String) -> URL? {
-        #if SWIFT_PACKAGE
-        if let url = Bundle.module.url(forResource: name, withExtension: "wav") {
+        if let url = VoiceTypeResources.url(forResource: name, withExtension: "wav") {
             return url
         }
-        if let url = Bundle.module.url(forResource: name, withExtension: "wav", subdirectory: "Sounds") {
+        if let url = VoiceTypeResources.url(forResource: name, withExtension: "wav", subdirectory: "Sounds") {
             return url
         }
-        #endif
 
         if let url = Bundle.main.url(forResource: name, withExtension: "wav") {
             return url

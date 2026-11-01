@@ -22,7 +22,7 @@ final class SedaTranscriber {
 
     init(pythonURL: URL? = nil, workerURL: URL? = nil, timeoutSeconds: Double = 90) {
         self.pythonURL = pythonURL ?? Self.runtimeURL.appendingPathComponent(".venv/bin/python")
-        self.workerURL = workerURL ?? Bundle.module.url(forResource: "seda_worker", withExtension: "py")
+        self.workerURL = workerURL ?? VoiceTypeResources.url(forResource: "seda_worker", withExtension: "py")
         self.timeoutSeconds = timeoutSeconds
     }
 
@@ -35,17 +35,25 @@ final class SedaTranscriber {
         ["tr", "tr-tr", "tr_tr"].contains(language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
     }
 
-    static func readinessMessage(language: String) -> String? {
-        guard supportsLanguage(language) else { return "Seda-v0.1 yalnızca Türkçe destekler. Dil ayarını tr yapın." }
+    static let requiredModelFiles = [
+        "encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx", "tokens.txt", "lm/rnnlm.int8.onnx", "lm/2gram.fst"
+    ]
+
+    static func isInstalled(
+        runtimeURL: URL = runtimeURL,
+        workerURL: URL? = VoiceTypeResources.url(forResource: "seda_worker", withExtension: "py")
+    ) -> Bool {
         let python = runtimeURL.appendingPathComponent(".venv/bin/python")
         let snapshot = runtimeURL.appendingPathComponent("models/models--atasoglu--seda-v0.1/snapshots/\(revision)")
-        let files = ["encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx", "tokens.txt", "lm/rnnlm.int8.onnx", "lm/2gram.fst"]
-        guard FileManager.default.isExecutableFile(atPath: python.path),
-              FileManager.default.fileExists(atPath: runtimeURL.appendingPathComponent("ready.json").path),
-              files.allSatisfy({ FileManager.default.isReadableFile(atPath: snapshot.appendingPathComponent($0).path) }),
-              Bundle.module.url(forResource: "seda_worker", withExtension: "py") != nil else {
-            return "Seda-v0.1 kurulmadı. Önce setup-stt.sh çalıştırın."
-        }
+        return FileManager.default.isExecutableFile(atPath: python.path)
+            && FileManager.default.fileExists(atPath: runtimeURL.appendingPathComponent("ready.json").path)
+            && requiredModelFiles.allSatisfy { FileManager.default.isReadableFile(atPath: snapshot.appendingPathComponent($0).path) }
+            && workerURL.map { FileManager.default.isReadableFile(atPath: $0.path) } == true
+    }
+
+    static func readinessMessage(language: String) -> String? {
+        guard supportsLanguage(language) else { return "Seda-v0.1 yalnızca Türkçe destekler. Dil ayarını tr yapın." }
+        guard isInstalled() else { return "Seda-v0.1 kurulmadı. Önce setup-stt.sh çalıştırın." }
         return nil
     }
 

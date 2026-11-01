@@ -39,3 +39,9 @@ jobs:
             --verify-tag \
             --title "VoiceType $version" \
             --notes-file "docs/releases/$GITHUB_REF_NAME.md"
+      - name: Add 1.0.0 resource warning
+        if: github.ref_name == 'v1.0.1'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit v1.0.0 --notes-file docs/releases/v1.0.0.md

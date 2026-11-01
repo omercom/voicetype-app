@@ -152,12 +152,15 @@ final class SedaTranscriberTests: XCTestCase {
         let original = ConfigManager.shared.config
         let controller = SettingsWindowController.shared
         let callback = controller.onConfigUpdated
+        let installationCheck = controller.sedaInstallationCheck
         defer {
             ConfigManager.shared.update { $0 = original }
             controller.onConfigUpdated = callback
+            controller.sedaInstallationCheck = installationCheck
             controller.loadValues()
         }
         controller.onConfigUpdated = nil
+        controller.sedaInstallationCheck = { true }
         ConfigManager.shared.update { $0.provider = "apple"; $0.language = "en" }
         controller.loadValues()
         controller.selectTab(index: 1)
