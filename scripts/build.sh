@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "🔨 Building VoiceTyping native macOS binary with Swift Package Manager..."
-swift build -c release
-BIN_DIR="$(swift build -c release --show-bin-path)"
+SWIFT_ARGS=(-c release)
+if [ "${VOICETYPE_UNIVERSAL_BUILD:-0}" = "1" ]; then
+    SWIFT_ARGS+=(--arch arm64 --arch x86_64)
+fi
+swift build "${SWIFT_ARGS[@]}"
+BIN_DIR="$(swift build "${SWIFT_ARGS[@]}" --show-bin-path)"
 cp "$BIN_DIR/VoiceTyping" ./VoiceTyping
 
 # macOS .app Paketi Oluştur (TCC Mikrofon & Erişilebilirlik Desteği)
@@ -28,6 +32,7 @@ if [ -d "Sources/VoiceTypingCore/Resources" ]; then
     if [ -f "Sources/VoiceTypingCore/Resources/AppIcon.icns" ]; then
         cp "Sources/VoiceTypingCore/Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
     fi
+    cp "Sources/VoiceTypingCore/Resources/VoiceType.sdef" "$APP_BUNDLE/Contents/Resources/VoiceType.sdef"
 fi
 # Kullanıcı yapılandırması/API anahtarları .app paketine taşınmaz.
 # Önceki bir build'den kalmış kaynak dosyasını da temizle.

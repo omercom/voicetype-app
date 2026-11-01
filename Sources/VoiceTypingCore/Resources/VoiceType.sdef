@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<dictionary title="VoiceType Automation">
+    <suite name="VoiceType Suite" code="VTYP" description="Control dictation and settings.">
+        <command name="start dictation" code="VTYPSTRT" description="Request dictation in the currently focused target application.">
+            <cocoa class="VoiceTypeStartDictationCommand"/>
+            <direct-parameter type="text" description="Bundle identifier of the target application."/>
+            <result type="text" description="Request status."/>
+        </command>
+        <command name="stop dictation" code="VTYPSTOP" description="Finish the current dictation.">
+            <cocoa class="VoiceTypeStopDictationCommand"/>
+            <result type="text" description="Request status."/>
+        </command>
+        <command name="open voice settings" code="VTYPSETS" description="Open VoiceType settings.">
+            <cocoa class="VoiceTypeOpenSettingsCommand"/>
+            <result type="text" description="Request status."/>
+        </command>
+        <command name="voice automation status" code="VTYPSTAT" description="Check whether VoiceType automation is available.">
+            <cocoa class="VoiceTypeAutomationStatusCommand"/>
+            <result type="text" description="Automation status."/>
+        </command>
+    </suite>
+</dictionary>

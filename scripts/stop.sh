@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # stop.sh - macOS Voice Typing Uygulamasını Durdurucu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PID_FILE="$SCRIPT_DIR/.app.pid"
 
 STOPPED=0

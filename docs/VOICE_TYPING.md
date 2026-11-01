@@ -1,14 +1,14 @@
 # macOS Yerel Swift Sesle Yazma (Voice Typing) - Menü Çubuğu Uygulaması
 
-macOS üzerinde herhangi bir metin alanındayken (tarayıcı, kod editörü, mesajlaşma uygulamaları vb.) **Sağ Command (Right Command)** tuşuna basılı tutarak konuşmanızı sağlayan ve bıraktığınız anda sesinizi ultra hızlı (Groq Whisper ile ~0.3 saniye) veya bağlamsal zekayla (Google Gemini) yazıya döküp aktif imlece yapıştıran, **tamamen yerel Swift (Zero Python)** menü çubuğu uygulaması.
+VoiceType, macOS menü çubuğunda çalışan bir dikte uygulamasıdır. Bir metin alanı seçip **Sağ Command** tuşuna basılı tutarak konuşabilirsiniz. Konuşma tanıma için Apple Speech, Seda veya desteklenen bulut sağlayıcılarından birini seçebilirsiniz.
 
 ---
 
 ## 🌟 Öne Çıkan Özellikler
 
-1. **Sıfır Python Bağımlılığı (Zero Python Dependencies):**
-   - Çalışma anında Python, pip, conda veya harici kütüphane gerektirmez.
-   - Tek bir `swift build -c release` veya `./build.sh` komutu ile derlenen 360 KB boyutunda ultra hafif, bağımsız yerel macOS ikili dosyası (`VoiceTyping`).
+1. **Yerel Swift uygulaması:**
+   - Ana uygulama Swift ile çalışır. İsteğe bağlı Seda motoru ayrı bir Python ortamı gerektirir.
+   - `swift build -c release` veya `./scripts/build.sh` ile derlenir.
 
 2. **Yerel Menü Çubuğu Durum Simgesi (`NSStatusItem`):**
    - Menü çubuğunda canlı durum takibi: `🎙️` (Hazır), `🔴 Dinliyor...` (Kayıt), `⏳ Yazıyor...` (Deşifre).
@@ -33,7 +33,7 @@ macOS üzerinde herhangi bir metin alanındayken (tarayıcı, kod editörü, mes
    - Batch ses yollarında RMPN (Robust Modulation-Periodicity Normalization): sağlam gürültü tabanı, fonetik spektral flux ve Goertzel spektral entropisiyle tek statik netlik kazancı; canlı Apple/Gemini akışında mevcut realtime AGC korunur ve iki işlem üst üste uygulanmaz.
 
 6. **Doğrudan `URLSession` Asenkron HTTP Deşifre:**
-   - Groq Cloud API Whisper endpoint'ine multipart/form-data ile doğrudan bağlantı (~0.25 - 0.3s).
+   - Groq Cloud API Whisper endpoint'ine multipart/form-data ile doğrudan bağlantı.
    - Google Gemini Transcribe Live WebSocket veya Transcribe REST API'ye optimize bağlantı.
    - AssemblyAI Dictation API (`/v1/transcribe/live`) ile varsayılan dolgu/öz-düzeltme temizliği ve `llm_response` → `text` güvenli fallback'i.
 
@@ -77,7 +77,7 @@ için kullanır. Hedefi ve aktarımı doğrulamak için odaktaki alanın erişil
 
 ### Tek Komutla Derleme
 ```bash
-./build.sh
+./scripts/build.sh
 # veya
 swift build -c release && cp .build/release/VoiceTyping ./VoiceTyping
 ```
@@ -85,19 +85,19 @@ swift build -c release && cp .build/release/VoiceTyping ./VoiceTyping
 ### Uygulamayı Başlatma
 Arka planda (Menü Çubuğunda) başlatmak için:
 ```bash
-./start.sh
+./scripts/start.sh
 ```
 
 Ön planda (konsol loglarıyla) çalıştırmak için:
 ```bash
-./start.sh -f
+./scripts/start.sh -f
 # veya
 ./VoiceTyping
 ```
 
 ### Uygulamayı Durdurma
 ```bash
-./stop.sh
+./scripts/stop.sh
 ```
 
 ---

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # start.sh - macOS Voice Typing Yerel Swift Uygulamasını Başlatıcı
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 PID_FILE="$SCRIPT_DIR/.app.pid"
@@ -44,7 +44,7 @@ fi
 # Binary yoksa derle
 if [ ! -f "$BINARY" ]; then
     echo "⚙️ Native Swift app bundle derleniyor..."
-    ./build.sh
+    ./scripts/build.sh
     if [ ! -f "$BINARY" ]; then
         BINARY="$SCRIPT_DIR/VoiceTyping"
     fi
@@ -68,7 +68,7 @@ else
         echo "✅ Başarıyla başlatıldı! (PID: $APP_PID)"
         echo "📌 Menü çubuğundaki ses dalgası (waveform) simgesinden ayarları yönetebilirsiniz."
         echo "🎤 Kullanım: Herhangi bir metin kutusundayken Sağ Command tuşuna basılı tutun ve konuşun, bırakınca metin anında yapıştırılır."
-        echo "⏹️ Durdurmak için: ./stop.sh"
+        echo "⏹️ Durdurmak için: ./scripts/stop.sh"
         echo "📄 Logları izlemek için: tail -f app.log"
     else
         echo "❌ Uygulama başlatılamadı. Log dosyası:"

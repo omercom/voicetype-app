@@ -23,7 +23,7 @@ fi
 
 # 1. En son sürümü derle
 echo "🔨 1/5. Native Swift binary ve .app paketi derleniyor..."
-./build.sh
+./scripts/build.sh
 
 # 2. Çalışan eski süreçleri durdur
 echo "🛑 2/5. Varsa önceki süreçler durduruluyor..."

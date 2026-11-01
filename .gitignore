@@ -35,10 +35,17 @@ config.json
 .agents/teamwork/
 /PROJECT.md
 
-# Swift build artifacts
+# Swift build artifacts and release packages
 .build/
+/dist/
 /VoiceTyping
 VoiceTyping.app/
 *.bundle/
 sounds
+
+# Raycast extension dependencies and build output
+node_modules/
+/integrations/raycast/dist/
+/integrations/raycast/raycast-env.d.ts
+
 .DS_Store

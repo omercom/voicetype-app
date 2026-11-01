@@ -517,6 +517,35 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func startAutomationDictation(expectedBundleIdentifier: String?) -> String {
+        let expected = expectedBundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let decision = AutomationStartDecision.resolve(
+            expected: expected,
+            frontmost: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+            ownBundle: Bundle.main.bundleIdentifier ?? "com.antigravity.VoiceTyping",
+            busy: isDictationActive
+        )
+        guard decision == .ready, let expected else { return decision.rawValue }
+        handleRecordStart(expectedTargetBundleIdentifier: expected)
+        return "requested"
+    }
+
+    func stopAutomationDictation() -> String {
+        if isPreparingRecord {
+            cancelPendingRecordStart(reason: "automationStop")
+            return "cancelled"
+        }
+        if AudioRecorder.shared.isRecording {
+            handleRecordStop(duration: AudioRecorder.shared.currentRecordingDuration())
+            return "stopping"
+        }
+        return isTranscribing || isFinishingRecord ? "finishing" : "idle"
+    }
+
+    func openAutomationSettings() {
+        openSettings()
+    }
+
     @objc private func exportRecoveredAudioAction() {
         if let savedURL = DictationRecoveryAudioStore.shared.exportLatestRecoveryToDesktop() {
             RecordingHUD.shared.showSuccess(text: "Ses Masaüstüne Kaydedildi")
@@ -668,7 +697,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         return snapshot
     }
 
-    private func handleRecordStart(triggeredAt: TimeInterval? = nil, shortcutKind: DictationShortcutKind = .normal) {
+    private func handleRecordStart(
+        triggeredAt: TimeInterval? = nil,
+        shortcutKind: DictationShortcutKind = .normal,
+        expectedTargetBundleIdentifier: String? = nil
+    ) {
         let handlerEnteredAt = ProcessInfo.processInfo.systemUptime
         guard !isPreparingRecord, !isTranscribing, !isFinishingRecord, !AudioRecorder.shared.isRecording else { return }
         let config = Self.dictationConfig(ConfigManager.shared.config, shortcutKind: shortcutKind)
@@ -711,7 +744,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 provider: provider,
                 effectiveModel: effectiveModel,
                 generation: generation,
-                trace: trace
+                trace: trace,
+                expectedTargetBundleIdentifier: expectedTargetBundleIdentifier
             )
         }
     }
@@ -721,7 +755,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         provider: String,
         effectiveModel: String,
         generation: UInt64,
-        trace: RecordingStartLatencyTrace
+        trace: RecordingStartLatencyTrace,
+        expectedTargetBundleIdentifier: String?
     ) {
         guard isPreparingRecord, pendingRecordStartGeneration == generation else {
             trace.finish(reason: "cancelledBeforeStart")
@@ -769,10 +804,22 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             prepare: { _ in },
             captureTarget: { [self] in
                 trace.mark(.targetCaptureStarted)
-                if let target = TargetInputManager.shared.captureTargetContext() {
+                let captured = TargetInputManager.shared.captureTargetContext()
+                let frontmost = NSWorkspace.shared.frontmostApplication
+                guard AutomationStartDecision.acceptsCapture(
+                    expected: expectedTargetBundleIdentifier,
+                    frontmostBundle: frontmost?.bundleIdentifier,
+                    frontmostPID: frontmost?.processIdentifier,
+                    capturedBundle: captured?.bundleIdentifier,
+                    capturedPID: captured?.pid
+                ) else {
+                    activeTargetContext = nil
+                    return false
+                }
+                if let target = captured {
                     activeTargetContext = target
                     print("[AppDelegate] 🎯 Hedef yazı alanı kilitlendi: \(target.appName) (\(target.role)) [PID: \(target.pid)]")
-                } else if config.only_in_text_fields {
+                } else if config.only_in_text_fields || expectedTargetBundleIdentifier != nil {
                     print("[AppDelegate] ⚠️ Odakta geçerli bir yazı alanı bulunamadı. Kural gereği kayıt başlatılmadı.")
                     activeTargetContext = nil
                     return false

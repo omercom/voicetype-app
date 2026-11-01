@@ -11,6 +11,7 @@ VoiceType, macOS menü çubuğunda çalışan açık kaynaklı bir uygulamadır.
 - **Konuşarak yazın:** Bir metin alanı seçin, Sağ Command tuşuna basılı tutun ve konuşun.
 - **Çevirerek yazın:** Çeviriyi açın ve Sağ Option ile konuşun. Metin seçtiğiniz dile çevrilir.
 - **Motoru seçin:** Apple Speech, yerel Seda veya desteklenen bulut servislerini kullanın.
+- **Raycast ile başlatın:** Dikteyi Raycast komutlarıyla başlatın veya durdurun.
 - **Çalışmanıza devam edin:** VoiceType arka planda çalışır. Ayarları menü çubuğundan değiştirirsiniz.
 
 ## Ücretsiz kullanabilir miyim?
@@ -25,9 +26,22 @@ Evet. VoiceType ücretsiz ve açık kaynaklıdır. **Normal dikte için ücretli
 
 ## Kurulum
 
-**Gerekenler:** macOS 13 veya daha yeni bir sürüm, mikrofon ve [Xcode Komut Satırı Araçları](https://developer.apple.com/xcode/resources/). Apple Silicon ve Intel Mac'ler desteklenir.
+**Gerekenler:** macOS 13 veya daha yeni bir sürüm ve mikrofon. Apple Silicon ve Intel Mac'ler desteklenir.
 
-Terminal'i açın ve şu komutları çalıştırın:
+### Son sürümü indirin
+
+1. [Sürümler sayfasını](https://github.com/omercom/voicetype-app/releases) açın.
+2. En son sürümün `VoiceType-...-macOS.zip` dosyasını indirin.
+3. Arşivi açın. `VoiceTyping.app` dosyasını Uygulamalar klasörüne taşıyıp açın.
+
+> [!IMPORTANT]
+> İndirilen uygulama Developer ID ile imzalanmadı ve Apple tarafından noterlenmedi. macOS Gatekeeper uygulamanın açılmasını engelleyebilir. Kaynaktan kurulum aşağıdadır.
+
+İndirilen paket otomatik başlangıç kurmaz. İsterseniz macOS giriş öğelerine VoiceTyping'i ekleyebilirsiniz.
+
+### Kaynaktan kurun
+
+[Xcode Komut Satırı Araçları](https://developer.apple.com/xcode/resources/) gerekir. Terminal'i açın ve şu komutları çalıştırın:
 
 ```bash
 git clone https://github.com/omercom/voicetype-app.git
@@ -74,6 +88,10 @@ Kayıt sırasında vazgeçmek için **Esc** tuşuna basın. Kısayolu ve diğer 
 
 VoiceType, uygun canlı tanıma sonuçlarında cümleleri konuşma sırasında arka planda çevirmeye başlayabilir. Sonucu tek seferde yapıştırır. Çeviri başarısız olursa özgün metni korur ve sizi uyarır.
 
+### Raycast ile kullanın
+
+Raycast için **Start VoiceType Dictation**, **Stop VoiceType Dictation** ve **Open VoiceType Settings** komutları eklendi. Eklentiyi kendi Mac'inize kurmanız gerekir; henüz Raycast Store'da değildir. Raycast ve macOS otomasyon bağlantısı gerçek kullanımda henüz doğrulanmadı. [Raycast kurulum adımlarına](integrations/raycast/README.md) bakın.
+
 ### Türkçe dikteyi tamamen yerel çalıştırın
 
 Seda-v0.1 seçeneğini kullanmak için [uv](https://docs.astral.sh/uv/getting-started/installation/) kurun ve Terminal'de şu komutu çalıştırın:
@@ -94,7 +112,7 @@ Model lisansları ve ayrıntılar için [Seda kurulumuna](runtime/seda/README.md
 - **Çeviri:** Metin Groq veya Gemini'ye gönderilir. Otomatik seçimde Groq başarısız olursa metin yapılandırılmış Gemini'ye de gönderilebilir. Ara cümleler konuşma sürerken gönderilebilir.
 - **İzinler:** Erişilebilirlik izni, kısayollar ve metni hedef alana yazmak için kullanılır. API anahtarları kullanıcı hesabındaki yerel ayarlarda saklanır.
 
-Özel içerikleri göndermeden önce seçtiğiniz sağlayıcının gizlilik ve ücret koşullarını kontrol edin. Ayrıntılı bilgi: [dikte ve çeviri kılavuzu](VOICE_TYPING.md).
+Özel içerikleri göndermeden önce seçtiğiniz sağlayıcının gizlilik ve ücret koşullarını kontrol edin. Ayrıntılı bilgi: [dikte ve çeviri kılavuzu](docs/VOICE_TYPING.md).
 
 ## Yardım
 
@@ -103,7 +121,7 @@ Model lisansları ve ayrıntılar için [Seda kurulumuna](runtime/seda/README.md
 - **Metin yazılmıyor:** Önce düzenlenebilir bir metin alanı seçin. Bazı güvenli alanlar veya uygulamalar otomatik yapıştırmayı sınırlayabilir.
 - **Çeviri çalışmıyor:** Çevirinin açık olduğunu, API anahtarını, internet bağlantısını ve sağlayıcı kotasını kontrol edin.
 
-Daha fazla kurulum, gizlilik ve sorun giderme bilgisi için [VoiceType kılavuzuna](VOICE_TYPING.md) bakın.
+Daha fazla kurulum, gizlilik ve sorun giderme bilgisi için [VoiceType kılavuzuna](docs/VOICE_TYPING.md) bakın.
 
 ## Geliştiriciler
 
@@ -111,7 +129,7 @@ Daha fazla kurulum, gizlilik ve sorun giderme bilgisi için [VoiceType kılavuzu
 swift test
 ```
 
-Canlı API ve mikrofon testleri varsayılan olarak kapalıdır. Bunları etkinleştirme koşulları [test kılavuzunda](VOICE_TYPING.md) açıklanır.
+Canlı API ve mikrofon testleri varsayılan olarak kapalıdır. Bunları etkinleştirme koşulları [test kılavuzunda](docs/VOICE_TYPING.md) açıklanır.
 
 ## Lisans ve teşekkür
 

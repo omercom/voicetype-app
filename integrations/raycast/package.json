@@ -1,0 +1,47 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "voicetype",
+  "title": "VoiceType",
+  "description": "Start and stop VoiceType dictation or open its settings.",
+  "icon": "icon.png",
+  "author": "omercom",
+  "categories": ["Productivity"],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "start-dictation",
+      "title": "Start VoiceType Dictation",
+      "description": "Start dictation in the current text field.",
+      "mode": "no-view"
+    },
+    {
+      "name": "stop-dictation",
+      "title": "Stop VoiceType Dictation",
+      "description": "Stop the current dictation and insert its result.",
+      "mode": "no-view"
+    },
+    {
+      "name": "open-settings",
+      "title": "Open VoiceType Settings",
+      "description": "Open VoiceType settings.",
+      "mode": "no-view"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^2.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "minimatch": "^11.0.1"
+  },
+  "scripts": {
+    "build": "ray build",
+    "dev": "ray develop",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
+  }
+}
