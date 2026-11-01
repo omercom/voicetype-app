@@ -36,4 +36,30 @@ final class NotchWaveViewTests: XCTestCase {
         }
         XCTAssertGreaterThan(height(8), height(1) * 3)
     }
+
+    func testRecordingWaveDrawsVisiblePixels() throws {
+        let view = NotchWaveView(frame: CGRect(origin: .zero, size: NotchWaveView.size))
+        func visiblePixels() throws -> Int {
+            let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            var count = 0
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide {
+                    guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                    if color.alphaComponent > 0.1 && color.redComponent > 0.4 {
+                        count += 1
+                    }
+                }
+            }
+            return count
+        }
+        let initial = try visiblePixels()
+        view.render(level: 0.8, mode: .listening, animated: false)
+        let speaking = try visiblePixels()
+        view.reset()
+        let reset = try visiblePixels()
+        XCTAssertGreaterThan(initial, 10, "Ses dalgası ilk zamanlayıcı tikinden önce de görünmeli")
+        XCTAssertGreaterThan(speaking, initial + 10, "Konuşma dalgası sessiz durumdan ayırt edilmeli")
+        XCTAssertEqual(reset, initial, "Yeni kayıt önceki sesin dalgasını göstermemeli")
+    }
 }

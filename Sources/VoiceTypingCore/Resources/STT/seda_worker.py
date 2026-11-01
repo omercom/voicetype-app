@@ -9,8 +9,10 @@ import sys
 import wave
 import uuid
 
-MODEL_REPO = "atasoglu/seda-v0.1"
-MODEL_REVISION = "b5cf32ae4936968b284df3f1c4c79714af71e1fe"
+MODEL_REPO = "atasoglu/seda-v0.2"
+MODEL_REVISION = "62e2cc1615a63c433b6956214a548267ada5a774"
+# v0.2 balanced uses 1.28 s chunks; flush a chunk plus right context.
+TAIL_PADDING_SAMPLES = 24_000
 MODEL_FILES = ["README.md", "tokens.txt", "encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx",
                "lm/rnnlm.int8.onnx", "lm/2gram.fst"]
 
@@ -21,7 +23,7 @@ def load_recognizer(prepare=False):
     from huggingface_hub import snapshot_download
     import sherpa_onnx
 
-    home = Path(os.environ.get("VOICETYPE_SEDA_HOME", Path.home() / ".voice_typing/stt/seda"))
+    home = Path(os.environ.get("VOICETYPE_SEDA_HOME", Path.home() / ".voice_typing/stt/seda-v0.2"))
     directory = Path(snapshot_download(
         MODEL_REPO, revision=MODEL_REVISION, allow_patterns=MODEL_FILES,
         cache_dir=str(home / "models"), local_files_only=not prepare,
@@ -57,7 +59,9 @@ def transcribe(recognizer, path):
         stream.accept_waveform(16000, samples[start:start + 1600])
         while recognizer.is_ready(stream):
             recognizer.decode_stream(stream)
-    stream.accept_waveform(16000, np.zeros(16000, dtype=np.float32))
+    stream.accept_waveform(16000, np.zeros(TAIL_PADDING_SAMPLES, dtype=np.float32))
+    while recognizer.is_ready(stream):
+        recognizer.decode_stream(stream)
     stream.input_finished()
     while recognizer.is_ready(stream):
         recognizer.decode_stream(stream)
@@ -99,7 +103,9 @@ class StreamingDecoder:
             self.stream.accept_waveform(16000, samples)
         elif operation == "finish":
             # Preserve the same final-chunk flush used by WAV transcription.
-            self.stream.accept_waveform(16000, np.zeros(16000, dtype=np.float32))
+            self.stream.accept_waveform(16000, np.zeros(TAIL_PADDING_SAMPLES, dtype=np.float32))
+            while self.recognizer.is_ready(self.stream):
+                self.recognizer.decode_stream(self.stream)
             self.stream.input_finished()
         else:
             raise ValueError("Unknown streaming operation")
@@ -142,7 +148,7 @@ def serve(recognizer):
             decoder.stream = None
             decoder.identifier = None
             print(json.dumps({"event": "error", "id": identifier,
-                              "error": "Seda-v0.1 ses kaydını çözümleyemedi."}), flush=True)
+                              "error": "Seda-v0.2 ses kaydını çözümleyemedi."}), flush=True)
             print(f"Seda request: {type(error).__name__}", file=sys.stderr)
 
 
@@ -164,8 +170,13 @@ def main():
                 while recognizer.is_ready(stream):
                     recognizer.decode_stream(stream)
                 marker = home / "ready.json"
-                marker.write_text(json.dumps({"model": MODEL_REPO, "revision": MODEL_REVISION}))
-                marker.chmod(0o600)
+                temporary = home / f".ready-{uuid.uuid4().hex}.tmp"
+                try:
+                    temporary.write_text(json.dumps({"model": MODEL_REPO, "revision": MODEL_REVISION}))
+                    temporary.chmod(0o600)
+                    temporary.replace(marker)
+                finally:
+                    temporary.unlink(missing_ok=True)
                 text = ""
             elif args.serve:
                 text = None
@@ -179,7 +190,7 @@ def main():
             print(json.dumps({"text": text}, ensure_ascii=False), flush=True)
         return 0
     except Exception as error:
-        print(json.dumps({"error": "Seda-v0.1 işlemi başarısız. setup-stt.sh ile kurulumu kontrol edin."}), flush=True)
+        print(json.dumps({"error": "Seda-v0.2 işlemi başarısız. setup-stt.sh ile kurulumu kontrol edin."}), flush=True)
         print(f"Seda worker: {type(error).__name__}", file=sys.stderr)
         return 1
 

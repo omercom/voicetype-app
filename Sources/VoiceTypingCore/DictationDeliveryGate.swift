@@ -1,3 +1,5 @@
+import Foundation
+
 /// Main-thread state shared by transcription, translation and delivery callbacks.
 struct DictationDeliveryGate {
     private var generation: UInt64?
@@ -48,10 +50,58 @@ struct DictationDeliveryGate {
         return true
     }
 
+    /// A sent request may continue verification without blocking the next recording.
+    mutating func releaseAfterAttempt(_ generation: UInt64) -> Bool {
+        guard isDelivering(generation), injectionStarted else { return false }
+        finish()
+        return true
+    }
+
     mutating func finish() {
         generation = nil
         attempt = 0
         delivering = false
         injectionStarted = false
+    }
+}
+
+/// Main-thread ownership for a delivery that can outlive its recording.
+final class PendingDictationDelivery {
+    let generation: UInt64
+    let recoveryID: UUID?
+    let cancellation = TextInjector.InjectionCancellation()
+    private var accessibilityLease: TargetAppAccessibilityLease?
+    private(set) var attempted = false
+    private(set) var cancelled = false
+    private var completed = false
+
+    init(generation: UInt64, recoveryID: UUID?, accessibilityLease: TargetAppAccessibilityLease?) {
+        self.generation = generation
+        self.recoveryID = recoveryID
+        self.accessibilityLease = accessibilityLease
+    }
+
+    func recordAttempt(gate: inout DictationDeliveryGate) -> Bool {
+        guard !cancelled, !completed, gate.releaseAfterAttempt(generation) else { return false }
+        attempted = true
+        return true
+    }
+
+    func shouldPresent(currentGeneration: UInt64, gate: DictationDeliveryGate) -> Bool {
+        !cancelled && !completed && currentGeneration == generation && (attempted || gate.isDelivering(generation))
+    }
+
+    func cancel() {
+        cancelled = true
+        cancellation.cancel()
+    }
+
+    @discardableResult
+    func complete() -> Bool {
+        guard !completed else { return false }
+        completed = true
+        accessibilityLease?.end()
+        accessibilityLease = nil
+        return true
     }
 }

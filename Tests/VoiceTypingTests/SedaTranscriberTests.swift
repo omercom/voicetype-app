@@ -169,7 +169,7 @@ final class SedaTranscriberTests: XCTestCase {
         }
         let root = try XCTUnwrap(controller.window?.contentView)
         let control = try XCTUnwrap(segments(in: root).first { control in
-            (0..<control.segmentCount).contains { control.label(forSegment: $0) == "Seda-v0.1" }
+            (0..<control.segmentCount).contains { control.label(forSegment: $0) == "Seda-v0.2" }
         })
         let index = try XCTUnwrap(TranscriptionProviderRegistry.all.firstIndex { $0.id == "seda" })
         XCTAssertEqual(control.segmentCount, TranscriptionProviderRegistry.all.count)
@@ -242,6 +242,49 @@ final class SedaTranscriberTests: XCTestCase {
             }
             wait(for: [done], timeout: 95)
         }
+    }
+
+    func testInstalledModelLiveMatchesBatch() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["VOICETYPE_TEST_SEDA"] == "1",
+              let samplePath = environment["VOICETYPE_SEDA_SAMPLE"],
+              let pcmPath = environment["VOICETYPE_SEDA_PCM"] else {
+            throw XCTSkip("Provide an installed Seda model and matching WAV/PCM fixtures for the live test.")
+        }
+        XCTAssertTrue(SedaTranscriber.isInstalled(), "Kurulu v0.2 sağlayıcı listesinde görünmeli")
+        let wavData = try Data(contentsOf: URL(fileURLWithPath: samplePath))
+        let pcm = try Data(contentsOf: URL(fileURLWithPath: pcmPath))
+        XCTAssertGreaterThan(pcm.count, 0)
+        XCTAssertEqual(pcm.count % 2, 0)
+        let engine = SedaTranscriber()
+        defer { engine.cancel() }
+        let liveDone = expectation(description: "real Seda live result")
+        var partials: [String] = []
+        var liveText = ""
+        let session = engine.startLive(language: "tr", onInterim: { partials.append($0) }) { result in
+            XCTAssertTrue(result.success, result.error ?? "")
+            XCTAssertEqual(result.model, SedaTranscriber.model)
+            liveText = result.text
+            liveDone.fulfill()
+        }
+        for start in stride(from: 0, to: pcm.count, by: 3200) {
+            session.sendAudioChunk(pcm.subdata(in: start..<min(start + 3200, pcm.count)))
+        }
+        session.finishAudio()
+        wait(for: [liveDone], timeout: 95)
+        XCTAssertFalse(partials.isEmpty, "Canlı dikte ara metin üretmeli")
+        XCTAssertFalse(liveText.isEmpty)
+        if let suffix = environment["VOICETYPE_SEDA_EXPECTED_SUFFIX"] {
+            XCTAssertTrue(liveText.hasSuffix(suffix), "Son kelimeler eksik: \(liveText)")
+        }
+
+        let batchDone = expectation(description: "real Seda batch result")
+        engine.transcribe(audioData: wavData, language: "tr") { result in
+            XCTAssertTrue(result.success, result.error ?? "")
+            XCTAssertEqual(result.text, liveText)
+            batchDone.fulfill()
+        }
+        wait(for: [batchDone], timeout: 95)
     }
 
     func testMissingRuntimeReturnsSetupHint() {

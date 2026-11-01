@@ -50,6 +50,59 @@ final class RecoveryStorageSafetyTests: XCTestCase {
         XCTAssertFalse(store.hasRecovery())
     }
 
+    func testOverlappingRecordingsKeepFailedOlderAudioWhenNewerSucceeds() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VoiceTypingRecoveryConcurrent-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DictationRecoveryAudioStore(customDirectoryURL: directory)
+        let first = Data(repeating: 1, count: 128)
+        let second = Data(repeating: 2, count: 256)
+        let firstID = try XCTUnwrap(store.saveRecording(wavData: first))
+        let secondID = try XCTUnwrap(store.saveRecording(wavData: second))
+        XCTAssertNotEqual(firstID, secondID)
+        XCTAssertTrue(store.markFailed(error: "unverified", recordingID: firstID))
+        XCTAssertTrue(store.hasFailedRecovery())
+        XCTAssertEqual(store.getLatestAudioData(), second)
+        store.clear(recordingID: secondID)
+        XCTAssertTrue(store.hasRecovery())
+        XCTAssertEqual(store.getLatestAudioData(), first)
+        XCTAssertTrue(store.hasFailedRecovery())
+        XCTAssertEqual(try mode(directory.appendingPathComponent("recovery_\(firstID.uuidString).wav")), 0o600)
+        XCTAssertEqual(try mode(directory.appendingPathComponent("recovery_\(firstID.uuidString).json")), 0o600)
+    }
+
+    func testOlderSuccessCannotDeleteOrMarkNewerRecording() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VoiceTypingRecoveryOrdering-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DictationRecoveryAudioStore(customDirectoryURL: directory)
+        let firstID = try XCTUnwrap(store.saveRecording(wavData: Data(repeating: 1, count: 128)))
+        let second = Data(repeating: 2, count: 256)
+        let secondID = try XCTUnwrap(store.saveRecording(wavData: second))
+        store.clear(recordingID: firstID)
+        XCTAssertFalse(store.markFailed(error: "late", recordingID: firstID))
+        XCTAssertEqual(store.getLatestAudioData(), second)
+        XCTAssertFalse(store.hasFailedRecovery())
+        XCTAssertTrue(store.markFailed(error: "second", recordingID: secondID))
+        XCTAssertEqual(store.getLatestAudioData(), second)
+    }
+
+    func testLegacyRecoverySurvivesNewRecordingAndNilIdentifier() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VoiceTypingRecoveryLegacy-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DictationRecoveryAudioStore(customDirectoryURL: directory)
+        let legacy = Data(repeating: 3, count: 128)
+        XCTAssertTrue(store.saveLastRecording(wavData: legacy))
+        XCTAssertTrue(store.markFailed(error: "legacy"))
+        let newID = try XCTUnwrap(store.saveRecording(wavData: Data(repeating: 4, count: 128)))
+        XCTAssertFalse(store.markFailed(error: "wrong", recordingID: nil))
+        store.clear(recordingID: nil)
+        store.clear(recordingID: newID)
+        XCTAssertTrue(store.hasFailedRecovery())
+        XCTAssertEqual(store.getLatestAudioData(), legacy)
+    }
+
     func testExportSelectsUnusedNameWithoutReplacingExistingFiles() {
         let directory = URL(fileURLWithPath: "/test")
         let existing: Set<String> = ["ses.wav", "ses_2.wav"]

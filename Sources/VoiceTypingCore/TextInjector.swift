@@ -256,13 +256,44 @@ public class TextInjector {
         }
     }
 
+    /// Cancels one delivery without affecting earlier deliveries still checking the clipboard.
+    public final class InjectionCancellation {
+        private let lock = NSLock()
+        private var cancelled = false
+
+        public init() {}
+
+        public func cancel() {
+            lock.lock()
+            cancelled = true
+            lock.unlock()
+        }
+
+        fileprivate var isCancelled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return cancelled
+        }
+    }
+
+    /// Aktarım isteğinin gönderilmesini izler; bu olay teslim kanıtı değildir.
+    public struct DeliveryObserver {
+        let onAttempted: () -> Void
+
+        public init(onAttempted: @escaping () -> Void) {
+            self.onAttempted = onAttempted
+        }
+    }
+
     /// Yapıştırmanın gerçek sonucu. `sent` true dönse bile metin hedefe
     /// girmemiş olabilir; kesin sonuç bu değerle bildirilir.
     public enum InjectionOutcome: Equatable {
         /// Beklenen metnin hedef alana eklendiği doğrulandı.
         case verified
-        /// Cmd+V gönderildi ama alan içeriği okunamıyor (bazı editörler/terminaller).
+        /// Metin gönderildi ama hedefteki değişiklik doğrulanamadı.
         case unverifiable
+        /// Aktarım doğrulanamadı ve başka bir işlem panoyu değiştirdi.
+        case unverifiableClipboardChanged
         /// Alan okunabiliyor fakat beklenen metin değişikliği görülmedi.
         case notInserted
         /// Kayıt sırasında sekme/uygulama değişti; yanlış yere yapıştırılmadı. Metin panoda.
@@ -301,7 +332,23 @@ public class TextInjector {
                 selection = NSRange(location: range.location, length: range.length)
             }
         }
-        return FieldSnapshot(value: value, count: count, selection: selection)
+        let completeValue = completeSnapshotValue(value, count: count) { range in
+            readText(in: range, from: element)
+        }
+        return FieldSnapshot(value: completeValue, count: count, selection: selection)
+    }
+
+    /// Some accessible editors expose the text by range instead of AXValue.
+    /// Keep partial or inconsistent values unverified, and bound the extra read.
+    static func completeSnapshotValue(
+        _ value: String?, count: Int?, readRange: (NSRange) -> String?
+    ) -> String? {
+        guard let count, count >= 0, count <= 10_000 else { return value }
+        if let value, value.utf16.count == count { return value }
+        if count == 0 { return value == nil ? "" : value }
+        guard let complete = readRange(NSRange(location: 0, length: count)),
+              complete.utf16.count == count else { return value }
+        return complete
     }
 
     static func outcome(
@@ -431,7 +478,8 @@ public class TextInjector {
     /// 4. Teslimat doğrulanmadıysa otomatik gönderim ve pano geri yüklemesi yapılmaz.
     ///
     /// Dönüş değeri yalnızca işlemin başlatılıp başlatılmadığıdır; kesin
-    /// sonuç `completion` ile ana thread'de gelir.
+    /// sonuç `completion` ile ana thread'de gelir. `onAttempted`, aktarım
+    /// isteği gönderildiğinde çağrılır ve başarılı teslim anlamına gelmez.
     @discardableResult
     public func paste(
         text: String,
@@ -442,22 +490,28 @@ public class TextInjector {
         autoSubmitKey: String = "return",
         typeDirectly: Bool = false,
         restoreOriginalTarget: Bool = false,
+        cancellation: InjectionCancellation? = nil,
+        observer: DeliveryObserver? = nil,
         completion: ((InjectionOutcome) -> Void)? = nil
     ) -> Bool {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
 
         let generation = currentGeneration()
+        let attempted: () -> Void = {
+            guard let observer else { return }
+            DispatchQueue.main.async(execute: observer.onAttempted)
+        }
         let finish: (InjectionOutcome) -> Void = { outcome in
             DispatchQueue.main.async { completion?(outcome) }
         }
         queue.async { [self] in
-            let cancelled = { self.currentGeneration() != generation }
+            let cancelled = { self.currentGeneration() != generation || cancellation?.isCancelled == true }
             guard !cancelled() else { return finish(.cancelled) }
             performPaste(text: text, targetContext: targetContext,
                          restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
                          autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
                          typeDirectly: typeDirectly, restoreOriginalTarget: restoreOriginalTarget,
-                         isCancelled: cancelled, finish: finish)
+                         isCancelled: cancelled, onAttempted: attempted, finish: finish)
         }
         return true
     }
@@ -466,7 +520,7 @@ public class TextInjector {
         text: String, targetContext: TargetContext?, restoreClipboard: Bool,
         pasteDelayMs: Int, autoSubmit: Bool, autoSubmitKey: String, typeDirectly: Bool,
         restoreOriginalTarget: Bool, isCancelled: @escaping () -> Bool,
-        finish: @escaping (InjectionOutcome) -> Void
+        onAttempted: @escaping () -> Void, finish: @escaping (InjectionOutcome) -> Void
     ) {
         guard !isCancelled() else { return finish(.cancelled) }
         if case let .changed(reason) = checkTarget(targetContext) {
@@ -495,14 +549,14 @@ public class TextInjector {
             return pasteViaClipboard(
                 text: text, target: targetContext, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
                 autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
-                isCancelled: isCancelled, finish: finish
+                isCancelled: isCancelled, onAttempted: onAttempted, finish: finish
             )
         }
         insertWithoutInputMethod(
             text: text, target: targetContext, typeDirectly: typeDirectly,
             restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
             autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
-            isCancelled: isCancelled, finish: finish
+            isCancelled: isCancelled, onAttempted: onAttempted, finish: finish
         )
     }
 
@@ -519,6 +573,7 @@ public class TextInjector {
         autoSubmit: Bool,
         autoSubmitKey: String,
         isCancelled: @escaping () -> Bool,
+        onAttempted: @escaping () -> Void,
         finish: @escaping (InjectionOutcome) -> Void
     ) {
         guard !isCancelled() else { return finish(.cancelled) }
@@ -550,7 +605,8 @@ public class TextInjector {
                     readRange: { Self.readText(in: $0, from: field) }
                 )
             }
-            switch SelectedTextTransaction.run(text: text, autoSubmit: autoSubmit, environment: environment) {
+            switch SelectedTextTransaction.run(text: text, autoSubmit: autoSubmit, environment: environment,
+                                               onAttempted: onAttempted) {
             case .unsupported:
                 break
             case let .finished(.targetChanged(reason)):
@@ -564,7 +620,7 @@ public class TextInjector {
         pasteViaClipboard(
             text: text, target: target, restoreClipboard: restoreClipboard, pasteDelayMs: pasteDelayMs,
             autoSubmit: autoSubmit, autoSubmitKey: autoSubmitKey,
-            isCancelled: isCancelled, finish: finish
+            isCancelled: isCancelled, onAttempted: onAttempted, finish: finish
         )
     }
 
@@ -602,6 +658,7 @@ public class TextInjector {
         autoSubmit: Bool,
         autoSubmitKey: String,
         isCancelled: @escaping () -> Bool,
+        onAttempted: @escaping () -> Void,
         finish: @escaping (InjectionOutcome) -> Void
     ) {
         let environment = clipboardEnvironment(text: text, target: target,
@@ -609,7 +666,8 @@ public class TextInjector {
                                                autoSubmitKey: autoSubmitKey, isCancelled: isCancelled)
         let outcome = ClipboardPasteTransaction.run(
             text: text, pasteDelay: Double(max(0, pasteDelayMs)) / 1000,
-            restoreClipboard: restoreClipboard, autoSubmit: autoSubmit, environment: environment
+            restoreClipboard: restoreClipboard, autoSubmit: autoSubmit, environment: environment,
+            onAttempted: onAttempted
         )
         print("[TextInjector] Teslim sonucu: \(outcome), uzunluk: \(text.utf16.count)")
         finish(outcome)
@@ -701,6 +759,8 @@ public class TextInjector {
         text: String,
         targetContext: TargetContext? = nil,
         pasteDelayMs: Int = 20,
+        cancellation: InjectionCancellation? = nil,
+        observer: DeliveryObserver? = nil,
         completion: ((InjectionOutcome) -> Void)? = nil
     ) -> Bool {
         let config = configProvider()
@@ -713,6 +773,8 @@ public class TextInjector {
             autoSubmitKey: config.auto_submit_key,
             typeDirectly: config.type_text_directly,
             restoreOriginalTarget: config.restore_target_focus,
+            cancellation: cancellation,
+            observer: observer,
             completion: completion
         )
     }

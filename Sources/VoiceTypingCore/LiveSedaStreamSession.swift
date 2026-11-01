@@ -56,7 +56,7 @@ final class LiveSedaStreamSession: LiveStreamSession {
             guard !self.isStopped, self.acceptingAudio else { return }
             self.byteCount += chunk.count
             guard chunk.count % 2 == 0, self.byteCount <= 19_200_000 else {
-                self.failTransport("Seda-v0.1 geçerli PCM16 ve en fazla 10 dakika ses kabul eder.")
+                self.failTransport("Seda-v0.2 geçerli PCM16 ve en fazla 10 dakika ses kabul eder.")
                 return
             }
             // Even callers with large buffers use bounded 100 ms protocol packets.
@@ -91,7 +91,7 @@ final class LiveSedaStreamSession: LiveStreamSession {
             self.onFinish = onFinish
             self.onTransportFailure = onFailure
             do { try writer(["op": "start", "id": self.id.uuidString]) }
-            catch { self.failTransport("Seda-v0.1 canlı oturumu başlatılamadı."); return }
+            catch { self.failTransport("Seda-v0.2 canlı oturumu başlatılamadı."); return }
             let commands = self.pending
             self.pending.removeAll()
             for command in commands { self.sendOrBuffer(command) }
@@ -146,6 +146,6 @@ final class LiveSedaStreamSession: LiveStreamSession {
                 lock.lock(); finishSent = true; lock.unlock()
                 try writer(["op": "finish", "id": id.uuidString])
             }
-        } catch { failTransport("Seda-v0.1 canlı bağlantısı kapandı.") }
+        } catch { failTransport("Seda-v0.2 canlı bağlantısı kapandı.") }
     }
 }

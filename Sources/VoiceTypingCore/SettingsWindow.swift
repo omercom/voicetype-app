@@ -627,7 +627,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         providerPopUp.addItem(withTitle: "Google Gemini Live (Canlı Akış)")
         providerPopUp.addItem(withTitle: "Groq Whisper (whisper-large-v3)")
         providerPopUp.addItem(withTitle: "AssemblyAI Dictation API (Universal-3.5 Pro)")
-        providerPopUp.addItem(withTitle: "Harfiyen · Seda-v0.1 (Yerel Türkçe)")
+        providerPopUp.addItem(withTitle: "Harfiyen · Seda-v0.2 (Yerel Türkçe)")
         providerPopUp.isHidden = true
         container.addSubview(providerPopUp)
 
@@ -852,8 +852,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             providerNoteLabel.stringValue = "🎙 AssemblyAI Dictation API: Sesi gönderime hazır metne dönüştürür; dolgu ve öz-düzeltmeleri varsayılan olarak temizler."
         case "seda":
             providerNoteLabel.stringValue = sedaInstallationCheck()
-                ? "Seda-v0.1: Yerel canlı Türkçe dikte ve HUD önizlemesi. Beam 4 + dil modeli; noktalama ve özel sözlük yoktur."
-                : "Seda-v0.1 kurulu değil. Yeniden kurun veya başka bir sağlayıcı seçin."
+                ? "Seda-v0.2: Yerel canlı Türkçe dikte ve HUD önizlemesi. Beam 4 + dil modeli; noktalama ve özel sözlük yoktur."
+                : "Seda-v0.2 kurulu değil. Yeniden kurun veya başka bir sağlayıcı seçin."
         default:
             providerNoteLabel.stringValue = "Sağlayıcı ayarını kontrol edin."
         }
@@ -1338,7 +1338,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         speechActionButton.action = #selector(openSpeechSettingsClicked)
         container.addSubview(speechActionButton)
 
-        let speechNote = createNoteLabel(text: "Yalnızca Apple Speech için gereklidir; Seda-v0.1 bu izni kullanmaz.", y: 110)
+        let speechNote = createNoteLabel(text: "Yalnızca Apple Speech için gereklidir; Seda-v0.2 bu izni kullanmaz.", y: 110)
         container.addSubview(speechNote)
 
         // Ayırıcı
@@ -1520,30 +1520,6 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         tipContent.addSubview(tipText)
         tipCard.contentView = tipContent
         container.addSubview(tipCard)
-
-        // 5. Raycast entegrasyonu için kısa kullanım notu
-        let raycastCard = NSBox(frame: NSRect(x: 45, y: 388, width: 560, height: 84))
-        raycastCard.boxType = .custom
-        raycastCard.cornerRadius = 8
-        raycastCard.borderWidth = 1
-        raycastCard.borderColor = NSColor.separatorColor.withAlphaComponent(0.22)
-        raycastCard.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.3)
-        raycastCard.titlePosition = .noTitle
-
-        let raycastContent = FlippedContentView(frame: raycastCard.bounds)
-        let raycastTitle = NSTextField(labelWithString: "🚀 Raycast ile kullanım")
-        raycastTitle.frame = NSRect(x: 16, y: 8, width: 528, height: 18)
-        raycastTitle.font = NSFont.systemFont(ofSize: 11.5, weight: .semibold)
-        raycastTitle.textColor = .systemBlue
-        raycastContent.addSubview(raycastTitle)
-
-        let raycastText = NSTextField(wrappingLabelWithString: "Eklentiyi README'deki adımlarla kurun. Raycast'te Start VoiceType Dictation ile başlatın; Stop VoiceType Dictation ile bitirin. Bağlantı henüz gerçek kullanımda doğrulanmadı.")
-        raycastText.frame = NSRect(x: 16, y: 28, width: 528, height: 48)
-        raycastText.font = NSFont.systemFont(ofSize: 11)
-        raycastText.textColor = .secondaryLabelColor
-        raycastContent.addSubview(raycastText)
-        raycastCard.contentView = raycastContent
-        container.addSubview(raycastCard)
 
         return container
     }

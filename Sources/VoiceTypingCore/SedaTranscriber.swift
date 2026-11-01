@@ -3,10 +3,10 @@ import Darwin
 
 /// CPU-only local STT. A reusable worker keeps the model loaded between dictations.
 final class SedaTranscriber {
-    static let model = "atasoglu/seda-v0.1"
-    static let revision = "b5cf32ae4936968b284df3f1c4c79714af71e1fe"
+    static let model = "atasoglu/seda-v0.2"
+    static let revision = "62e2cc1615a63c433b6956214a548267ada5a774"
     static let runtimeURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".voice_typing/stt/seda")
+        .appendingPathComponent(".voice_typing/stt/seda-v0.2")
     private let pythonURL: URL
     private let workerURL: URL?
     private let timeoutSeconds: Double
@@ -43,17 +43,23 @@ final class SedaTranscriber {
         runtimeURL: URL = runtimeURL,
         workerURL: URL? = VoiceTypeResources.url(forResource: "seda_worker", withExtension: "py")
     ) -> Bool {
+        struct Installation: Decodable {
+            let model: String
+            let revision: String
+        }
         let python = runtimeURL.appendingPathComponent(".venv/bin/python")
-        let snapshot = runtimeURL.appendingPathComponent("models/models--atasoglu--seda-v0.1/snapshots/\(revision)")
+        let snapshot = runtimeURL.appendingPathComponent("models/models--atasoglu--seda-v0.2/snapshots/\(revision)")
+        guard let data = try? Data(contentsOf: runtimeURL.appendingPathComponent("ready.json")),
+              let installation = try? JSONDecoder().decode(Installation.self, from: data),
+              installation.model == model, installation.revision == revision else { return false }
         return FileManager.default.isExecutableFile(atPath: python.path)
-            && FileManager.default.fileExists(atPath: runtimeURL.appendingPathComponent("ready.json").path)
             && requiredModelFiles.allSatisfy { FileManager.default.isReadableFile(atPath: snapshot.appendingPathComponent($0).path) }
             && workerURL.map { FileManager.default.isReadableFile(atPath: $0.path) } == true
     }
 
     static func readinessMessage(language: String) -> String? {
-        guard supportsLanguage(language) else { return "Seda-v0.1 yalnızca Türkçe destekler. Dil ayarını tr yapın." }
-        guard isInstalled() else { return "Seda-v0.1 kurulmadı. Önce setup-stt.sh çalıştırın." }
+        guard supportsLanguage(language) else { return "Seda-v0.2 yalnızca Türkçe destekler. Dil ayarını tr yapın." }
+        guard isInstalled() else { return "Seda-v0.2 kurulmadı. Önce setup-stt.sh çalıştırın." }
         return nil
     }
 
@@ -88,22 +94,22 @@ final class SedaTranscriber {
                 let line = Data(responseBuffer.prefix(upTo: newline))
                 responseBuffer.removeSubrange(...newline)
                 guard let response = try? JSONDecoder().decode(WorkerResponse.self, from: line) else {
-                    throw SedaError.message("Seda-v0.1 yanıtı okunamadı.")
+                    throw SedaError.message("Seda-v0.2 yanıtı okunamadı.")
                 }
                 return response
             }
             let chunk = output.availableData
             guard !chunk.isEmpty else {
-                throw SedaError.message("Seda-v0.1 kapandı veya zaman aşımına uğradı. setup-stt.sh ile kontrol edin.")
+                throw SedaError.message("Seda-v0.2 kapandı veya zaman aşımına uğradı. setup-stt.sh ile kontrol edin.")
             }
             responseBuffer.append(chunk)
-            guard responseBuffer.count <= 65536 else { throw SedaError.message("Seda-v0.1 yanıtı çok büyük.") }
+            guard responseBuffer.count <= 65536 else { throw SedaError.message("Seda-v0.2 yanıtı çok büyük.") }
         }
     }
 
     private func ensureWorker(token: UUID) throws -> (Process, FileHandle, FileHandle, Bool) {
         guard FileManager.default.isExecutableFile(atPath: pythonURL.path), workerURL != nil else {
-            throw SedaError.message("Seda-v0.1 kurulmadı. Önce setup-stt.sh çalıştırın.")
+            throw SedaError.message("Seda-v0.2 kurulmadı. Önce setup-stt.sh çalıştırın.")
         }
         lock.lock()
         guard generation == token else { lock.unlock(); throw SedaError.message("Dikte iptal edildi.") }
@@ -124,7 +130,7 @@ final class SedaTranscriber {
             task.standardError = FileHandle.nullDevice
             _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
             do { try task.run() }
-            catch { lock.unlock(); throw SedaError.message("Seda-v0.1 başlatılamadı. setup-stt.sh ile kontrol edin.") }
+            catch { lock.unlock(); throw SedaError.message("Seda-v0.2 başlatılamadı. setup-stt.sh ile kontrol edin.") }
             process = task; inputPipe = input; outputPipe = output
             responseBuffer.removeAll(); workerUsable = true
         }
@@ -155,14 +161,14 @@ final class SedaTranscriber {
                 lock.unlock()
             }
         }
-        if isNew, try readResponse(output).ready != true { throw SedaError.message("Seda-v0.1 yüklenemedi.") }
+        if isNew, try readResponse(output).ready != true { throw SedaError.message("Seda-v0.2 yüklenemedi.") }
         let request = try JSONSerialization.data(withJSONObject: ["audio": audioURL.path]) + Data([10])
         lock.lock()
         guard generation == token, task.isRunning, workerUsable else { lock.unlock(); throw SedaError.message("Dikte iptal edildi.") }
         do { try input.write(contentsOf: request); lock.unlock() }
-        catch { lock.unlock(); throw SedaError.message("Seda-v0.1 bağlantısı kapandı.") }
+        catch { lock.unlock(); throw SedaError.message("Seda-v0.2 bağlantısı kapandı.") }
         let response = try readResponse(output)
-        guard let text = response.text else { throw SedaError.message(response.error ?? "Seda-v0.1 yanıtı okunamadı.") }
+        guard let text = response.text else { throw SedaError.message(response.error ?? "Seda-v0.2 yanıtı okunamadı.") }
         succeeded = true
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -189,12 +195,12 @@ final class SedaTranscriber {
                 lock.unlock()
             }
         }
-        if isNew, try readResponse(output).ready != true { throw SedaError.message("Seda-v0.1 yüklenemedi.") }
+        if isNew, try readResponse(output).ready != true { throw SedaError.message("Seda-v0.2 yüklenemedi.") }
         // Recording duration is separate from model-start and finish timeouts.
         timer.schedule(deadline: .now() + 600 + timeoutSeconds)
         session.attach(writer: { [weak self] message in
             guard self?.isCurrent(token) == true, task.isRunning else {
-                throw SedaError.message("Seda-v0.1 canlı oturumu kapandı.")
+                throw SedaError.message("Seda-v0.2 canlı oturumu kapandı.")
             }
             let data = try JSONSerialization.data(withJSONObject: message) + Data([10])
             try input.write(contentsOf: data)
@@ -203,29 +209,29 @@ final class SedaTranscriber {
         while true {
             let response = try readResponse(output)
             if let error = response.error { throw SedaError.message(error) }
-            guard response.id == token else { throw SedaError.message("Seda-v0.1 oturum yanıtı geçersiz.") }
+            guard response.id == token else { throw SedaError.message("Seda-v0.2 oturum yanıtı geçersiz.") }
             switch response.event {
             case "started": break
             case "interim":
-                guard let text = response.text else { throw SedaError.message("Seda-v0.1 canlı metni eksik.") }
+                guard let text = response.text else { throw SedaError.message("Seda-v0.2 canlı metni eksik.") }
                 session.receiveInterim(text)
             case "final":
-                guard session.hasSentFinish else { throw SedaError.message("Seda-v0.1 canlı oturumu erken sonlandı.") }
-                guard let text = response.text else { throw SedaError.message("Seda-v0.1 nihai metni eksik.") }
+                guard session.hasSentFinish else { throw SedaError.message("Seda-v0.2 canlı oturumu erken sonlandı.") }
+                guard let text = response.text else { throw SedaError.message("Seda-v0.2 nihai metni eksik.") }
                 succeeded = true
                 return text
-            default: throw SedaError.message("Seda-v0.1 canlı yanıtı okunamadı.")
+            default: throw SedaError.message("Seda-v0.2 canlı yanıtı okunamadı.")
             }
         }
     }
 
     private func run(audioData: Data, token: UUID) throws -> String {
         guard FileManager.default.isExecutableFile(atPath: pythonURL.path), workerURL != nil else {
-            throw SedaError.message("Seda-v0.1 kurulmadı. Önce setup-stt.sh çalıştırın.")
+            throw SedaError.message("Seda-v0.2 kurulmadı. Önce setup-stt.sh çalıştırın.")
         }
         guard audioData.count > 44, audioData.count <= 20_000_000,
               audioData.prefix(4) == Data("RIFF".utf8) else {
-            throw SedaError.message("Seda-v0.1 için geçerli bir WAV kaydı gerekir (en fazla 20 MB).")
+            throw SedaError.message("Seda-v0.2 için geçerli bir WAV kaydı gerekir (en fazla 20 MB).")
         }
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("voicetype-seda-\(token)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false,
@@ -266,7 +272,7 @@ final class SedaTranscriber {
         queue.async {
             do {
                 guard Self.supportsLanguage(language) else {
-                    throw SedaError.message("Seda-v0.1 yalnızca Türkçe destekler. Dil ayarını tr yapın.")
+                    throw SedaError.message("Seda-v0.2 yalnızca Türkçe destekler. Dil ayarını tr yapın.")
                 }
                 let text = try self.runLive(session, token: token)
                 self.lock.lock()
@@ -295,7 +301,7 @@ final class SedaTranscriber {
             var result: TranscriptionResult
             do {
                 guard Self.supportsLanguage(language) else {
-                    throw SedaError.message("Seda-v0.1 yalnızca Türkçe destekler. Dil ayarını tr yapın.")
+                    throw SedaError.message("Seda-v0.2 yalnızca Türkçe destekler. Dil ayarını tr yapın.")
                 }
                 let text = try self.run(audioData: audioData, token: token)
                 result = TranscriptionResult(success: true, text: text, latency: 0, provider: "seda", model: Self.model)

@@ -20,7 +20,9 @@ struct SelectedTextTransaction {
         var readRange: (NSRange) -> String? = { _ in nil }
     }
 
-    static func run(text: String, autoSubmit: Bool, environment env: Environment) -> Attempt {
+    static func run(
+        text: String, autoSubmit: Bool, environment env: Environment, onAttempted: () -> Void = {}
+    ) -> Attempt {
         guard !env.isCancelled() else { return .finished(.cancelled) }
         guard env.supportsSelectedText() else { return .unsupported }
         guard !env.isCancelled() else { return .finished(.cancelled) }
@@ -32,6 +34,7 @@ struct SelectedTextTransaction {
         guard env.writeSelectedText(text) else {
             return .finished(.failed(reason: "Metin aktarımı doğrulanamadı; hedefi kontrol edin"))
         }
+        onAttempted()
 
         guard before.isReadable else { return .finished(.unverifiable) }
         let deadline = env.now() + TextInjector.verificationTimeout(for: text, before: before)

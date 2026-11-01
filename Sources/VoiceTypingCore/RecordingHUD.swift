@@ -418,16 +418,10 @@ public class RecordingHUD: NSObject {
             waveformBars.append(bar)
         }
 
-        // 3c. Çentik (Notch) modu için AYRI ekolayzır — referansın BİREBİR
-        // ölçüleriyle (bkz. _make_audio_meter_view / _audio_bar_rects):
-        // 20x20pt kutu, 5 simetrik çubuk, çubuk genişliği = kutu/10,
-        // çubuklar dikey MERKEZDEN büyür, aktifken yeşil / sessizken gri.
-        //
-        // Neden ayrı görünüm: `waveformContainer` 31pt'lik `indicatorArea`
-        // içinde yaşar; ona panel genişliğinde koordinat vermek kırpılmasına
-        // yol açıyordu (VU metre bu yüzden görünmüyordu).
-        let meterSize = NotchAudioMeter.meterSize
-        notchMeterContainer = NSView(frame: NSRect(x: 0, y: 0, width: meterSize, height: meterSize))
+        // 3c. Çentik (Notch) modu için ayrı ses göstergesi.
+        // Kapsülün 31pt'lik indicatorArea görünümünü kullanmak, çentik
+        // koordinatlarını kırpıyordu; dalga doğrudan içerik görünümündedir.
+        notchMeterContainer = NSView(frame: NSRect(origin: .zero, size: NotchWaveView.size))
         notchMeterContainer.wantsLayer = true
         notchMeterContainer.isHidden = true
         contentView.addSubview(notchMeterContainer)
@@ -442,7 +436,6 @@ public class RecordingHUD: NSObject {
         contentView.addSubview(notchShapeView, positioned: .below, relativeTo: notchMeterContainer)
 
         // Çentik ses göstergesi: çubuklar yerine akışkan dalga çizgisi.
-        notchMeterContainer.setFrameSize(NotchWaveView.size)
         notchWave = NotchWaveView(frame: NSRect(origin: .zero, size: NotchWaveView.size))
         notchMeterContainer.addSubview(notchWave)
 
@@ -1530,11 +1523,7 @@ public class RecordingHUD: NSObject {
                 : 1.0
         }
 
-        // Çentik ekolayzırı: referansın `_audio_bar_rects` formülü birebir.
-        // Yükseklik = 2 + (kutu-2) * level * ağırlık; çubuklar dikey MERKEZDEN
-        // simetrik büyür. Aktifken yeşil, sessizken gri. Tüm sabitler ve
-        // formüller NotchAudioMeter'da tek kaynaktan gelir ve testlerle
-        // kilitlidir (referans ölçüleri sessizce kaymasın diye).
+        // Çentik dalgası aynı ses seviyesini zaman tabanlı yumuşatmayla izler.
         let now = ProcessInfo.processInfo.systemUptime
         let dt = notchLastTick.map { max(0.0, now - $0) } ?? (1.0 / 30.0)
         notchLastTick = now

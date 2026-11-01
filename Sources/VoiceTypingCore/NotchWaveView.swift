@@ -50,7 +50,7 @@ final class NotchWaveView: NSView {
         glow.actions = ["opacity": NSNull(), "frame": NSNull()]
         layer?.addSublayer(glow)
 
-        for (shape, alpha, width) in [(echo, 0.32, 1.2), (primary, 1.0, 1.8)] {
+        for (shape, alpha, width) in [(echo, 0.32, 1.2), (primary, 1.0, 2.0)] {
             shape.fillColor = nil
             shape.strokeColor = NSColor(calibratedWhite: 1, alpha: alpha).cgColor
             shape.lineWidth = width
@@ -71,6 +71,7 @@ final class NotchWaveView: NSView {
         primaryColor.shadowOffset = .zero
         primaryColor.actions = ["colors": NSNull(), "shadowOpacity": NSNull()]
         layer?.addSublayer(primaryColor)
+        reset()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) kullanılmaz") }
@@ -79,6 +80,9 @@ final class NotchWaveView: NSView {
         phase = 0
         lastTick = nil
         glowOpacity = 0
+        // İlk ses örneğini beklemeden sessiz durum çizgisini göster.
+        render(level: 0, mode: .listening, animated: false)
+        lastTick = nil
     }
 
     /// - Parameters:
@@ -93,8 +97,8 @@ final class NotchWaveView: NSView {
         let speed: CGFloat
         switch mode {
         case .listening:
-            // Sessizlikte ince kıpırtı, konuşunca yüksekliğin neredeyse tamamı.
-            amplitude = 0.6 + 8.4 * min(1, max(0, level)).squareRoot()
+            // Sessizlikte görünür çizgi, konuşunca yüksekliğin neredeyse tamamı.
+            amplitude = 1.2 + 7.8 * min(1, max(0, level)).squareRoot()
             speed = 7 + 10 * level
         case .processing:
             amplitude = 3.2

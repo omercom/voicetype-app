@@ -78,6 +78,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeTargetContext: TargetContext?
     private var activeDictationConfig: AppConfig?
     private var activeAccessibilityLease: TargetAppAccessibilityLease?
+    private var activeRecoveryID: UUID?
+    private var activeDelivery: PendingDictationDelivery?
+    private var pendingDeliveries: [UInt64: PendingDictationDelivery] = [:]
     private var recoverAudioMenuItem: NSMenuItem?
     private var postRollWorkItem: DispatchWorkItem?
     private var currentLiveSession: (any LiveStreamSession)?
@@ -351,7 +354,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         assemblyAIMenuItem.target = self
         providerMenu.addItem(assemblyAIMenuItem)
 
-        sedaMenuItem = NSMenuItem(title: "Harfiyen · Seda-v0.1 (yerel Türkçe)", action: #selector(selectSedaProvider), keyEquivalent: "")
+        sedaMenuItem = NSMenuItem(title: "Harfiyen · Seda-v0.2 (yerel Türkçe)", action: #selector(selectSedaProvider), keyEquivalent: "")
         sedaMenuItem.target = self
         providerMenu.addItem(sedaMenuItem)
 
@@ -401,7 +404,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // Kurtarma Ses Deposu (Dictation Recovery)
-        recoverAudioMenuItem = NSMenuItem(title: "💾 Son Sesi Masaüstüne Kaydet", action: #selector(exportRecoveredAudioAction), keyEquivalent: "")
+        recoverAudioMenuItem = NSMenuItem(title: Self.recoveryMenuTitle, action: #selector(exportRecoveredAudioAction), keyEquivalent: "")
         recoverAudioMenuItem?.target = self
         if let recItem = recoverAudioMenuItem {
             menu.addItem(recItem)
@@ -464,7 +467,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         assemblyAIMenuItem.state = (activeProvider == "assemblyai") ? .on : .off
         let sedaInstalled = SedaTranscriber.isInstalled()
         Self.updateSedaMenuItem(sedaMenuItem, installed: sedaInstalled, activeProvider: activeProvider)
-        let providerNames = ["apple": "Apple", "gemini": "Gemini", "groq": "Groq", "assemblyai": "AssemblyAI", "seda": "Seda-v0.1"]
+        let providerNames = ["apple": "Apple", "gemini": "Gemini", "groq": "Groq", "assemblyai": "AssemblyAI", "seda": "Seda-v0.2"]
         let unavailable = activeProvider == "seda" && !sedaInstalled ? " (kurulu değil)" : ""
         providerParentMenuItem?.title = "Ses Tanıma: \(providerNames[activeProvider] ?? activeProvider)\(unavailable)"
 
@@ -511,7 +514,18 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         if !isRecording && !isTranscribing && !isFinishingRecord && revertStatusTimer == nil {
             statusMenuItem?.title = dictationReadinessMessage().map { "Durum: \($0)" } ?? readyMenuText
         }
-        recoverAudioMenuItem?.isHidden = !DictationRecoveryAudioStore.shared.hasRecovery()
+        refreshRecoveryMenu()
+    }
+
+    static let recoveryMenuTitle = "💾 Son Sesi Masaüstüne Kaydet"
+
+    static func updateRecoveryMenu(_ item: NSMenuItem?, hasRecovery: Bool) {
+        item?.isHidden = !hasRecovery
+        item?.title = recoveryMenuTitle
+    }
+
+    private func refreshRecoveryMenu() {
+        Self.updateRecoveryMenu(recoverAudioMenuItem, hasRecovery: DictationRecoveryAudioStore.shared.hasRecovery())
     }
 
     @objc private func toggleRecordAction() {
@@ -1092,7 +1106,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             self.lastRecordedAudioData = audioData
-            _ = DictationRecoveryAudioStore.shared.saveLastRecording(wavData: audioData)
+            self.activeRecoveryID = DictationRecoveryAudioStore.shared.saveRecording(wavData: audioData)
 
             if let liveSession = self.currentLiveSession {
                 self.isTranscribing = true
@@ -1123,6 +1137,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleTranscriptionResult(result: TranscriptionResult, config: AppConfig, generation: UInt64, attempt: UInt64) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.deliveryGate.acceptsResult(generation, attempt: attempt) else { return }
+            let recoveryID = self.activeRecoveryID
 
             // Canlı sağlayıcı, post-roll penceresinde bile sonucu mikrofon
             // kapanmadan bildirebilir. Hedefe erken metin yapıştırmamak için
@@ -1151,8 +1166,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                     let polishedText = TextPolisher.shared.polish(text: recognizedText, config: config, targetContext: target)
                     guard !polishedText.isEmpty else {
                         self.finishDictationDelivery()
-                        let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: "Metin oluşturulamadı")
-                        self.recoverAudioMenuItem?.isHidden = !recoveryAvailable
+                        let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: "Metin oluşturulamadı", recordingID: recoveryID)
+                        self.refreshRecoveryMenu()
                         BackgroundAudioController.shared.handleDictationEnded(config: config)
                         let message = recoveryAvailable ? "Metin oluşturulamadı · Ses korundu" : "Metin oluşturulamadı · Ses kurtarılamadı"
                         RecordingHUD.shared.showNotice(message: message)
@@ -1173,20 +1188,58 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                         // Akıllı Boşluk (Smart Spacing): Ardışık diktelerde kelimelerin birbirine yapışmasını önler
                         let textToInject = TextPolisher.applySmartSpacing(text)
 
+                        let delivery = PendingDictationDelivery(
+                            generation: generation, recoveryID: recoveryID,
+                            accessibilityLease: self.activeAccessibilityLease
+                        )
+                        self.activeAccessibilityLease = nil
+                        self.activeDelivery = delivery
+                        self.pendingDeliveries[generation] = delivery
                         let injectionStarted = TextInjector.shared.inject(
                             text: textToInject,
                             targetContext: target,
-                            pasteDelayMs: config.paste_delay_ms
+                            pasteDelayMs: config.paste_delay_ms,
+                            cancellation: delivery.cancellation,
+                            observer: .init(onAttempted: { [weak self] in
+                                guard let self, self.activeDelivery === delivery,
+                                      delivery.recordAttempt(gate: &self.deliveryGate) else { return }
+                                // The request is sent, not necessarily verified. Keep its
+                                // lease and recovery file until the background result arrives.
+                                self.finishDictationDelivery()
+                                RecordingHUD.shared.dismiss(animated: true)
+                                self.setStatus(title: "⏳", menuText: "Durum: Aktarım kontrol ediliyor...")
+                            })
                         ) { [weak self] outcome in
-                            guard let self, self.deliveryGate.isDelivering(generation) else { return }
-                            self.presentInjectionOutcome(outcome, latency: result.latency)
+                            guard let self else { return }
+                            let showFeedback = delivery.shouldPresent(
+                                currentGeneration: self.pendingRecordStartGeneration, gate: self.deliveryGate
+                            )
+                            guard delivery.complete() else { return }
+                            self.pendingDeliveries.removeValue(forKey: generation)
+                            if self.activeDelivery === delivery {
+                                self.finishDictationDelivery()
+                            }
+                            let store = DictationRecoveryAudioStore.shared
+                            let recoveryAvailable: Bool
+                            if outcome == .verified {
+                                store.clear(recordingID: delivery.recoveryID)
+                                recoveryAvailable = false
+                            } else {
+                                recoveryAvailable = store.markFailed(error: "Metin teslimi doğrulanamadı", recordingID: delivery.recoveryID)
+                            }
+                            self.refreshRecoveryMenu()
+                            if showFeedback {
+                                self.presentInjectionOutcome(outcome, latency: result.latency, recoveryAvailable: recoveryAvailable)
+                            }
                         }
                         BackgroundAudioController.shared.handleDictationEnded(config: config)
 
                         if !injectionStarted {
+                            delivery.complete()
+                            self.pendingDeliveries.removeValue(forKey: generation)
                             self.finishDictationDelivery()
-                            let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: "Metin hedef alana yapıştırılamadı")
-                            self.recoverAudioMenuItem?.isHidden = !recoveryAvailable
+                            let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: "Metin hedef alana yapıştırılamadı", recordingID: recoveryID)
+                            self.refreshRecoveryMenu()
                             SoundManager.shared.playCancel()
                             HapticManager.shared.playCancel()
                             let message = recoveryAvailable ? "Yapıştırılamadı · Ses korundu" : "Yapıştırılamadı · Ses kurtarılamadı"
@@ -1222,8 +1275,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     self.finishDictationDelivery()
                     self.activeTargetContext = nil
-                    DictationRecoveryAudioStore.shared.clear()
-                    self.recoverAudioMenuItem?.isHidden = true
+                    DictationRecoveryAudioStore.shared.clear(recordingID: recoveryID)
+                    self.refreshRecoveryMenu()
                     BackgroundAudioController.shared.handleDictationEnded(config: config)
                     RecordingHUD.shared.showNotice(message: "Ses algılanmadı · Tekrar deneyin")
                     self.setStatus(title: "🔇", menuText: "Ses algılanmadı — tekrar deneyin", revertAfter: 1.8)
@@ -1235,8 +1288,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                     self.currentLiveSession = nil
                     self.activeTargetContext = nil
                     self.lastRecordedAudioData = nil
-                    DictationRecoveryAudioStore.shared.clear()
-                    self.recoverAudioMenuItem?.isHidden = true
+                    DictationRecoveryAudioStore.shared.clear(recordingID: recoveryID)
+                    self.refreshRecoveryMenu()
                     BackgroundAudioController.shared.handleDictationEnded(config: config)
                     RecordingHUD.shared.showNotice(message: "Ses algılanmadı · Tekrar deneyin")
                     self.setStatus(title: "🔇", menuText: "Ses algılanmadı — tekrar deneyin", revertAfter: 1.8)
@@ -1285,8 +1338,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self.lastRecordedAudioData = nil
                 let rawError = result.error?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 let errMsg = rawError.isEmpty ? "Bilinmeyen hata" : rawError
-                let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: errMsg)
-                self.recoverAudioMenuItem?.isHidden = !recoveryAvailable
+                let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: errMsg, recordingID: recoveryID)
+                self.refreshRecoveryMenu()
                 BackgroundAudioController.shared.handleDictationEnded(config: config)
                 SoundManager.shared.playCancel()
                 HapticManager.shared.playCancel()
@@ -1306,22 +1359,15 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         liveTranslation?.cancel()
         liveTranslation = nil
         activeDictationConfig = nil
+        activeRecoveryID = nil
+        activeDelivery = nil
         deliveryGate.finish()
         activeAccessibilityLease?.end()
         activeAccessibilityLease = nil
     }
 
     /// Aktarımın gerçek sonucunu ve ses kurtarma durumunu kullanıcıya gösterir.
-    private func presentInjectionOutcome(_ outcome: TextInjector.InjectionOutcome, latency: Double) {
-        finishDictationDelivery()
-        var recoveryAvailable = false
-        if outcome == .verified {
-            DictationRecoveryAudioStore.shared.clear()
-            recoverAudioMenuItem?.isHidden = true
-        } else {
-            recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: "Metin teslimi doğrulanamadı")
-            recoverAudioMenuItem?.isHidden = !recoveryAvailable
-        }
+    private func presentInjectionOutcome(_ outcome: TextInjector.InjectionOutcome, latency: Double, recoveryAvailable: Bool) {
         switch outcome {
         case .verified:
             // Başarı sesi çalınmaz: tuş bırakılınca "mikrofon kapandı" sesi zaten
@@ -1331,10 +1377,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             // bildirimdir. Ada hemen çentiğe geri çekilir.
             RecordingHUD.shared.dismiss(animated: true)
             setStatus(title: "✅", menuText: "Durum: Yapıştırıldı (\(String(format: "%.2f", latency))s)", revertAfter: 1.5)
-        case .unverifiable:
-            let message = recoveryAvailable ? "Aktarım doğrulanamadı · Ses korundu" : "Aktarım doğrulanamadı · Hedefi kontrol edin"
-            RecordingHUD.shared.showNotice(message: message, autoDismissDelay: 2.6)
-            setStatus(title: "ℹ️", menuText: message, revertAfter: 2.6)
+        case .unverifiable, .unverifiableClipboardChanged:
+            Self.presentUnverifiedDelivery(
+                clipboardChanged: outcome == .unverifiableClipboardChanged,
+                recoveryAvailable: recoveryAvailable,
+                dismissHUD: { RecordingHUD.shared.dismiss(animated: true) },
+                showStatus: { self.setStatus(title: "ℹ️", menuText: $0, revertAfter: 10) }
+            )
         case let .targetChanged(reason):
             SoundManager.shared.playCancel()
             HapticManager.shared.playCancel()
@@ -1357,12 +1406,25 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Belirsiz sonuç başarısızlık değildir; kurtarma durumu menüde kalır.
+    static func presentUnverifiedDelivery(
+        clipboardChanged: Bool, recoveryAvailable: Bool,
+        dismissHUD: () -> Void, showStatus: (String) -> Void
+    ) {
+        let detail = recoveryAvailable ? "Ses korundu" : "Hedefi kontrol edin"
+        let clipboard = clipboardChanged ? " · Pano değişti" : ""
+        dismissHUD()
+        showStatus("Aktarım doğrulanamadı\(clipboard) · \(detail)")
+    }
+
     private func handleCancel() {
         liveTranslation?.cancel()
         liveTranslation = nil
         activeDictationConfig = nil
+        activeRecoveryID = nil
+        activeDelivery?.cancel()
+        activeDelivery = nil
         deliveryGate.finish()
-        TextInjector.shared.cancelPendingInjections()
         recordingStartCoordinator.finish()
         activeStartLatencyTrace?.finish(reason: "cancelled")
         activeStartLatencyTrace = nil
@@ -1606,6 +1668,13 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private func cleanupActiveDictationForTermination() {
         deliveryGate.finish()
         TextInjector.shared.cancelPendingInjections()
+        for delivery in pendingDeliveries.values {
+            delivery.cancel()
+            delivery.complete()
+        }
+        pendingDeliveries.removeAll()
+        activeDelivery = nil
+        activeRecoveryID = nil
         postRollWorkItem?.cancel()
         postRollWorkItem = nil
         activeAccessibilityLease?.end()

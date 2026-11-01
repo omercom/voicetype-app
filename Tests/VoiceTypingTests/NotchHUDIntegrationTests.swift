@@ -33,6 +33,20 @@ final class NotchHUDIntegrationTests: XCTestCase {
         hud.dismiss(animated: false)
     }
 
+    func testDeliveryDismissalDoesNotHideLaterError() {
+        withNotchMode { hud in
+            hud.showTranscribing()
+            hud.finishPresentationTransitions()
+            XCTAssertEqual(hud.currentState, .transcribing)
+            hud.dismiss(animated: true)
+            XCTAssertEqual(hud.currentState, .idle)
+            hud.showError(message: "Alan güncellenmedi", autoDismissDelay: 5)
+            hud.finishPresentationTransitions()
+            XCTAssertEqual(hud.currentState, .error("Alan güncellenmedi"))
+            XCTAssertTrue(hud.isVisible)
+        }
+    }
+
     func testNotchShapeViewExistsInHUDHierarchy() {
         withNotchMode { hud in
             guard let root = hud.rootContentView else {
@@ -81,18 +95,58 @@ final class NotchHUDIntegrationTests: XCTestCase {
             let texts = root.subviews.enumerated()
                 .filter { $0.element is NSTextField }
                 .map(\.offset)
-            let meters = root.subviews.enumerated()
-                .filter { $0.element is NotchShapeView == false && $0.element.subviews.contains { $0 is NSView } && $0.element.frame.width == NotchAudioMeter.meterSize }
-                .map(\.offset)
+            guard let meterIndex = root.subviews.firstIndex(where: {
+                $0.subviews.contains { $0 is NotchWaveView }
+            }) else { return XCTFail("Çentik ses dalgası bulunamadı") }
 
             for textIndex in texts {
                 XCTAssertLessThan(shapeIndex, textIndex,
                                   "Şekil metnin altında çizilmeli (index \(shapeIndex) < \(textIndex))")
             }
-            for meterIndex in meters {
-                XCTAssertLessThan(shapeIndex, meterIndex,
-                                  "Şekil ekolayzırın altında çizilmeli")
+            XCTAssertLessThan(shapeIndex, meterIndex, "Şekil ses dalgasının altında çizilmeli")
+        }
+    }
+
+    func testLiveWaveIsVisibleInsideNotchHUD() {
+        withNotchMode { hud in
+            guard let root = hud.rootContentView,
+                  let wave = root.subviews.flatMap(\.subviews).compactMap({ $0 as? NotchWaveView }).first,
+                  let container = wave.superview else {
+                return XCTFail("Çentik ses dalgası bulunamadı")
             }
+            XCTAssertFalse(container.isHidden)
+            XCTAssertFalse(wave.isHidden)
+            XCTAssertGreaterThan(container.alphaValue, 0.9)
+            XCTAssertTrue(root.bounds.contains(wave.convert(wave.bounds, to: root)))
+
+            let waveFrame = wave.convert(wave.bounds, to: root)
+            func brightPixels() -> Int? {
+                root.displayIfNeeded()
+                guard let bitmap = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return nil }
+                root.cacheDisplay(in: root.bounds, to: bitmap)
+                let scale = CGFloat(bitmap.pixelsWide) / root.bounds.width
+                let minX = max(0, Int(waveFrame.minX * scale))
+                let maxX = min(bitmap.pixelsWide, Int(ceil(waveFrame.maxX * scale)))
+                var count = 0
+                for y in 0..<bitmap.pixelsHigh {
+                    for x in minX..<maxX {
+                        guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                        if color.alphaComponent > 0.5 && color.redComponent > 0.6 && color.greenComponent > 0.6 && color.blueComponent > 0.6 {
+                            count += 1
+                        }
+                    }
+                }
+                return count
+            }
+            container.isHidden = true
+            let withoutWave = brightPixels()
+            container.isHidden = false
+            let initial = brightPixels()
+            wave.render(level: 0.8, mode: .listening, animated: false)
+            let speaking = brightPixels()
+            guard let withoutWave, let initial, let speaking else { return XCTFail("HUD bitmap'i oluşturulamadı") }
+            XCTAssertGreaterThan(initial, withoutWave + 10, "Sessiz ses dalgası ilk andan itibaren çizilmeli")
+            XCTAssertGreaterThan(speaking, initial + 10, "Konuşma dalgası daha belirgin çizilmeli")
         }
     }
 

@@ -73,9 +73,16 @@ final class HUDRenderDiagnosticTests: XCTestCase {
         hud.dismiss(animated: false)
         hud.showRecording()
         hud.finishPresentationTransitions()
-        hud.updateInterimText("Merhaba dünya bu bir çentik testi")
+        hud.updateInterimText("Merhaba, nasılsın?")
+        if let root = hud.rootContentView,
+           let wave = root.subviews.flatMap(\.subviews).compactMap({ $0 as? NotchWaveView }).first {
+            wave.render(level: 0.7, mode: .listening, animated: false)
+        } else {
+            XCTFail("Çentik ses dalgası bulunamadı")
+        }
 
-        let rep = dump(hud, name: "hud_notch", bg: .systemBlue)
+        let background = NSColor(calibratedRed: 0.14, green: 0.18, blue: 0.27, alpha: 1)
+        let rep = dump(hud, name: "hud_notch", bg: background)
         hud.dismiss(animated: false)
 
         // Dolgu gerçekten var mı?

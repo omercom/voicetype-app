@@ -242,10 +242,99 @@ final class ClipboardPasteTransactionTests: XCTestCase {
         h.onWait = {
             if h.sentAt != nil { h.clipboard = "başka metin"; h.generation += 1 }
         }
+        XCTAssertEqual(h.run(), .unverifiableClipboardChanged)
+        XCTAssertEqual(h.clipboard, "başka metin")
+        XCTAssertFalse(h.events.contains("restore"))
+        XCTAssertFalse(h.events.contains("submit"))
+    }
+
+    func testClipboardChangeAfterSendDoesNotHideKnownMissingInsertion() {
+        let h = Harness()
+        h.delay = 10
+        h.onWait = {
+            if h.sentAt != nil { h.clipboard = "başka metin"; h.generation += 1 }
+        }
         XCTAssertEqual(h.run(), .failed(reason: "Aktarım doğrulanamadı; pano başka bir işlem tarafından değiştirildi"))
         XCTAssertEqual(h.clipboard, "başka metin")
         XCTAssertFalse(h.events.contains("restore"))
         XCTAssertFalse(h.events.contains("submit"))
+    }
+
+    func testAttemptedCallbackRunsBeforeUnverifiedDeliveryFinishes() {
+        let h = Harness()
+        h.readable = false
+        let releaseVerification = DispatchSemaphore(value: 0)
+        let verificationBlocked = DispatchSemaphore(value: 0)
+        var held = false
+        h.onWait = {
+            guard h.sentAt != nil, !held else { return }
+            held = true
+            verificationBlocked.signal()
+            XCTAssertEqual(releaseVerification.wait(timeout: .now() + 5), .success)
+        }
+        let injector = TextInjector(clipboardEnvironment: { h.environment(text: $0) },
+                                    targetCheck: { _ in .same })
+        let attempted = expectation(description: "paste sent")
+        let completed = expectation(description: "verification completed")
+        var callbacks: [String] = []
+        XCTAssertTrue(injector.paste(text: "dikte", restoreClipboard: true, autoSubmit: true,
+                                     observer: .init(onAttempted: {
+            XCTAssertTrue(Thread.isMainThread)
+            callbacks.append("attempted")
+            attempted.fulfill()
+        })) { outcome in
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertEqual(outcome, .unverifiable)
+            callbacks.append("completed")
+            completed.fulfill()
+        })
+        wait(for: [attempted], timeout: 2)
+        XCTAssertEqual(verificationBlocked.wait(timeout: .now() + 2), .success)
+        XCTAssertEqual(callbacks, ["attempted"])
+        XCTAssertEqual(h.events, ["prepare", "send"])
+        releaseVerification.signal()
+        wait(for: [completed], timeout: 2)
+        XCTAssertEqual(callbacks, ["attempted", "completed"])
+        XCTAssertEqual(h.field, "dikte")
+        XCTAssertEqual(h.clipboard, "dikte")
+        XCTAssertFalse(h.events.contains("restore"))
+        XCTAssertFalse(h.events.contains("submit"))
+    }
+
+    func testInjectForwardsDeliveryObserverWithoutClaimingSuccess() {
+        let h = Harness()
+        h.readable = false
+        let injector = TextInjector(clipboardEnvironment: { h.environment(text: $0) },
+                                    targetCheck: { _ in .same }, configProvider: { AppConfig.defaultConfig })
+        let completed = expectation(description: "unverified injection")
+        var callbacks: [String] = []
+        XCTAssertTrue(injector.inject(text: "dikte", observer: .init(onAttempted: {
+            callbacks.append("attempted")
+        })) { outcome in
+            XCTAssertEqual(outcome, .unverifiable)
+            callbacks.append("completed")
+            completed.fulfill()
+        })
+        wait(for: [completed], timeout: 2)
+        XCTAssertEqual(callbacks, ["attempted", "completed"])
+        XCTAssertEqual(h.field, "dikte")
+        XCTAssertEqual(h.clipboard, "dikte")
+    }
+
+    func testAttemptedCallbackIsNotSentWhenKeystrokeFails() {
+        let h = Harness()
+        h.sendSucceeds = false
+        let injector = TextInjector(clipboardEnvironment: { h.environment(text: $0) },
+                                    targetCheck: { _ in .same })
+        let completed = expectation(description: "failed delivery")
+        var attempted = false
+        XCTAssertTrue(injector.paste(text: "dikte", observer: .init(onAttempted: { attempted = true })) { outcome in
+            XCTAssertEqual(outcome, .failed(reason: "Yapıştırma tuşu gönderilemedi"))
+            XCTAssertFalse(attempted)
+            completed.fulfill()
+        })
+        wait(for: [completed], timeout: 2)
+        XCTAssertEqual(h.clipboard, "dikte")
     }
 
     func testTargetChangeAfterPastePreventsAutoSubmit() {
@@ -279,6 +368,84 @@ final class ClipboardPasteTransactionTests: XCTestCase {
         XCTAssertEqual(h.field, "ilk metinikinci metin")
         XCTAssertEqual(h.clipboard, "ikinci metin")
         XCTAssertEqual(h.events, ["prepare", "send", "consume", "prepare", "send", "consume"])
+    }
+
+    func testSecondDeliveryWaitsForFirstVerificationWithoutMixingText() {
+        let h = Harness()
+        let blocked = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        var didBlock = false
+        h.onWait = {
+            if h.sentAt != nil && !didBlock {
+                didBlock = true
+                blocked.signal()
+                _ = release.wait(timeout: .now() + 3)
+            }
+        }
+        let injector = TextInjector(clipboardEnvironment: { h.environment(text: $0) }, targetCheck: { _ in .same })
+        let attempted = expectation(description: "first request sent")
+        let firstDone = expectation(description: "first verified")
+        let secondDone = expectation(description: "second verified")
+        XCTAssertTrue(injector.paste(text: "ilk", restoreClipboard: true, pasteDelayMs: 0,
+                                     observer: .init(onAttempted: { attempted.fulfill() })) { outcome in
+            XCTAssertEqual(outcome, .verified)
+            firstDone.fulfill()
+        })
+        wait(for: [attempted], timeout: 2)
+        XCTAssertEqual(blocked.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(injector.paste(text: "ikinci", restoreClipboard: true, pasteDelayMs: 0) { outcome in
+            XCTAssertEqual(outcome, .verified)
+            secondDone.fulfill()
+        })
+        XCTAssertEqual(h.events, ["prepare", "send"])
+        release.signal()
+        wait(for: [firstDone, secondDone], timeout: 3)
+        XCTAssertEqual(h.field, "ilkikinci")
+        XCTAssertEqual(h.clipboard, "önceki pano")
+        XCTAssertEqual(h.events, ["prepare", "send", "consume", "restore",
+                                  "prepare", "send", "consume", "restore"])
+    }
+
+    func testCancellingQueuedInjectionDoesNotCancelEarlierVerification() {
+        let h = Harness()
+        let blocked = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        var didBlock = false
+        h.onWait = {
+            if h.sentAt != nil && !didBlock {
+                didBlock = true
+                blocked.signal()
+                _ = release.wait(timeout: .now() + 3)
+            }
+        }
+        var config = AppConfig.defaultConfig
+        config.restore_clipboard = true
+        config.enable_auto_submit = false
+        config.type_text_directly = false
+        let injector = TextInjector(clipboardEnvironment: { h.environment(text: $0) },
+                                    targetCheck: { _ in .same }, configProvider: { config })
+        let firstToken = TextInjector.InjectionCancellation()
+        let secondToken = TextInjector.InjectionCancellation()
+        let attempted = expectation(description: "first request sent")
+        let firstDone = expectation(description: "first verified")
+        let secondDone = expectation(description: "second cancelled")
+        XCTAssertTrue(injector.inject(text: "ilk", pasteDelayMs: 0, cancellation: firstToken,
+                                      observer: .init(onAttempted: { attempted.fulfill() })) { outcome in
+            XCTAssertEqual(outcome, .verified)
+            firstDone.fulfill()
+        })
+        wait(for: [attempted], timeout: 2)
+        XCTAssertEqual(blocked.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(injector.inject(text: "ikinci", pasteDelayMs: 0, cancellation: secondToken) { outcome in
+            XCTAssertEqual(outcome, .cancelled)
+            secondDone.fulfill()
+        })
+        secondToken.cancel()
+        release.signal()
+        wait(for: [firstDone, secondDone], timeout: 3)
+        XCTAssertEqual(h.field, "ilk")
+        XCTAssertEqual(h.clipboard, "önceki pano")
+        XCTAssertEqual(h.events, ["prepare", "send", "consume", "restore"])
     }
 
     func testRealInjectorCancellationStopsActiveAndQueuedDeliveries() {

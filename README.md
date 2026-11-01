@@ -1,10 +1,12 @@
 # VoiceType 🎙️
 
+[![Son sürüm](https://img.shields.io/github/v/release/omercom/voicetype-app?label=Son%20s%C3%BCr%C3%BCm)](https://github.com/omercom/voicetype-app/releases/latest)
+
 **Mac'inizde konuşarak yazın. İsterseniz konuşmanızı başka bir dile çevirin.**
 
 VoiceType, macOS menü çubuğunda çalışan açık kaynaklı bir uygulamadır. Mesaj, e-posta veya belge yazarken konuşmanızı metne dönüştürür.
 
-<img src="docs/images/ayarlar.png" alt="VoiceType ayarlar penceresi" width="520">
+<img src="docs/images/ayarlar.png" alt="VoiceType genel ayarlar ekranı" width="520">
 
 ## Neler yapabilir?
 
@@ -19,7 +21,7 @@ VoiceType, macOS menü çubuğunda çalışan açık kaynaklı bir uygulamadır.
 Evet. VoiceType ücretsiz ve açık kaynaklıdır. **Normal dikte için ücretli bir servise veya API anahtarına ihtiyacınız yoktur.**
 
 - **Apple Speech:** macOS ile gelir ve varsayılan olarak seçilidir. Desteklenen cihaz ve dillerde yerel tanıma kullanılır. Diğer durumlarda Apple'ın konuşma tanıma davranışı geçerlidir.
-- **Seda-v0.1:** Türkçe konuşmayı Mac'inizde işler. İlk kurulumda model indirilir; sonrasında dikte için bulut servisi ve API anahtarı gerekmez.
+- **Seda-v0.2:** Türkçe konuşmayı Mac'inizde işler. İlk kurulumda model indirilir; sonrasında dikte için bulut servisi ve API anahtarı gerekmez.
 - **Groq ve Gemini:** İsteğe bağlı bulut servisleridir. Hesap ve API anahtarı gerektirir. Uygun ücretsiz kotalar hafif kullanım için yeterli olabilir; kota, model erişimi ve fiyatlar değişebilir.
 
 Çevirili dikte şu anda Groq veya Gemini gerektirir. Kullanımınız ücretsiz kotayı aşarsa veya ücretli bir plan seçerseniz sağlayıcınız ücret uygulayabilir. Güncel koşulları [Groq](https://console.groq.com/docs/rate-limits) ve [Gemini](https://ai.google.dev/gemini-api/docs/rate-limits) üzerinden kontrol edin.
@@ -44,10 +46,10 @@ Evet. VoiceType ücretsiz ve açık kaynaklıdır. **Normal dikte için ücretli
 [Xcode Komut Satırı Araçları](https://developer.apple.com/xcode/resources/) gerekir. Terminal'e şu tek komutu yapıştırın:
 
 ```bash
-git clone --depth 1 --branch v1.0.1 https://github.com/omercom/voicetype-app.git && (cd voicetype-app && ./install.sh)
+git clone --depth 1 https://github.com/omercom/voicetype-app.git && (cd voicetype-app && ./install.sh)
 ```
 
-Komut kaynak kodunu indirir ve [kurulum betiğini](install.sh) çalıştırır. Uygulamayı derler, Uygulamalar klasörüne yerleştirir ve otomatik başlatmayı açar. `voicetype-app` klasörü zaten varsa komut mevcut dosyaları değiştirmez.
+Komut ana daldaki güncel kaynak kodunu indirir ve [kurulum betiğini](install.sh) çalıştırır. Bu kod, yayımlanmış son sürümden farklı olabilir. Betik uygulamayı derler, Uygulamalar klasörüne yerleştirir ve otomatik başlatmayı açar. `voicetype-app` klasörü zaten varsa komut mevcut dosyaları değiştirmez.
 
 ### Uygulama nerede?
 
@@ -102,13 +104,13 @@ Eklentiyi kendi Mac'inize kurmanız gerekir; henüz Raycast Store'da değildir. 
 
 ### Türkçe dikteyi tamamen yerel çalıştırın
 
-Seda-v0.1 için [uv](https://docs.astral.sh/uv/getting-started/installation/) ve kaynak kodu gerekir. Terminal ile kurduysanız `voicetype-app` klasörüne geçin ve şu komutu çalıştırın:
+Seda-v0.2 için [uv](https://docs.astral.sh/uv/getting-started/installation/) ve VoiceType 1.1.0 veya daha yeni bir sürüm gerekir. Model, uygulamadan ayrı kurulur. Kaynak klasöründe şu komutu çalıştırın:
 
 ```bash
 ./setup-stt.sh
 ```
 
-Kurulum bitene kadar Seda, sağlayıcı listesinde görünmez. Kurulumdan sonra menüyü yeniden açın ve **Ses Tanıma → Harfiyen · Seda-v0.1** seçeneğini seçin. Dili **Türkçe (`tr`)** olarak ayarlayın. İlk kurulum model dosyalarını indirir; sonraki dikte işlemleri Mac'inizde çalışır. Tek kayıt en fazla 10 dakika sürer.
+Kurulum bitene kadar Seda, sağlayıcı listesinde görünmez. Kurulumdan sonra menüyü yeniden açın ve **Ses Tanıma → Harfiyen · Seda-v0.2** seçeneğini seçin. Dili **Türkçe (`tr`)** olarak ayarlayın. İlk kurulum model dosyalarını indirir; sonraki dikte işlemleri Mac'inizde çalışır. Tek kayıt en fazla 10 dakika sürer. Noktalama biçimlendiricisi bu uygulamada henüz kullanılmaz.
 
 Model lisansları ve ayrıntılar için [Seda kurulumuna](runtime/seda/README.md) bakın.
 
@@ -141,4 +143,4 @@ Canlı API ve mikrofon testleri varsayılan olarak kapalıdır. Bunları etkinle
 
 ## Lisans ve teşekkür
 
-VoiceType için MIT lisansı belirtilmiştir; depoda henüz ayrı bir lisans dosyası yoktur. Harfiyen ve Seda-v0.1'in kendi lisansları geçerlidir. Bazı tasarım yaklaşımları için [AlwaysWhisper](https://github.com/kzkhykw/AlwaysWhisper) projesinden yararlanılmıştır.
+VoiceType için MIT lisansı belirtilmiştir; depoda henüz ayrı bir lisans dosyası yoktur. Harfiyen ve Seda-v0.2'in kendi lisansları geçerlidir. Bazı tasarım yaklaşımları için [AlwaysWhisper](https://github.com/kzkhykw/AlwaysWhisper) projesinden yararlanılmıştır.

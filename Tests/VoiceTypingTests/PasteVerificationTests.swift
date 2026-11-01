@@ -69,6 +69,39 @@ final class PasteVerificationTests: XCTestCase {
         }
     }
 
+    func testRangeOnlyEditorCanProveUnicodeInsertion() {
+        let old = "Önce 👩🏽‍💻"
+        let inserted = " Merhaba"
+        let new = old + inserted
+        let oldCount = old.utf16.count
+        let newCount = new.utf16.count
+        let beforeValue = TextInjector.completeSnapshotValue(nil, count: oldCount) { range in
+            XCTAssertEqual(range, NSRange(location: 0, length: oldCount))
+            return old
+        }
+        let afterValue = TextInjector.completeSnapshotValue(nil, count: newCount) { range in
+            XCTAssertEqual(range, NSRange(location: 0, length: newCount))
+            return new
+        }
+        let before = Snap(value: beforeValue, count: oldCount)
+        let after = Snap(value: afterValue, count: newCount)
+        XCTAssertEqual(TextInjector.outcome(before: before, after: after, insertedText: inserted), .verified)
+        XCTAssertEqual(TextInjector.outcome(before: before, after: after, insertedText: " başka"), .unverifiable)
+    }
+
+    func testRangeFallbackDoesNotTrustPartialOrUnboundedValues() {
+        var calls = 0
+        let read: (NSRange) -> String? = { _ in calls += 1; return "kısa" }
+        XCTAssertEqual(TextInjector.completeSnapshotValue(nil, count: 0, readRange: read), "")
+        XCTAssertEqual(TextInjector.completeSnapshotValue("tam", count: 3, readRange: read), "tam")
+        XCTAssertNil(TextInjector.completeSnapshotValue(nil, count: 10_001, readRange: read))
+        XCTAssertNil(TextInjector.completeSnapshotValue(nil, count: -1, readRange: read))
+        XCTAssertEqual(calls, 0)
+        XCTAssertNil(TextInjector.completeSnapshotValue(nil, count: 10, readRange: read))
+        XCTAssertEqual(TextInjector.completeSnapshotValue("parça", count: 10, readRange: read), "parça")
+        XCTAssertEqual(calls, 2)
+    }
+
     func testWrongSelectionAndPartialTextDoNotVerify() {
         let before = Snap(value: "ön son", count: nil, selection: NSRange(location: 3, length: 0))
         for new in ["ön sondikte", "ön dikson", "ön başka son"] {

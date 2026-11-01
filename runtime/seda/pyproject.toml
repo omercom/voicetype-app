@@ -1,7 +1,7 @@
 [project]
 name = "voicetype-seda-stt"
 version = "0.1.0"
-description = "VoiceType için yerel Seda-v0.1 Türkçe dikte motoru"
+description = "VoiceType için yerel Seda-v0.2 Türkçe dikte motoru"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "sherpa-onnx==1.13.8",

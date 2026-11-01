@@ -138,6 +138,27 @@ final class SelectedTextTransactionTests: XCTestCase {
         XCTAssertEqual(h.clipboardPreparations, 0)
     }
 
+    func testSelectedTextAttemptIsReportedBeforeVerificationResult() {
+        let h = Harness()
+        h.applyWrite = false
+        let done = expectation(description: "selected text not inserted")
+        var callbacks: [String] = []
+        XCTAssertTrue(h.injector().paste(text: "yeni", targetContext: h.target(), typeDirectly: true,
+                                         observer: .init(onAttempted: {
+            XCTAssertTrue(Thread.isMainThread)
+            callbacks.append("attempted")
+        })) { outcome in
+            XCTAssertTrue(Thread.isMainThread)
+            XCTAssertEqual(outcome, .notInserted)
+            callbacks.append("completed")
+            done.fulfill()
+        })
+        wait(for: [done], timeout: 2)
+        XCTAssertEqual(callbacks, ["attempted", "completed"])
+        XCTAssertEqual(h.writes, 1)
+        XCTAssertEqual(h.clipboardPreparations, 0)
+    }
+
     func testInjectorFallsBackOnlyWhenSelectedTextIsUnsupported() {
         let h = Harness()
         h.supported = false

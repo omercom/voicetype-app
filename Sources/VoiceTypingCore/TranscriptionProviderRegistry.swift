@@ -142,8 +142,8 @@ public enum TranscriptionProviderRegistry {
         ),
         TranscriptionProviderDescriptor(
             id: "seda",
-            displayName: "Harfiyen · Seda-v0.1",
-            readinessShortName: "Seda-v0.1",
+            displayName: "Harfiyen · Seda-v0.2",
+            readinessShortName: "Seda-v0.2",
             capabilities: [.streaming, .batch, .onDevice],
             processingMode: .realtimeBoost
         )

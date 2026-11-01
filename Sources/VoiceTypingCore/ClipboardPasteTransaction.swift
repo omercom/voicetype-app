@@ -24,7 +24,8 @@ struct ClipboardPasteTransaction {
         pasteDelay: TimeInterval,
         restoreClipboard: Bool,
         autoSubmit: Bool,
-        environment env: Environment
+        environment env: Environment,
+        onAttempted: () -> Void = {}
     ) -> TextInjector.InjectionOutcome {
         guard !env.isCancelled() else { return .cancelled }
         guard env.prepare() else {
@@ -60,6 +61,7 @@ struct ClipboardPasteTransaction {
         guard !env.isCancelled() else { return cancelBeforeSending() }
         guard env.ownsClipboard() else { return .failed(reason: "Pano başka bir işlem tarafından değiştirildi") }
         guard env.sendPaste() else { return .failed(reason: "Yapıştırma tuşu gönderilemedi") }
+        onAttempted()
 
         // An unreadable editor gives no delivery acknowledgement. Keep the text
         // available indefinitely rather than restoring the clipboard after 500ms.
@@ -80,7 +82,9 @@ struct ClipboardPasteTransaction {
         // Never retry Cmd+V: delayed updates must not produce duplicate text.
         guard !env.isCancelled() else { return .cancelled }
         guard result == .verified else {
-            return env.ownsClipboard() ? result : .failed(reason: "Aktarım doğrulanamadı; pano başka bir işlem tarafından değiştirildi")
+            if env.ownsClipboard() { return result }
+            if result == .unverifiable { return .unverifiableClipboardChanged }
+            return .failed(reason: "Aktarım doğrulanamadı; pano başka bir işlem tarafından değiştirildi")
         }
         if restoreClipboard, env.ownsClipboard() { env.restore() }
         if autoSubmit, !env.isCancelled(), env.targetChangedReason() == nil, !env.isCancelled() { env.autoSubmit() }

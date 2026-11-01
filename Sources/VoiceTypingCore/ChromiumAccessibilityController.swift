@@ -3,6 +3,7 @@ import AppKit
 import ApplicationServices
 
 public final class TargetAppAccessibilityLease {
+    private let lock = NSLock()
     private var endAction: (() -> Void)?
 
     public init(endAction: @escaping () -> Void) {
@@ -10,8 +11,10 @@ public final class TargetAppAccessibilityLease {
     }
 
     public func end() {
+        lock.lock()
         let action = endAction
         endAction = nil
+        lock.unlock()
         action?()
     }
 
@@ -48,7 +51,30 @@ public final class ChromiumAccessibilityController {
         "com.github.GitHubClient"        // GitHub Desktop
     ]
 
-    public init() {}
+    private let lock = NSLock()
+    private var ownedObservations: [pid_t: Int] = [:]
+    private let readEnabled: (pid_t) -> Bool
+    private let setEnabled: (pid_t, Bool) -> Bool
+
+    public convenience init() {
+        self.init(
+            readEnabled: { pid in
+                let appRef = AXUIElementCreateApplication(pid)
+                var value: AnyObject?
+                let status = AXUIElementCopyAttributeValue(appRef, Self.manualAccessibilityAttribute, &value)
+                return status == .success && ((value as? NSNumber)?.boolValue == true)
+            },
+            setEnabled: { pid, enabled in
+                let appRef = AXUIElementCreateApplication(pid)
+                return AXUIElementSetAttributeValue(appRef, Self.manualAccessibilityAttribute, NSNumber(value: enabled)) == .success
+            }
+        )
+    }
+
+    init(readEnabled: @escaping (pid_t) -> Bool, setEnabled: @escaping (pid_t, Bool) -> Bool) {
+        self.readEnabled = readEnabled
+        self.setEnabled = setEnabled
+    }
 
     /// Verilen uygulamanın Chromium veya Electron tabanlı olup olmadığını tespit eder
     public func isChromiumOrElectron(bundleIdentifier: String?, bundleURL: URL? = nil) -> Bool {
@@ -80,28 +106,34 @@ public final class ChromiumAccessibilityController {
             return nil
         }
 
-        let appRef = AXUIElementCreateApplication(pid)
-
-        // Mevcut durumu oku
-        var currentValue: AnyObject?
-        let readStatus = AXUIElementCopyAttributeValue(appRef, Self.manualAccessibilityAttribute, &currentValue)
-        let wasEnabled = (readStatus == .success) && ((currentValue as? NSNumber)?.boolValue == true)
-
-        guard !wasEnabled else {
-            // Zaten açık, kapatmaya gerek yok
-            return nil
+        lock.lock()
+        if let count = ownedObservations[pid] {
+            ownedObservations[pid] = count + 1
+        } else {
+            // Zaten kullanıcı veya başka bir uygulama tarafından açıldıysa sahiplenme.
+            guard !readEnabled(pid), setEnabled(pid, true) else {
+                lock.unlock()
+                return nil
+            }
+            ownedObservations[pid] = 1
+            print("[ChromiumAX] ⚡ Erişilebilirlik ağacı uyandırıldı: \(bundleIdentifier ?? "pid \(pid)")")
         }
+        lock.unlock()
 
-        // Erişilebilirliği aktifleştir
-        let setStatus = AXUIElementSetAttributeValue(appRef, Self.manualAccessibilityAttribute, NSNumber(value: true))
-        guard setStatus == .success else {
-            return nil
+        return TargetAppAccessibilityLease { [self] in
+            endObservation(pid: pid, bundleIdentifier: bundleIdentifier)
         }
+    }
 
-        print("[ChromiumAX] ⚡ Erişilebilirlik ağacı uyandırıldı: \(bundleIdentifier ?? "pid \(pid)")")
-
-        return TargetAppAccessibilityLease {
-            _ = AXUIElementSetAttributeValue(appRef, Self.manualAccessibilityAttribute, NSNumber(value: false))
+    private func endObservation(pid: pid_t, bundleIdentifier: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let count = ownedObservations[pid] else { return }
+        if count > 1 {
+            ownedObservations[pid] = count - 1
+        } else {
+            ownedObservations.removeValue(forKey: pid)
+            _ = setEnabled(pid, false)
             print("[ChromiumAX] 💤 Erişilebilirlik ağacı uykuya alındı: \(bundleIdentifier ?? "pid \(pid)")")
         }
     }
