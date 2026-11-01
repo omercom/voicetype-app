@@ -1,0 +1,315 @@
+{
+  "created_at": "2026-10-07T02:31:40.640187+00:00",
+  "model": "canberkkkkkk/ema-lightning",
+  "ema_version": "1.0.1",
+  "torch_version": "2.14.1",
+  "python": "3.12.13",
+  "platform": "macOS-27.0-arm64-arm-64bit",
+  "cpu": "Apple M5",
+  "device": "mps",
+  "threads": 4,
+  "seed": 0,
+  "sample_rate": 48000,
+  "runs": 5,
+  "import_seconds": 0.4431766249908833,
+  "model_load_seconds": 0.1456945420068223,
+  "cold_say": {
+    "generation_ms": 677.9755419993307,
+    "audio_seconds": 5.36,
+    "rtf": 0.12648797425360647,
+    "realtime_factor": 7.90588991483898
+  },
+  "results": [
+    {
+      "text": "Merhaba! Bu ses yapay zekâ ile üretilmiştir. VoiceType artık Türkçe metinleri sesli okuyabilir.",
+      "wav": "demo-01.wav",
+      "say_runs": [
+        {
+          "generation_ms": 48.54695800167974,
+          "audio_seconds": 5.36,
+          "rtf": 0.009057268283895473,
+          "realtime_factor": 110.40856565749274
+        },
+        {
+          "generation_ms": 48.11466699175071,
+          "audio_seconds": 5.36,
+          "rtf": 0.008976616976072892,
+          "realtime_factor": 111.40054239425528
+        },
+        {
+          "generation_ms": 61.88174999260809,
+          "audio_seconds": 5.36,
+          "rtf": 0.01154510261056121,
+          "realtime_factor": 86.61681352967982
+        },
+        {
+          "generation_ms": 46.50804201082792,
+          "audio_seconds": 5.36,
+          "rtf": 0.00867687350948282,
+          "realtime_factor": 115.24888531648128
+        },
+        {
+          "generation_ms": 46.16037500090897,
+          "audio_seconds": 5.36,
+          "rtf": 0.008612010261363613,
+          "realtime_factor": 116.11690762682179
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 55.8866249921266,
+        "audio_seconds": 5.36,
+        "rtf": 0.010426609140322125,
+        "realtime_factor": 95.90845753800889
+      },
+      "warmup_stream": {
+        "generation_ms": 60.61870799749158,
+        "audio_seconds": 5.36,
+        "rtf": 0.011309460447293205,
+        "realtime_factor": 88.42154801817614,
+        "first_chunk_ms": 28.289541995036416,
+        "chunks": 3
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 61.4454580063466,
+          "audio_seconds": 5.36,
+          "rtf": 0.011463704851930335,
+          "realtime_factor": 87.23183411614207,
+          "first_chunk_ms": 27.80712500680238,
+          "chunks": 3
+        },
+        {
+          "generation_ms": 59.618250001221895,
+          "audio_seconds": 5.36,
+          "rtf": 0.01112280783604886,
+          "realtime_factor": 89.90535616007088,
+          "first_chunk_ms": 29.37783399829641,
+          "chunks": 3
+        },
+        {
+          "generation_ms": 68.35229101125151,
+          "audio_seconds": 5.36,
+          "rtf": 0.012752293099114086,
+          "realtime_factor": 78.41726913173528,
+          "first_chunk_ms": 34.63087500131223,
+          "chunks": 3
+        },
+        {
+          "generation_ms": 54.907124998862855,
+          "audio_seconds": 5.36,
+          "rtf": 0.010243866604265458,
+          "realtime_factor": 97.6193891068055,
+          "first_chunk_ms": 25.195666996296495,
+          "chunks": 3
+        },
+        {
+          "generation_ms": 54.10445800225716,
+          "audio_seconds": 5.36,
+          "rtf": 0.010094115298928574,
+          "realtime_factor": 99.06762211306855,
+          "first_chunk_ms": 24.940792005509138,
+          "chunks": 3
+        }
+      ],
+      "median_generation_ms": 48.11466699175071,
+      "median_first_chunk_ms": 27.80712500680238,
+      "median_realtime_factor": 111.40054239425528
+    },
+    {
+      "text": "Toplantı yarın saat 14:30'da başlayacak. Lütfen raporu kontrol edip ekibe gönderin.",
+      "wav": "demo-02.wav",
+      "say_runs": [
+        {
+          "generation_ms": 49.60395800299011,
+          "audio_seconds": 5.16,
+          "rtf": 0.009613170155618238,
+          "realtime_factor": 104.02395711424796
+        },
+        {
+          "generation_ms": 49.30654099734966,
+          "audio_seconds": 5.16,
+          "rtf": 0.009555531201036756,
+          "realtime_factor": 104.65142951880081
+        },
+        {
+          "generation_ms": 48.38883400952909,
+          "audio_seconds": 5.16,
+          "rtf": 0.009377681009598661,
+          "realtime_factor": 106.63617145608126
+        },
+        {
+          "generation_ms": 45.77266600972507,
+          "audio_seconds": 5.16,
+          "rtf": 0.00887067170731106,
+          "realtime_factor": 112.7310346944546
+        },
+        {
+          "generation_ms": 47.98299999674782,
+          "audio_seconds": 5.16,
+          "rtf": 0.00929903100712167,
+          "realtime_factor": 107.53808641289068
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 243.83741700148676,
+        "audio_seconds": 5.16,
+        "rtf": 0.047255313372381154,
+        "realtime_factor": 21.161641488223843
+      },
+      "warmup_stream": {
+        "generation_ms": 279.1999999899417,
+        "audio_seconds": 5.16,
+        "rtf": 0.05410852712983366,
+        "realtime_factor": 18.48137535883199,
+        "first_chunk_ms": 29.283665993716568,
+        "chunks": 3
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 60.46412499563303,
+          "audio_seconds": 5.16,
+          "rtf": 0.01171785368132423,
+          "realtime_factor": 85.33986062599396,
+          "first_chunk_ms": 25.973374999011867,
+          "chunks": 3
+        },
+        {
+          "generation_ms": 55.45991699909791,
+          "audio_seconds": 5.16,
+          "rtf": 0.010748045930057735,
+          "realtime_factor": 93.04016809264122,
+          "first_chunk_ms": 26.34504200250376,
+          "chunks": 3
+        },
+        {
+          "generation_ms": 53.621333005139604,
+          "audio_seconds": 5.16,
+          "rtf": 0.010391731202546434,
+          "realtime_factor": 96.23035666616893,
+          "first_chunk_ms": 25.568416007445194,
+          "chunks": 3
+        },
+        {
+          "generation_ms": 57.29475000407547,
+          "audio_seconds": 5.16,
+          "rtf": 0.011103633721720052,
+          "realtime_factor": 90.06060764089138,
+          "first_chunk_ms": 26.75904199713841,
+          "chunks": 3
+        },
+        {
+          "generation_ms": 55.706707993522286,
+          "audio_seconds": 5.16,
+          "rtf": 0.01079587364215548,
+          "realtime_factor": 92.62798298187029,
+          "first_chunk_ms": 26.22483299637679,
+          "chunks": 3
+        }
+      ],
+      "median_generation_ms": 48.38883400952909,
+      "median_first_chunk_ms": 26.22483299637679,
+      "median_realtime_factor": 106.63617145608126
+    },
+    {
+      "text": "Sesle yazdığınız metni dinleyerek kontrol edebilirsiniz. Bu model konuşmayı yazıya çevirmez, yazıyı sese çevirir. İlk kurulumdan sonra internet bağlantısı olmadan çalışabilir.",
+      "wav": "demo-03.wav",
+      "say_runs": [
+        {
+          "generation_ms": 74.90620799944736,
+          "audio_seconds": 9.36,
+          "rtf": 0.008002799999940958,
+          "realtime_factor": 124.95626530806439
+        },
+        {
+          "generation_ms": 74.45825000468176,
+          "audio_seconds": 9.36,
+          "rtf": 0.007954941239816427,
+          "realtime_factor": 125.70803100276282
+        },
+        {
+          "generation_ms": 72.88116699783131,
+          "audio_seconds": 9.36,
+          "rtf": 0.007786449465580269,
+          "realtime_factor": 128.42823990837744
+        },
+        {
+          "generation_ms": 74.30066599044949,
+          "audio_seconds": 9.36,
+          "rtf": 0.007938105340859989,
+          "realtime_factor": 125.97464471184043
+        },
+        {
+          "generation_ms": 73.38850000815,
+          "audio_seconds": 9.36,
+          "rtf": 0.007840651710272437,
+          "realtime_factor": 127.54041844376904
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 102.63899998972192,
+        "audio_seconds": 9.36,
+        "rtf": 0.010965705127107045,
+        "realtime_factor": 91.19340602438929
+      },
+      "warmup_stream": {
+        "generation_ms": 83.99870801076759,
+        "audio_seconds": 9.36,
+        "rtf": 0.008974220941321324,
+        "realtime_factor": 111.43028531819995,
+        "first_chunk_ms": 31.657375002396293,
+        "chunks": 4
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 81.24462500563823,
+          "audio_seconds": 9.36,
+          "rtf": 0.008679981304021178,
+          "realtime_factor": 115.20762141926845,
+          "first_chunk_ms": 30.001667008036748,
+          "chunks": 4
+        },
+        {
+          "generation_ms": 83.24404100130778,
+          "audio_seconds": 9.36,
+          "rtf": 0.008893594124071345,
+          "realtime_factor": 112.4404808730147,
+          "first_chunk_ms": 30.71508299035486,
+          "chunks": 4
+        },
+        {
+          "generation_ms": 82.67766700009815,
+          "audio_seconds": 9.36,
+          "rtf": 0.008833084081207069,
+          "realtime_factor": 113.21074166242363,
+          "first_chunk_ms": 30.989499995484948,
+          "chunks": 4
+        },
+        {
+          "generation_ms": 82.43162499275059,
+          "audio_seconds": 9.36,
+          "rtf": 0.008806797541960534,
+          "realtime_factor": 113.54865321195791,
+          "first_chunk_ms": 31.22849999635946,
+          "chunks": 4
+        },
+        {
+          "generation_ms": 82.11133300210349,
+          "audio_seconds": 9.36,
+          "rtf": 0.008772578312190544,
+          "realtime_factor": 113.99157287776852,
+          "first_chunk_ms": 29.56020800047554,
+          "chunks": 4
+        }
+      ],
+      "median_generation_ms": 74.30066599044949,
+      "median_first_chunk_ms": 30.71508299035486,
+      "median_realtime_factor": 125.97464471184043
+    }
+  ],
+  "notes": [
+    "WAV yazma ve ses çalma ölçüm dışında.",
+    "İlk parça gecikmesi hoparlörden duyulma gecikmesi değildir.",
+    "Yükleme süresi ilk çalışmada indirmeyi içerebilir.",
+    "Metinler ve WAV dosyaları yerelde saklanır; özel metni paylaşmayın."
+  ]
+}

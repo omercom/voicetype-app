@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+# Chrome publishes this RSA public key to keep the unpacked extension ID stable.
+# The private signing key is not part of the repository.
+[[allowlists]]
+description = "Chrome extension public key"
+condition = "AND"
+paths = ['''^browser-extension/chrome/manifest\.json$''']
+regexTarget = "secret"
+regexes = ['''^MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA[A-Za-z0-9+/]+IDAQAB$''']

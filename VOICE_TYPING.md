@@ -38,11 +38,30 @@ macOS üzerinde herhangi bir metin alanındayken (tarayıcı, kod editörü, mes
    - AssemblyAI Dictation API (`/v1/transcribe/live`) ile varsayılan dolgu/öz-düzeltme temizliği ve `llm_response` → `text` güvenli fallback'i.
 
 7. **Yerel Metin Enjeksiyonu ve Pano Yönetimi:**
-   - `NSPasteboard` ve `CGEvent` Cmd+V simülasyonu ile sıfır gecikmeli yapıştırma.
-   - İsteğe bağlı olarak yapıştırma sonrası eski panoyu otomatik geri yükleme (`restore_clipboard`).
+   - Kayıt başındaki uygulama, pencere ve alan teslimattan önce doğrulanır. Genel ayarlarındaki **Hedef: İlk alana dön** seçeneği, odak değiştiğinde bu alanı yeniden odaklamayı dener.
+   - **Hedef değişirse uyar** seçildiğinde odak değiştirilmez. İlk alan bulunamaz veya doğrulanamazsa metin panoda tutulur ve uyarı gösterilir.
+   - Varsayılan yöntem, metni panoya koyup `Cmd+V` olayını yalnızca hedef sürece göndermektir.
+   - `type_text_directly` açıksa desteklenen alanlarda seçili metin erişilebilirlik API'siyle değiştirilir. Alan bu işlemi desteklemiyorsa pano kullanılır.
+   - `restore_clipboard` açıksa önceki pano yalnızca teslimat doğrulandığında ve pano başka bir işlem tarafından değiştirilmediyse geri yüklenir. Gönderimden önce iptal edilirse pano hâlâ uygulamaya aitse önceki içerik geri yüklenir.
+   - Pano içeriğinin tamamı yedeklenemezse pano değiştirilmez ve aktarım durdurulur. Doğrulanamayan metin otomatik olarak yeniden gönderilmez.
+   - Uzun metinlerde tam alan okunamıyorsa eklenen metin aralığı ayrıca kontrol edilir. Satır sonu biçimi farkları hatalı uyarıya neden olmaz; gerçekten doğrulanamayan aktarım bildirilir.
+   - Geç gelen eski sağlayıcı sonuçları ve yinelenen çeviri sonuçları yeni kayda veya ikinci bir yapıştırmaya yol açmaz. Kurtarma klasörü ve kayıt dosyaları kullanıcıya özel izinlerle saklanır.
 
 8. **İşitsel Geri Bildirim (`NSSound`):**
    - Apple sistem sesleri (`Tink`, `Pop`, `Glass`, `Basso`) ile ekrana bakmadan geri bildirim.
+
+### Konuşmayı çevirerek yapıştırma
+
+1. Ayarlar'da **Normal Dikte Tuşu** olarak **Sağ Command** seçin. Bu tuş, çeviri açık olsa bile çevirmeden dikte eder.
+2. **Konuşma Dili** alanını `tr` yapın. **Sağ Option ile Çevir** seçeneğini açın ve hedef dil olarak **İngilizce [en]** seçin.
+3. Geçerli bir Groq veya Gemini API anahtarı girin. Otomatik seçim önce Groq'u dener. Groq başarısızsa ve Gemini anahtarı varsa aynı metni Gemini'ye de gönderir. Bu, iki sağlayıcıda da ücret oluşturabilir. Özellikle Groq veya Gemini seçildiğinde diğer sağlayıcı denenmez.
+4. Hedef yazı alanını seçin ve Sağ Option ile konuşun. Uygulama son çeviriyi hedef doğrulamasından sonra bir kez yapıştırır.
+
+Normal dikte tuşu da Sağ Option olarak seçilirse, çeviri açıkken Sağ Option çevirili dikteye ayrılır. Normal dikte için farklı bir tuş seçin. Basılı tutma, akıllı mod ve aç/kapa modu iki kısayol için de geçerlidir. Diğer dikte kısayolu başlayan kaydı durdurmaz.
+
+Çeviri açıksa metin Groq veya Gemini'ye gönderilir ve sağlayıcı ücret uygulayabilir. Apple Speech, Seda ve Gemini Live ara sonuçlarındaki kararlı cümleler konuşma sürerken de gönderilebilir. Bu cümleler son metne uymuyorsa yeniden çevrilir. Noktalama içermeyen ara sonuçlar ve canlı olmayan sağlayıcılar, kayıt sonunda çevrilir. Uzun metinler bölünür ve çevirileri sırayla birleştirilir. Bir parça başarısız olursa uygulama tüm orijinal metni kullanır ve kullanıcıyı uyarır. `Esc`, bekleyen istekleri iptal etmeyi dener; daha önce sağlayıcıya gönderilmiş metin geri alınamaz.
+
+Seçili metni seslendirme kısayolu **⌥⌘S** olarak kalır; sistemdeki diğer seslendirme kısayolları değiştirilmez.
 
 ### Erişilebilirlik izni ne sağlar?
 
@@ -52,7 +71,7 @@ macOS Erişilebilirlik izni, VoiceTyping'in başka bir uygulama öndeyken arka p
 - Odaktaki uygulama ile düzenlenebilir yazı alanını bulup odağı korumak,
 - Deşifre metnini panoya yazıp sentetik `Cmd+V` (ve isteğe bağlı Enter/Tab) göndermek
 
-için kullanır. Normal klavye karakterleri, ekran içeriği veya dosyalar okunmaz; ancak macOS bu izni geniş bir sistem yetkisi olarak tanımladığı için yalnızca güvendiğiniz uygulamalara verilmelidir. Mikrofon ve Apple Speech izinleri ayrı izinlerdir. İzin verilmezse global kısayol ve otomatik hedefe yazma kullanılamaz.
+için kullanır. Hedefi ve aktarımı doğrulamak için odaktaki alanın erişilebilirlik özellikleri, okunabiliyorsa metni ve imleç konumu okunur. Normal klavye karakterleri kaydedilmez. macOS bu izni geniş bir sistem yetkisi olarak tanımlar; yalnızca güvendiğiniz uygulamalara verilmelidir. Mikrofon ve Apple Speech izinleri ayrı izinlerdir. İzin verilmezse global kısayol ve otomatik hedefe yazma kullanılamaz.
 
 ---
 
@@ -87,11 +106,18 @@ Arka planda (Menü Çubuğunda) başlatmak için:
 
 ## 🧪 Doğrulama ve Testler
 
-Tüm birim ve entegrasyon testlerini çalıştırmak için:
+Varsayılan testleri çalıştırmak için:
 ```bash
 swift test
 ```
-Testler; yapılandırma yönetimi, LaTeX yasağı kontrolleri, izin denetleyicisi, ses kaydı, iptal mekanizması, pano enjeksiyonu ve `live_recording.wav` ile canlı Groq deşifresini uçtan uca doğrular.
+Testler; yapılandırma yönetimi, izinler, ses işleme, iptal, pano enjeksiyonu ve çeviri akışını doğrular. Varsayılan olarak canlı ses tanıma, canlı çeviri ve mikrofon testleri çalışmaz.
+
+Canlı ses tanıma testleri için açıkça seçtiğiniz bir WAV örneği ve ilgili sağlayıcının API anahtarı gerekir. Dosya sağlayıcının sunucusuna gönderilir ve kullanım ücrete tabi olabilir. Test örneği Türkçe `merhaba` içermelidir.
+```bash
+VOICETYPE_TEST_LIVE_SPEECH=1 VOICETYPE_TEST_AUDIO_FILE=/ornek/ses.wav \
+  swift test --filter 'VoiceTypingTests/testRealGroqTranscriptionWithSampleAudio'
+```
+Mikrofon testleri `VOICETYPE_TEST_MICROPHONE=1` ile, sabit metin kullanan canlı çeviri testleri `VOICETYPE_TEST_LIVE_TRANSLATION=1` ile ayrıca etkinleştirilir. Bu testleri yalnızca ilgili mikrofon ve API kullanımını kabul ettiğinizde çalıştırın.
 
 ---
 

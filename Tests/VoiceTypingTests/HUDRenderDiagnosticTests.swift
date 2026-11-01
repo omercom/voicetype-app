@@ -9,7 +9,8 @@ import AppKit
 /// formu net görünür (masaüstünde siyah üstüne siyah olabilir).
 final class HUDRenderDiagnosticTests: XCTestCase {
 
-    private let outDir = "/tmp/VoiceTyping-HUDRenderDiagnosticTests"
+    private let outDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("VoiceTyping-HUDRenderDiagnosticTests", isDirectory: true)
 
     @discardableResult
     private func dump(_ hud: RecordingHUD, name: String, bg: NSColor) -> NSBitmapImageRep? {
@@ -41,8 +42,14 @@ final class HUDRenderDiagnosticTests: XCTestCase {
               let png = bmp.representation(using: .png, properties: [:]) else {
             XCTFail("png yok"); return nil
         }
-        let url = URL(fileURLWithPath: "\(outDir)/\(name).png")
-        try? png.write(to: url)
+        let url = outDir.appendingPathComponent("\(name).png")
+        do {
+            try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+            try png.write(to: url, options: .atomic)
+        } catch {
+            XCTFail("png yazılamadı: \(error.localizedDescription)")
+            return nil
+        }
 
         // Kac piksel siyah (dolgu var mi?)
         var dark = 0

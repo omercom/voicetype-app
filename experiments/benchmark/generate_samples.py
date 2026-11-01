@@ -85,7 +85,6 @@ async def generate_all():
         metadata.append({
             "id": item["id"],
             "filename": filename,
-            "filepath": filepath,
             "category": item["category"],
             "voice": item["voice"],
             "rate": item["rate"],

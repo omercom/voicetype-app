@@ -112,11 +112,12 @@ public struct AppConfig: Codable {
     public var save_history: Bool
     public var gemini_system_prompt: String
     public var only_in_text_fields: Bool
+    /// Odak değişirse kayıt başındaki alanı yeniden odaklamayı dene.
+    public var restore_target_focus: Bool
     public var enable_auto_submit: Bool
     public var auto_submit_key: String // "return", "cmd_return", "shift_return", "tab"
-    /// Metni klavye olayları olarak yazar (deneysel, varsayılan kapalı). Electron
-    /// terminallerinde (ör. Claude Code) metnin sonu tekrar yazılabildiği için
-    /// varsayılan yol pano + Cmd+V'dir; eski pano içeriği ardından geri yüklenir.
+    /// Desteklenen alanlarda seçili metni erişilebilirlik API'siyle değiştirir.
+    /// Desteklenmiyorsa pano + Cmd+V kullanılır. Varsayılan kapalıdır.
     public var type_text_directly: Bool
     public var enable_app_profiles: Bool
     public var voice_snippets: [String: String]
@@ -137,6 +138,9 @@ public struct AppConfig: Codable {
     public var vad_stay_ratio: Double
     public var vad_silence_hold_sec: Double
     public var vad_max_segment_sec: Double
+    public var enable_translation: Bool
+    public var translation_target_language: String
+    public var translation_provider: String // "auto", "groq", "gemini"
 
     public static let defaultGeminiSystemPrompt = "Sen profesyonel bir ses deşifre asistanısın. Kullanıcının konuşmasını dinle ve doğrudan yazıya dök. Asla selamlama, özet, onaylama ('Tabii ki', 'Anladım' gibi) veya fazladan yorum ekleme; sadece konuşulan metni temiz, doğru imla ve akıcı bir dille yaz."
 
@@ -166,6 +170,7 @@ public struct AppConfig: Codable {
         save_history: true,
         gemini_system_prompt: AppConfig.defaultGeminiSystemPrompt,
         only_in_text_fields: true,
+        restore_target_focus: true,
         enable_auto_submit: false,
         auto_submit_key: "return",
         type_text_directly: false,
@@ -179,7 +184,10 @@ public struct AppConfig: Codable {
         vad_gate_db: -60.0,
         vad_stay_ratio: 0.5,
         vad_silence_hold_sec: 0.4,
-        vad_max_segment_sec: 8.0
+        vad_max_segment_sec: 8.0,
+        enable_translation: false,
+        translation_target_language: "en",
+        translation_provider: "auto"
     )
 
     enum CodingKeys: String, CodingKey {
@@ -188,12 +196,13 @@ public struct AppConfig: Codable {
         case paste_delay_ms, min_record_duration, mute_system_audio, pause_media_playback
         case background_audio_mode, enable_microphone_boost, show_dock_icon
         case haptic_feedback, remove_filler_words, custom_vocabulary, dictation_mode, save_history
-        case gemini_system_prompt, only_in_text_fields
+        case gemini_system_prompt, only_in_text_fields, restore_target_focus
         case enable_auto_submit, auto_submit_key, type_text_directly, enable_app_profiles, voice_snippets
         case sound_theme, sound_volume
         case hud_style
         case decode_tokens_per_sec, decode_token_base
         case vad_gate_db, vad_stay_ratio, vad_silence_hold_sec, vad_max_segment_sec
+        case enable_translation, translation_target_language, translation_provider
     }
 
     public init(
@@ -222,6 +231,7 @@ public struct AppConfig: Codable {
         save_history: Bool = true,
         gemini_system_prompt: String = AppConfig.defaultGeminiSystemPrompt,
         only_in_text_fields: Bool = true,
+        restore_target_focus: Bool = true,
         enable_auto_submit: Bool = false,
         auto_submit_key: String = "return",
         type_text_directly: Bool = false,
@@ -235,7 +245,10 @@ public struct AppConfig: Codable {
         vad_gate_db: Double = -60.0,
         vad_stay_ratio: Double = 0.5,
         vad_silence_hold_sec: Double = 0.4,
-        vad_max_segment_sec: Double = 8.0
+        vad_max_segment_sec: Double = 8.0,
+        enable_translation: Bool = false,
+        translation_target_language: String = "en",
+        translation_provider: String = "auto"
     ) {
         self.provider = provider
         self.groq_api_key = groq_api_key
@@ -262,6 +275,7 @@ public struct AppConfig: Codable {
         self.save_history = save_history
         self.gemini_system_prompt = gemini_system_prompt
         self.only_in_text_fields = only_in_text_fields
+        self.restore_target_focus = restore_target_focus
         self.enable_auto_submit = enable_auto_submit
         self.auto_submit_key = auto_submit_key
         self.type_text_directly = type_text_directly
@@ -276,6 +290,9 @@ public struct AppConfig: Codable {
         self.vad_stay_ratio = vad_stay_ratio
         self.vad_silence_hold_sec = vad_silence_hold_sec
         self.vad_max_segment_sec = vad_max_segment_sec
+        self.enable_translation = enable_translation
+        self.translation_target_language = translation_target_language
+        self.translation_provider = translation_provider
     }
 
     public init(from decoder: Decoder) throws {
@@ -305,6 +322,7 @@ public struct AppConfig: Codable {
         save_history = try container.decodeIfPresent(Bool.self, forKey: .save_history) ?? true
         gemini_system_prompt = try container.decodeIfPresent(String.self, forKey: .gemini_system_prompt) ?? AppConfig.defaultGeminiSystemPrompt
         only_in_text_fields = try container.decodeIfPresent(Bool.self, forKey: .only_in_text_fields) ?? true
+        restore_target_focus = try container.decodeIfPresent(Bool.self, forKey: .restore_target_focus) ?? true
         enable_auto_submit = try container.decodeIfPresent(Bool.self, forKey: .enable_auto_submit) ?? false
         auto_submit_key = try container.decodeIfPresent(String.self, forKey: .auto_submit_key) ?? "return"
         type_text_directly = try container.decodeIfPresent(Bool.self, forKey: .type_text_directly) ?? false
@@ -319,6 +337,9 @@ public struct AppConfig: Codable {
         vad_stay_ratio = try container.decodeIfPresent(Double.self, forKey: .vad_stay_ratio) ?? 0.5
         vad_silence_hold_sec = try container.decodeIfPresent(Double.self, forKey: .vad_silence_hold_sec) ?? 0.4
         vad_max_segment_sec = try container.decodeIfPresent(Double.self, forKey: .vad_max_segment_sec) ?? 8.0
+        enable_translation = try container.decodeIfPresent(Bool.self, forKey: .enable_translation) ?? false
+        translation_target_language = try container.decodeIfPresent(String.self, forKey: .translation_target_language) ?? "en"
+        translation_provider = try container.decodeIfPresent(String.self, forKey: .translation_provider) ?? "auto"
     }
 
     public static func parseVoiceSnippets(from text: String) -> [String: String] {

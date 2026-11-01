@@ -98,7 +98,7 @@ public enum PromptEchoGuard {
     /// Noktalı/noktasız i ayrımını ortadan kaldırır.
     private static func canonicalI(_ character: Character) -> Character {
         switch character {
-        case "ı", "İ", "î", "Ì", "Í", "Ï", "Ĩ", "Ī", "Ĭ", "Į", "ı":
+        case "ı", "İ", "î", "Ì", "Í", "Ï", "Ĩ", "Ī", "Ĭ", "Į":
             return "i"
         default:
             return character

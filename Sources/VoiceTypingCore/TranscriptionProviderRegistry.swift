@@ -30,6 +30,8 @@ public struct TranscriptionCapabilities: OptionSet, Sendable, Hashable {
     public static let requiresAPIKey = TranscriptionCapabilities(rawValue: 1 << 6)
     /// Zaman damgalı segment çıktısı üretir.
     public static let timestamps = TranscriptionCapabilities(rawValue: 1 << 7)
+    /// macOS Apple Speech konuşma tanıma izni gerektirir.
+    public static let requiresSpeechPermission = TranscriptionCapabilities(rawValue: 1 << 8)
 }
 
 // MARK: - Sağlayıcı Tanımı (Registry)
@@ -111,7 +113,7 @@ public enum TranscriptionProviderRegistry {
         TranscriptionProviderDescriptor(
             id: "apple",
             displayName: "Apple Speech",
-            capabilities: [.streaming, .batch, .languageDetection, .hotwords, .onDevice],
+            capabilities: [.streaming, .batch, .languageDetection, .hotwords, .onDevice, .requiresSpeechPermission],
             processingMode: .realtimeBoost
         ),
         TranscriptionProviderDescriptor(
@@ -137,6 +139,13 @@ public enum TranscriptionProviderRegistry {
             capabilities: [.batch, .languageDetection, .hotwords, .initialPrompt, .requiresAPIKey],
             processingMode: .utteranceClarity,
             apiKeyKind: .assemblyAI
+        ),
+        TranscriptionProviderDescriptor(
+            id: "seda",
+            displayName: "Harfiyen · Seda-v0.1",
+            readinessShortName: "Seda-v0.1",
+            capabilities: [.streaming, .batch, .onDevice],
+            processingMode: .realtimeBoost
         )
     ]
 

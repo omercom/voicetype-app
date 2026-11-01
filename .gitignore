@@ -31,6 +31,11 @@ config.json
 
 # Third-party reference source (cloned for design consultation only)
 reference/
+
+# Local agent work and planning notes
+.agents/teamwork/
+/PROJECT.md
+
 # Swift build artifacts
 .build/
 /VoiceTyping

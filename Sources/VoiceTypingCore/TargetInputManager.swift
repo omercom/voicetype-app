@@ -11,8 +11,8 @@ public struct TargetContext: Equatable {
     public let element: AXUIElement
     public let window: AXUIElement?
     public let role: String
-    /// Tarayıcı/Electron web alanının adresi (şema+host+yol). Kayıt sırasında
-    /// sekme veya sohbet kanalı değişirse yapıştırmadan önce bununla fark edilir.
+    /// Tarayıcı/Electron web alanının adresi. Kayıt sırasında sekme veya sohbet
+    /// kanalı değişirse yapıştırmadan önce bununla fark edilir.
     public let pageURL: String?
 
     public init(
@@ -268,7 +268,9 @@ public class TargetInputManager {
             }
         }
 
-        let elemToInspect = candidateElement ?? targetWindow ?? appRef
+        // Hedef alan bilinmiyorsa yalnızca uygulamayı veya pencereyi kilitlemek
+        // yeterli değildir: aynı uygulamadaki başka bir alana yazılabilir.
+        guard let elemToInspect = candidateElement else { return nil }
 
         // Metin alanı doğrulaması
         let (isInput, detectedRole) = isTextInputElement(
@@ -286,7 +288,7 @@ public class TargetInputManager {
             bundleIdentifier: bundleID,
             appName: appName,
             runningApp: frontApp,
-            element: candidateElement ?? targetWindow ?? appRef,
+            element: elemToInspect,
             window: targetWindow,
             role: detectedRole,
             pageURL: candidateElement.flatMap { pageURL(near: $0) }
@@ -302,20 +304,22 @@ public class TargetInputManager {
 
     /// Sistem genelinde klavye odağındaki öğe (canlı AX sorgusu).
     public func focusedElement() -> AXUIElement? {
+        let systemWide = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(systemWide, 0.25)
         var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &ref) == .success else {
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &ref) == .success else {
             return nil
         }
         return axElement(from: ref)
     }
 
-    /// Öğenin içinde bulunduğu web alanının adresi. Sorgu parametreleri ve `#`
-    /// parçası atılır: yazarken değişebilirler ve yanlış alarm üretirler; farklı
-    /// sekme/kanal ise neredeyse her zaman farklı host veya yol demektir.
+    /// Öğenin içinde bulunduğu web alanının adresi. Sorgu ve `#` bölümleri de
+    /// korunur; bazı uygulamalar konuşma ve kanalları bu bölümlerde ayırır.
     public func pageURL(near element: AXUIElement, maxDepth: Int = 20) -> String? {
         var current: AXUIElement? = element
         for _ in 0..<maxDepth {
             guard let node = current else { break }
+            AXUIElementSetMessagingTimeout(node, 0.25)
             var roleRef: CFTypeRef?
             _ = AXUIElementCopyAttributeValue(node, kAXRoleAttribute as CFString, &roleRef)
             if (roleRef as? String) == "AXWebArea" {
@@ -333,34 +337,72 @@ public class TargetInputManager {
     }
 
     static func normalizedPageURL(_ raw: String) -> String? {
-        guard let components = URLComponents(string: raw), let host = components.host else { return nil }
-        let path = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        return "\(components.scheme ?? "")://\(host)\(path)"
+        guard var components = URLComponents(string: raw),
+              let scheme = components.scheme, let host = components.host else { return nil }
+        components.scheme = scheme.lowercased()
+        components.host = host.lowercased()
+        components.user = nil
+        components.password = nil
+        if components.path.hasSuffix("/") { components.path.removeLast() }
+        return components.string
     }
 
-    /// Kaydın başladığı hedef hâlâ odakta mı? Kesin bir değişiklik kanıtı
-    /// yoksa `.same` döner; böylece AX bilgisi vermeyen uygulamalarda eski
-    /// davranış korunur ve yanlış alarm üretilmez.
+    /// Teslimattan önce uygulamayı, pencereyi ve kayıt başındaki alanı doğrular.
+    /// Odak okunamıyorsa başka bir alana yazma riskine karşı teslimat durdurulur.
     public func verify(_ target: TargetContext) -> TargetCheck {
-        guard let focused = focusedElement() else { return .same }
-        var pid: pid_t = 0
-        if AXUIElementGetPid(focused, &pid) == .success, pid != target.pid {
-            return .changed(reason: "Başka uygulama odakta")
+        guard target.role != "AXFallbackApp", target.runningApp?.isTerminated != true else {
+            return .changed(reason: "Hedef alan kullanılamıyor")
         }
-        if CFEqual(focused, target.element) { return .same }
-        if let expected = target.pageURL, let current = pageURL(near: focused), current != expected {
-            return .changed(reason: "Sekme değişti")
+        guard let appPID = focusedApplicationPID() else {
+            return .changed(reason: "Odak doğrulanamadı")
         }
+        guard appPID == target.pid else { return .changed(reason: "Başka uygulama odakta") }
+        guard let focused = focusedElement() else { return .changed(reason: "Odak doğrulanamadı") }
+        var elementPID: pid_t = 0
+        guard AXUIElementGetPid(focused, &elementPID) == .success else {
+            return .changed(reason: "Hedef alan doğrulanamadı")
+        }
+
+        var sameWindow: Bool?
+        if let expectedWindow = target.window {
+            let app = AXUIElementCreateApplication(target.pid)
+            AXUIElementSetMessagingTimeout(app, 0.25)
+            var windowRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
+               let currentWindow = axElement(from: windowRef) {
+                sameWindow = CFEqual(expectedWindow, currentWindow)
+            } else {
+                sameWindow = false
+            }
+        }
+
+        return Self.assessTarget(
+            expectedPID: target.pid, focusedPID: elementPID,
+            sameElement: CFEqual(focused, target.element), sameWindow: sameWindow,
+            expectedPageURL: target.pageURL,
+            currentPageURL: target.pageURL == nil ? nil : pageURL(near: focused)
+        )
+    }
+
+    static func assessTarget(
+        expectedPID: pid_t, focusedPID: pid_t?, sameElement: Bool,
+        sameWindow: Bool?, expectedPageURL: String?, currentPageURL: String?
+    ) -> TargetCheck {
+        guard let focusedPID else { return .changed(reason: "Odak doğrulanamadı") }
+        guard focusedPID == expectedPID else { return .changed(reason: "Başka uygulama odakta") }
+        guard sameWindow != false else { return .changed(reason: "Pencere değişti") }
+        if let expectedPageURL, currentPageURL != expectedPageURL {
+            return .changed(reason: "Sekme doğrulanamadı veya değişti")
+        }
+        guard sameElement else { return .changed(reason: "Yazı alanı değişti") }
         return .same
     }
 
-    /// Arka planda kalmış veya odağı kaybolmuş hedef uygulamayı ve pencereyi öne getirir,
-    /// odağı ilk konuşulan yazı alanına kilitler.
-    /// Klavye odağına sahip uygulamanın PID'i, doğrudan AX üzerinden canlı sorgulanır.
-    /// `NSWorkspace.frontmostApplication` ana run loop'ta bildirimle güncellenir; ana
-    /// thread bir bekleme döngüsünde bloke iken hiç değişmez ve döngü hep zaman aşımına düşer.
+    /// Klavye odağına sahip uygulamanın PID'i doğrudan AX üzerinden canlı sorgulanır.
+    /// `NSWorkspace.frontmostApplication` ana run loop'ta bildirimle güncellenir.
     private func focusedApplicationPID() -> pid_t? {
         let systemWide = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(systemWide, 0.25)
         var appRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &appRef) == .success,
               let app = axElement(from: appRef) else {
@@ -371,40 +413,76 @@ public class TargetInputManager {
         return pid
     }
 
-    private func waitUntilFocused(pid: pid_t, timeout: CFAbsoluteTime) -> Bool {
-        let deadline = CFAbsoluteTimeGetCurrent() + timeout
-        while focusedApplicationPID() != pid {
-            if CFAbsoluteTimeGetCurrent() > deadline { return false }
-            usleep(10_000)
-        }
+    private func isOriginalProcess(_ target: TargetContext) -> Bool {
+        guard target.role != "AXFallbackApp", let original = target.runningApp,
+              !original.isTerminated,
+              let running = NSRunningApplication(processIdentifier: target.pid) else { return false }
+        return original == running
+    }
+
+    private func isOriginalElementAvailable(_ target: TargetContext) -> Bool {
+        guard isOriginalProcess(target) else { return false }
+        AXUIElementSetMessagingTimeout(target.element, 0.25)
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(target.element, &pid) == .success, pid == target.pid else { return false }
+        var role: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(target.element, kAXRoleAttribute as CFString, &role) == .success,
+              role as? String != nil else { return false }
+        if let expectedURL = target.pageURL, pageURL(near: target.element) != expectedURL { return false }
         return true
     }
 
+    private func isOriginalWindowFocused(_ target: TargetContext) -> Bool {
+        guard let expected = target.window else { return true }
+        let app = AXUIElementCreateApplication(target.pid)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &value) == .success,
+              let current = axElement(from: value) else { return false }
+        return CFEqual(expected, current)
+    }
+
+    private func focusOriginalElement(_ target: TargetContext) -> Bool {
+        guard isOriginalElementAvailable(target) else { return false }
+        if AXUIElementSetAttributeValue(target.element, kAXFocusedAttribute as CFString, kCFBooleanTrue) == .success {
+            return true
+        }
+        // Some apps expose focus on the application rather than the field.
+        let app = AXUIElementCreateApplication(target.pid)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+        var settable: DarwinBoolean = false
+        guard AXUIElementIsAttributeSettable(app, kAXFocusedUIElementAttribute as CFString, &settable) == .success,
+              settable.boolValue else { return false }
+        return AXUIElementSetAttributeValue(app, kAXFocusedUIElementAttribute as CFString, target.element) == .success
+    }
+
+    /// Yalnızca kayıt sırasında yakalanan süreci, pencereyi ve alanı geri odaklar.
+    /// Bu yöntem bekleme yaptığı için ana thread dışında çağrılmalıdır.
     @discardableResult
-    public func restoreTargetFocus(to target: TargetContext) -> Bool {
-        // 1. Cocoa seviyesinde aktive et ve hedef pencereyi öne kaldır.
-        let app = target.runningApp ?? NSRunningApplication(processIdentifier: target.pid)
-        app?.activate(options: [.activateAllWindows])
-        if let window = target.window {
-            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-        }
-
-        // 2. Odağın gerçekten geçtiğini canlı AX sorgusuyla doğrula. Cocoa yolu
-        // yetmezse (bazı Electron/Java uygulamaları) System Events yedeğine geç;
-        // AppleScript yavaştır ve Otomasyon izni ister, bu yüzden yalnızca yedektir.
-        var focused = waitUntilFocused(pid: target.pid, timeout: 0.25)
-        if !focused {
-            let script = "tell application \"System Events\" to set frontmost of (first process whose unix id is \(target.pid)) to true"
-            var scriptError: NSDictionary?
-            NSAppleScript(source: script)?.executeAndReturnError(&scriptError)
-            focused = waitUntilFocused(pid: target.pid, timeout: 0.25)
-        }
-
-        // 3. Hedef UI öğesine odak ver ve pencerenin/imlecin oturması için kısa bekle.
-        let appRef = AXUIElementCreateApplication(target.pid)
-        AXUIElementSetAttributeValue(appRef, kAXFocusedUIElementAttribute as CFString, target.element)
-        usleep(40_000)
-
-        return focused
+    public func restoreTargetFocus(to target: TargetContext, isCancelled: @escaping () -> Bool = { false }) -> Bool {
+        guard !Thread.isMainThread else { return verify(target) == .same }
+        let environment = TargetFocusRecovery.Environment(
+            processIsValid: { [self] in isOriginalProcess(target) },
+            targetIsAvailable: { [self] in isOriginalElementAvailable(target) },
+            targetIsFocused: { [self] in verify(target) == .same },
+            applicationIsFocused: { [self] in focusedApplicationPID() == target.pid },
+            activateApplication: {
+                DispatchQueue.main.sync {
+                    guard !isCancelled(), let app = target.runningApp, !app.isTerminated else { return false }
+                    return app.isActive || app.activate(options: [])
+                }
+            },
+            windowIsFocused: { [self] in isOriginalWindowFocused(target) },
+            raiseWindow: { [self] in
+                guard !isCancelled(), isOriginalProcess(target), let window = target.window else { return }
+                AXUIElementSetMessagingTimeout(window, 0.25)
+                var pid: pid_t = 0
+                guard AXUIElementGetPid(window, &pid) == .success, pid == target.pid else { return }
+                _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            },
+            focusField: { [self] in !isCancelled() && focusOriginalElement(target) },
+            isCancelled: isCancelled
+        )
+        return TargetFocusRecovery.run(environment) == .ready
     }
 }

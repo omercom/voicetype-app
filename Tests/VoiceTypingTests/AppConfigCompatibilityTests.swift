@@ -112,4 +112,39 @@ final class AppConfigCompatibilityTests: XCTestCase {
         XCTAssertEqual(HUDPlacement.resolve("bilinmeyen"), .pill)
         XCTAssertEqual(HUDPlacement.resolve(""), .pill)
     }
+
+    // MARK: - Çeviri Konfigürasyon Uyumluluk Testleri
+
+    func testLegacyConfigWithoutTranslationKeysDecodesWithSafeDefaults() throws {
+        // Çeviri anahtarları eklenmeden önce kaydedilmiş eski konfigürasyon
+        let legacyJson = """
+        {
+          "provider": "groq",
+          "groq_api_key": "gsk_test",
+          "gemini_api_key": "",
+          "language": "tr",
+          "trigger_key": 54,
+          "trigger_mode": "hold"
+        }
+        """
+        let cfg = try decode(legacyJson)
+        // Yeni çeviri anahtarları güvenli varsayılan değerleri almalıdır
+        XCTAssertFalse(cfg.enable_translation, "Eski config'lerde çeviri varsayılan olarak kapalı olmalıdır")
+        XCTAssertEqual(cfg.translation_target_language, "en", "Hedef dil varsayılan olarak 'en' olmalıdır")
+        XCTAssertEqual(cfg.translation_provider, "auto", "Sağlayıcı varsayılan olarak 'auto' olmalıdır")
+    }
+
+    func testTranslationSettingsRoundTrip() throws {
+        var cfg = AppConfig.defaultConfig
+        cfg.enable_translation = true
+        cfg.translation_target_language = "de"
+        cfg.translation_provider = "gemini"
+
+        let data = try JSONEncoder().encode(cfg)
+        let restored = try JSONDecoder().decode(AppConfig.self, from: data)
+
+        XCTAssertTrue(restored.enable_translation)
+        XCTAssertEqual(restored.translation_target_language, "de")
+        XCTAssertEqual(restored.translation_provider, "gemini")
+    }
 }

@@ -24,9 +24,11 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
     private let directoryURL: URL
     private let latestAudioURL: URL
     private let latestMetadataURL: URL
+    private let ownsExistingDirectory: Bool
     private let lock = NSLock()
 
     public init(customDirectoryURL: URL? = nil) {
+        self.ownsExistingDirectory = customDirectoryURL == nil
         if let custom = customDirectoryURL {
             self.directoryURL = custom
         } else {
@@ -36,13 +38,39 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
         self.latestAudioURL = directoryURL.appendingPathComponent("latest_recovery.wav")
         self.latestMetadataURL = directoryURL.appendingPathComponent("latest_recovery.json")
 
-        ensureDirectoryExists()
+        _ = ensureDirectoryExists()
     }
 
-    private func ensureDirectoryExists() {
-        if !fileManager.fileExists(atPath: directoryURL.path) {
-            try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+    @discardableResult
+    private func ensureDirectoryExists() -> Bool {
+        let existed = fileManager.fileExists(atPath: directoryURL.path)
+        do {
+            if !existed {
+                try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+            }
+            // A caller-supplied existing folder may contain unrelated files.
+            // Tighten only the app's own folder or one this store created.
+            if !existed || ownsExistingDirectory {
+                try fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directoryURL.path)
+            }
+            return true
+        } catch {
+            print("[RecoveryAudioStore] ⚠️ Kurtarma klasörü hazırlanamadı: \(error.localizedDescription)")
+            return false
         }
+    }
+
+    private func writePrivate(_ data: Data, to url: URL) throws {
+        try data.write(to: url, options: .atomic)
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private func audioByteCount() -> Int? {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: latestAudioURL.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber else { return nil }
+        return size.intValue
     }
 
     /// Tamamlanan son ses kaydını kurtarma deposuna geçici olarak yazar.
@@ -51,9 +79,9 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        ensureDirectoryExists()
+        guard ensureDirectoryExists() else { return false }
         do {
-            try wavData.write(to: latestAudioURL, options: .atomic)
+            try writePrivate(wavData, to: latestAudioURL)
             let metadata = DictationRecoveryMetadata(
                 timestamp: Date(),
                 byteCount: wavData.count,
@@ -61,7 +89,7 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
                 lastError: nil
             )
             let metaData = try JSONEncoder().encode(metadata)
-            try metaData.write(to: latestMetadataURL, options: .atomic)
+            try writePrivate(metaData, to: latestMetadataURL)
             return true
         } catch {
             print("[RecoveryAudioStore] ⚠️ Ses kurtarma dosyası yazılamadı: \(error.localizedDescription)")
@@ -75,25 +103,22 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        guard fileManager.fileExists(atPath: latestAudioURL.path),
-              let data = try? Data(contentsOf: latestAudioURL) else {
-            return false
-        }
+        guard ensureDirectoryExists(), let byteCount = audioByteCount() else { return false }
 
         let metadata = DictationRecoveryMetadata(
             timestamp: Date(),
-            byteCount: data.count,
+            byteCount: byteCount,
             isFailed: true,
             lastError: error
         )
         do {
             let metaData = try JSONEncoder().encode(metadata)
-            try metaData.write(to: latestMetadataURL, options: .atomic)
-            print("[RecoveryAudioStore] 🛡️ Başarısız deşifre sesi kurtarma deposunda güvenle saklandı (\(data.count) bayt).")
+            try writePrivate(metaData, to: latestMetadataURL)
+            print("[RecoveryAudioStore] 🛡️ Başarısız deşifre sesi kurtarma deposunda güvenle saklandı (\(byteCount) bayt).")
             return true
         } catch {
             print("[RecoveryAudioStore] ⚠️ Kurtarma metadata'sı yazılamadı: \(error.localizedDescription)")
-            return data.count > 44
+            return byteCount > 44
         }
     }
 
@@ -104,11 +129,8 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        guard fileManager.fileExists(atPath: latestAudioURL.path),
-              let data = try? Data(contentsOf: latestAudioURL) else {
-            return false
-        }
-        return data.count > 44
+        guard let byteCount = audioByteCount() else { return false }
+        return byteCount > 44
     }
 
     /// Son kaydın teknik hata sonrası tutulduğunu döner.
@@ -135,6 +157,16 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
         return try? Data(contentsOf: latestAudioURL)
     }
 
+    static func availableExportURL(in directory: URL, baseName: String, exists: (URL) -> Bool) -> URL {
+        var candidate = directory.appendingPathComponent("\(baseName).wav")
+        var suffix = 2
+        while exists(candidate) {
+            candidate = directory.appendingPathComponent("\(baseName)_\(suffix).wav")
+            suffix += 1
+        }
+        return candidate
+    }
+
     /// Son kurtarma kaydını kullanıcının Masaüstüne "VoiceTyping_Kurtarilan_Ses.wav" olarak kopyalar
     public func exportLatestRecoveryToDesktop() -> URL? {
         lock.lock()
@@ -148,12 +180,11 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmmss"
         let dateStr = formatter.string(from: Date())
-        let destURL = desktopURL.appendingPathComponent("VoiceTyping_Kurtarilan_\(dateStr).wav")
+        let destURL = Self.availableExportURL(in: desktopURL, baseName: "VoiceTyping_Kurtarilan_\(dateStr)") {
+            fileManager.fileExists(atPath: $0.path)
+        }
 
         do {
-            if fileManager.fileExists(atPath: destURL.path) {
-                try fileManager.removeItem(at: destURL)
-            }
             try fileManager.copyItem(at: latestAudioURL, to: destURL)
             print("[RecoveryAudioStore] 💾 Kurtarılan ses masaüstüne kopyalandı: \(destURL.path)")
             return destURL

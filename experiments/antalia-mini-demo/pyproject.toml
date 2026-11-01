@@ -1,0 +1,9 @@
+[project]
+name = "voicetype-antalia-demo"
+version = "0.1.0"
+description = "VoiceType için Antalia Mini Türkçe TTS ve hız ölçümü"
+requires-python = ">=3.12,<3.13"
+dependencies = ["antalia-mini[hub]==1.0.0", "torch==2.14.1"]
+
+[tool.uv]
+package = false

@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "VoiceType — Türkçe Metni Seslendir",
+  "version": "1.2.0",
+  "minimum_chrome_version": "113",
+  "description": "Seçili metnin yanında okuma butonu gösterir. Mac'teki VoiceType uygulaması metni yerelde Türkçe seslendirir.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0iL9Lon7MiI7gEmP8QcuFmcfPR/MSqqR1HM+DZX2RQWyfuJIVxabQnsFr69gXlvwR+4dtPAngEvALe/G1LPLzh/pXacYI+2HhO3+MyvJsAbOw2f1pUgF76WeYjjNs4P9lloilNh8623twQdBFYVRYYbi5bKfYGlzJeQ4gUdEhlIy+B5LUeBjShBbNyp58JcN38WMrHRoAC8Ef8gcGkHigx65ysDUP4Pzn/0hFR2DRWorGldEqdSw+N8VQ7VAEUutSsxn4vW9Cik5iOGeHgb3vU4Adp48T4LMGhvOefzPSUhLMUBnWiH82fVBS0PsNLdBvQBibNnvS+UDZNs8lEmpbQIDAQAB",
+  "permissions": ["nativeMessaging"],
+  "action": { "default_title": "Seçili metnin okuma butonuna odaklan" },
+  "background": { "service_worker": "service-worker.js" },
+  "content_scripts": [{
+    "matches": ["http://*/*", "https://*/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}

@@ -1,0 +1,799 @@
+{
+  "created_at": "2026-10-09T12:46:35.387300+00:00",
+  "model": "cloud0day3/antalia-mini",
+  "antalia_version": "1.0.0",
+  "model_revision": "1e8166a7436f3e11f7f03b339258ec30f366db60",
+  "torch_version": "2.14.1",
+  "python": "3.12.13",
+  "platform": "macOS-27.0-arm64-arm-64bit",
+  "cpu": "Apple M5",
+  "device": "cpu",
+  "threads": 2,
+  "seed": 0,
+  "sample_rate": 48000,
+  "runs": 5,
+  "import_seconds": 5.287671790982131,
+  "model_load_seconds": 4.6461000830167904,
+  "cold_say": {
+    "generation_ms": 617.5988750183024,
+    "audio_seconds": 6.296,
+    "rtf": 0.09809384927228436,
+    "realtime_factor": 10.194319087471492
+  },
+  "results": [
+    {
+      "text": "Merhaba! Bu ses yapay zekâ ile üretilmiştir. VoiceType artık Türkçe metinleri sesli okuyabilir.",
+      "normalized_text": "merhaba! bu ses yapay zekâ ile üretilmiştir. voys tayp artık türkçe metinleri sesli okuyabilir.",
+      "wav": "demo-01.wav",
+      "say_runs": [
+        {
+          "generation_ms": 177.91550001129508,
+          "audio_seconds": 6.296,
+          "rtf": 0.028258497460497946,
+          "realtime_factor": 35.38758567747214
+        },
+        {
+          "generation_ms": 182.9032080131583,
+          "audio_seconds": 6.296,
+          "rtf": 0.029050700129154748,
+          "realtime_factor": 34.42257830462469
+        },
+        {
+          "generation_ms": 183.7514160433784,
+          "audio_seconds": 6.296,
+          "rtf": 0.02918542186203596,
+          "realtime_factor": 34.26368153001714
+        },
+        {
+          "generation_ms": 179.94595802156255,
+          "audio_seconds": 6.296,
+          "rtf": 0.02858099714446673,
+          "realtime_factor": 34.9882824222457
+        },
+        {
+          "generation_ms": 187.4873749911785,
+          "audio_seconds": 6.296,
+          "rtf": 0.029778807971915264,
+          "realtime_factor": 33.58092778405071
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 187.7833339967765,
+        "audio_seconds": 6.296,
+        "rtf": 0.029825815437861575,
+        "realtime_factor": 33.52800201165923
+      },
+      "warmup_stream": {
+        "generation_ms": 174.60204201051965,
+        "audio_seconds": 6.296,
+        "rtf": 0.027732217600146068,
+        "realtime_factor": 36.05914299456286,
+        "first_chunk_ms": 99.23212497960776,
+        "chunks": 2
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 198.43104196479544,
+          "audio_seconds": 6.296,
+          "rtf": 0.03151700158271846,
+          "realtime_factor": 31.72890661490858,
+          "first_chunk_ms": 116.58754199743271,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 185.9592089895159,
+          "audio_seconds": 6.296,
+          "rtf": 0.029536087831879908,
+          "realtime_factor": 33.856887401338426,
+          "first_chunk_ms": 105.10200000135228,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 189.92312502814457,
+          "audio_seconds": 6.296,
+          "rtf": 0.030165680595321563,
+          "realtime_factor": 33.15025486794723,
+          "first_chunk_ms": 103.05149998748675,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 175.7381670176983,
+          "audio_seconds": 6.296,
+          "rtf": 0.0279126694754921,
+          "realtime_factor": 35.826025198987885,
+          "first_chunk_ms": 99.16670899838209,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 239.49995898874477,
+          "audio_seconds": 6.296,
+          "rtf": 0.038040018899101774,
+          "realtime_factor": 26.288104710263767,
+          "first_chunk_ms": 123.86558402795345,
+          "chunks": 2
+        }
+      ],
+      "median_generation_ms": 182.9032080131583,
+      "median_first_chunk_ms": 105.10200000135228,
+      "median_realtime_factor": 34.42257830462469
+    },
+    {
+      "text": "Toplantı yarın saat 14:30'da başlayacak. Lütfen raporu kontrol edip ekibe gönderin.",
+      "normalized_text": "toplantı yarın saat on dört otuzda başlayacak. lütfen raporu kontrol edip ekibe gönderin.",
+      "wav": "demo-02.wav",
+      "say_runs": [
+        {
+          "generation_ms": 211.3472079508938,
+          "audio_seconds": 5.762666666666667,
+          "rtf": 0.036675244322806645,
+          "realtime_factor": 27.266348690093007
+        },
+        {
+          "generation_ms": 249.32083301246166,
+          "audio_seconds": 5.762666666666667,
+          "rtf": 0.043264836825392464,
+          "realtime_factor": 23.113458257933203
+        },
+        {
+          "generation_ms": 169.57983298925683,
+          "audio_seconds": 5.762666666666667,
+          "rtf": 0.029427319468288433,
+          "realtime_factor": 33.982028199259645
+        },
+        {
+          "generation_ms": 188.621332985349,
+          "audio_seconds": 5.762666666666667,
+          "rtf": 0.03273160567769823,
+          "realtime_factor": 30.5515106666873
+        },
+        {
+          "generation_ms": 475.2567079849541,
+          "audio_seconds": 5.762666666666667,
+          "rtf": 0.08247166381043859,
+          "realtime_factor": 12.125376811828406
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 214.09445797326043,
+        "audio_seconds": 5.762666666666667,
+        "rtf": 0.0371519767422363,
+        "realtime_factor": 26.91646818520824
+      },
+      "warmup_stream": {
+        "generation_ms": 219.1323750303127,
+        "audio_seconds": 5.762666666666667,
+        "rtf": 0.038026210382400394,
+        "realtime_factor": 26.297650750463113,
+        "first_chunk_ms": 136.55929104425013,
+        "chunks": 2
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 186.29462498938665,
+          "audio_seconds": 5.762666666666667,
+          "rtf": 0.03232785024110134,
+          "realtime_factor": 30.933080688693895,
+          "first_chunk_ms": 110.85604201070964,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 175.23837502812967,
+          "audio_seconds": 5.762666666666667,
+          "rtf": 0.030409250641160863,
+          "realtime_factor": 32.88473010401763,
+          "first_chunk_ms": 105.39250000147149,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 207.79445802327245,
+          "audio_seconds": 5.762666666666667,
+          "rtf": 0.03605873288233557,
+          "realtime_factor": 27.732533011160783,
+          "first_chunk_ms": 125.32904098043218,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 654.4676250196062,
+          "audio_seconds": 5.762666666666667,
+          "rtf": 0.11357027273593351,
+          "realtime_factor": 8.805121057736098,
+          "first_chunk_ms": 129.72450000233948,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 240.98208401119336,
+          "audio_seconds": 5.762666666666667,
+          "rtf": 0.04181780726709741,
+          "realtime_factor": 23.913257661092338,
+          "first_chunk_ms": 158.6973749799654,
+          "chunks": 2
+        }
+      ],
+      "median_generation_ms": 211.3472079508938,
+      "median_first_chunk_ms": 125.32904098043218,
+      "median_realtime_factor": 27.266348690093007
+    },
+    {
+      "text": "Sesle yazdığınız metni dinleyerek kontrol edebilirsiniz. Bu model konuşmayı yazıya çevirmez, yazıyı sese çevirir. İlk kurulumdan sonra internet bağlantısı olmadan çalışabilir.",
+      "normalized_text": "sesle yazdığınız metni dinleyerek kontrol edebilirsiniz. bu model konuşmayı yazıya çevirmez, yazıyı sese çevirir. ilk kurulumdan sonra internet bağlantısı olmadan çalışabilir.",
+      "wav": "demo-03.wav",
+      "say_runs": [
+        {
+          "generation_ms": 279.2033330188133,
+          "audio_seconds": 11.277333333333333,
+          "rtf": 0.024757921466553555,
+          "realtime_factor": 40.391112854564106
+        },
+        {
+          "generation_ms": 343.7312089954503,
+          "audio_seconds": 11.277333333333333,
+          "rtf": 0.030479830544642674,
+          "realtime_factor": 32.808581351373896
+        },
+        {
+          "generation_ms": 269.49595898622647,
+          "audio_seconds": 11.277333333333333,
+          "rtf": 0.023897135166667045,
+          "realtime_factor": 41.84602016206744
+        },
+        {
+          "generation_ms": 299.95779099408537,
+          "audio_seconds": 11.277333333333333,
+          "rtf": 0.026598290759702534,
+          "realtime_factor": 37.59640080012358
+        },
+        {
+          "generation_ms": 304.4872499885969,
+          "audio_seconds": 11.277333333333333,
+          "rtf": 0.026999933493904903,
+          "realtime_factor": 37.03712826647313
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 354.63341703871265,
+        "audio_seconds": 11.277333333333333,
+        "rtf": 0.03144656689276833,
+        "realtime_factor": 31.799973695378718
+      },
+      "warmup_stream": {
+        "generation_ms": 294.81829196447507,
+        "audio_seconds": 11.277333333333333,
+        "rtf": 0.02614255367384208,
+        "realtime_factor": 38.251810151224355,
+        "first_chunk_ms": 125.38258300628513,
+        "chunks": 2
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 321.8033749726601,
+          "audio_seconds": 11.277333333333333,
+          "rtf": 0.028535413954775962,
+          "realtime_factor": 35.04417358671716,
+          "first_chunk_ms": 116.36574997100979,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 281.95329202571884,
+          "audio_seconds": 11.277333333333333,
+          "rtf": 0.025001769806016687,
+          "realtime_factor": 39.997168510820764,
+          "first_chunk_ms": 112.46725003002211,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 273.7047920236364,
+          "audio_seconds": 11.277333333333333,
+          "rtf": 0.024270346892613776,
+          "realtime_factor": 41.20254252749602,
+          "first_chunk_ms": 126.60083401715383,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 339.04683298897,
+          "audio_seconds": 11.277333333333333,
+          "rtf": 0.03006445078525981,
+          "realtime_factor": 33.2618748681844,
+          "first_chunk_ms": 150.673582975287,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 255.89566701091826,
+          "audio_seconds": 11.277333333333333,
+          "rtf": 0.022691150420689133,
+          "realtime_factor": 44.07004411236149,
+          "first_chunk_ms": 104.15062500396743,
+          "chunks": 2
+        }
+      ],
+      "median_generation_ms": 299.95779099408537,
+      "median_first_chunk_ms": 116.36574997100979,
+      "median_realtime_factor": 37.59640080012358
+    },
+    {
+      "text": "Toplam tutar 1.250,75 TL. Randevunuz 14 Ekim 2026 günü saat 15:30'da, Dr. Ayşe Yılmaz ile.",
+      "normalized_text": "toplam tutar bin iki yüz elli lira yetmiş beş kuruş. randevunuz on dört ekim iki bin yirmi altı günü saat on beş otuzda, doktor ayşe yılmaz ile.",
+      "wav": "demo-04.wav",
+      "say_runs": [
+        {
+          "generation_ms": 204.91416699951515,
+          "audio_seconds": 9.016,
+          "rtf": 0.022727835736414723,
+          "realtime_factor": 43.99891004130199
+        },
+        {
+          "generation_ms": 207.93583302292973,
+          "audio_seconds": 9.016,
+          "rtf": 0.023062980592605337,
+          "realtime_factor": 43.35953004793444
+        },
+        {
+          "generation_ms": 209.81945900712162,
+          "audio_seconds": 9.016,
+          "rtf": 0.02327190095464969,
+          "realtime_factor": 42.97027569637372
+        },
+        {
+          "generation_ms": 203.62487499369308,
+          "audio_seconds": 9.016,
+          "rtf": 0.02258483529211325,
+          "realtime_factor": 44.277498023162714
+        },
+        {
+          "generation_ms": 207.9427089774981,
+          "audio_seconds": 9.016,
+          "rtf": 0.02306374323175445,
+          "realtime_factor": 43.35809629649308
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 249.73812501411885,
+        "audio_seconds": 9.016,
+        "rtf": 0.02769943711336722,
+        "realtime_factor": 36.101816650902954
+      },
+      "warmup_stream": {
+        "generation_ms": 215.44266701675951,
+        "audio_seconds": 9.016,
+        "rtf": 0.023895593058646795,
+        "realtime_factor": 41.848720705349585,
+        "first_chunk_ms": 102.41433401824906,
+        "chunks": 2
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 201.05216599768028,
+          "audio_seconds": 9.016,
+          "rtf": 0.02229948602458743,
+          "realtime_factor": 44.84408290385703,
+          "first_chunk_ms": 99.52270798385143,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 213.2342499680817,
+          "audio_seconds": 9.016,
+          "rtf": 0.02365064884295494,
+          "realtime_factor": 42.28213807748789,
+          "first_chunk_ms": 102.61449997778982,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 204.3368750018999,
+          "audio_seconds": 9.016,
+          "rtf": 0.022663806011745773,
+          "realtime_factor": 44.12321564532183,
+          "first_chunk_ms": 100.62300000572577,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 209.05249996576458,
+          "audio_seconds": 9.016,
+          "rtf": 0.023186834512618076,
+          "realtime_factor": 43.12792241889718,
+          "first_chunk_ms": 104.4140409794636,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 226.45729198120534,
+          "audio_seconds": 9.016,
+          "rtf": 0.025117268409627923,
+          "realtime_factor": 39.813246555771215,
+          "first_chunk_ms": 114.57766697276384,
+          "chunks": 2
+        }
+      ],
+      "median_generation_ms": 207.93583302292973,
+      "median_first_chunk_ms": 102.61449997778982,
+      "median_realtime_factor": 43.35953004793444
+    },
+    {
+      "text": "Öğleden sonra ılık bir çay içtik. Işık, çığ, yağmur ve gökyüzü hakkında konuştuk.",
+      "normalized_text": "öğleden sonra ılık bir çay içtik. ışık, çığ, yağmur ve gökyüzü hakkında konuştuk.",
+      "wav": "demo-05.wav",
+      "say_runs": [
+        {
+          "generation_ms": 179.84445800539106,
+          "audio_seconds": 5.378666666666667,
+          "rtf": 0.03343662456718971,
+          "realtime_factor": 29.90732506478145
+        },
+        {
+          "generation_ms": 186.42191699473187,
+          "audio_seconds": 5.378666666666667,
+          "rtf": 0.03465950365544098,
+          "realtime_factor": 28.852115423846133
+        },
+        {
+          "generation_ms": 175.87233398808166,
+          "audio_seconds": 5.378666666666667,
+          "rtf": 0.032698128530258115,
+          "realtime_factor": 30.58279005401249
+        },
+        {
+          "generation_ms": 189.76683396613225,
+          "audio_seconds": 5.378666666666667,
+          "rtf": 0.035281389557411794,
+          "realtime_factor": 28.343554847031907
+        },
+        {
+          "generation_ms": 262.25766603602096,
+          "audio_seconds": 5.378666666666667,
+          "rtf": 0.048758862054292446,
+          "realtime_factor": 20.509092252532703
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 182.81300005037338,
+        "audio_seconds": 5.378666666666667,
+        "rtf": 0.03398853496226575,
+        "realtime_factor": 29.42168590409105
+      },
+      "warmup_stream": {
+        "generation_ms": 176.16558400914073,
+        "audio_seconds": 5.378666666666667,
+        "rtf": 0.03275264948112433,
+        "realtime_factor": 30.53188111014682,
+        "first_chunk_ms": 90.41237499332055,
+        "chunks": 2
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 190.2988330111839,
+          "audio_seconds": 5.378666666666667,
+          "rtf": 0.035380298651062944,
+          "realtime_factor": 28.264317660584716,
+          "first_chunk_ms": 105.30362499412149,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 174.8557089595124,
+          "audio_seconds": 5.378666666666667,
+          "rtf": 0.03250911792752462,
+          "realtime_factor": 30.760600832953582,
+          "first_chunk_ms": 89.35516694327816,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 173.16575004952028,
+          "audio_seconds": 5.378666666666667,
+          "rtf": 0.03219492130320779,
+          "realtime_factor": 31.060799639238862,
+          "first_chunk_ms": 91.2310000276193,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 225.16704199369997,
+          "audio_seconds": 5.378666666666667,
+          "rtf": 0.041862985001307626,
+          "realtime_factor": 23.887450929950745,
+          "first_chunk_ms": 104.4104170287028,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 178.01212501944974,
+          "audio_seconds": 5.378666666666667,
+          "rtf": 0.03309595779984812,
+          "realtime_factor": 30.21517026482881,
+          "first_chunk_ms": 92.52054203534499,
+          "chunks": 2
+        }
+      ],
+      "median_generation_ms": 186.42191699473187,
+      "median_first_chunk_ms": 92.52054203534499,
+      "median_realtime_factor": 28.852115423846133
+    },
+    {
+      "text": "Toplantı bağlantısını WhatsApp üzerinden gönderdim. Python ve GitHub ile çalışıyoruz.",
+      "normalized_text": "toplantı bağlantısını whatsapp üzerinden gönderdim. python ve git hab ile çalışıyoruz.",
+      "wav": "demo-06.wav",
+      "say_runs": [
+        {
+          "generation_ms": 169.2482500220649,
+          "audio_seconds": 5.24,
+          "rtf": 0.032299284355355895,
+          "realtime_factor": 30.960438287053847
+        },
+        {
+          "generation_ms": 168.50762499962002,
+          "audio_seconds": 5.24,
+          "rtf": 0.03215794370221756,
+          "realtime_factor": 31.096515662195205
+        },
+        {
+          "generation_ms": 159.72887497628108,
+          "audio_seconds": 5.24,
+          "rtf": 0.030482609728297916,
+          "realtime_factor": 32.80559010246653
+        },
+        {
+          "generation_ms": 163.74887502752244,
+          "audio_seconds": 5.24,
+          "rtf": 0.031249785310595884,
+          "realtime_factor": 32.00021984346015
+        },
+        {
+          "generation_ms": 158.50170800695196,
+          "audio_seconds": 5.24,
+          "rtf": 0.030248417558578617,
+          "realtime_factor": 33.05958065619186
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 182.23108298843727,
+        "audio_seconds": 5.24,
+        "rtf": 0.03477692423443459,
+        "realtime_factor": 28.754699330478562
+      },
+      "warmup_stream": {
+        "generation_ms": 185.58549997396767,
+        "audio_seconds": 5.24,
+        "rtf": 0.035417080147703756,
+        "realtime_factor": 28.23496448125,
+        "first_chunk_ms": 107.87087498465553,
+        "chunks": 2
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 162.5919590005651,
+          "audio_seconds": 5.24,
+          "rtf": 0.03102899980926815,
+          "realtime_factor": 32.22791601878533,
+          "first_chunk_ms": 99.18020898476243,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 165.36104201804847,
+          "audio_seconds": 5.24,
+          "rtf": 0.03155745076680314,
+          "realtime_factor": 31.688237665000177,
+          "first_chunk_ms": 98.70550001505762,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 168.73999999370426,
+          "audio_seconds": 5.24,
+          "rtf": 0.0322022900751344,
+          "realtime_factor": 31.053692071799848,
+          "first_chunk_ms": 104.62975001428276,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 161.83662501862273,
+          "audio_seconds": 5.24,
+          "rtf": 0.030884852102790596,
+          "realtime_factor": 32.37833215687134,
+          "first_chunk_ms": 100.3781670005992,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 164.87158299423754,
+          "audio_seconds": 5.24,
+          "rtf": 0.0314640425561522,
+          "realtime_factor": 31.782311450137193,
+          "first_chunk_ms": 102.6897500269115,
+          "chunks": 2
+        }
+      ],
+      "median_generation_ms": 163.74887502752244,
+      "median_first_chunk_ms": 100.3781670005992,
+      "median_realtime_factor": 32.00021984346015
+    },
+    {
+      "text": "Evet. Tamam! Hayır, teşekkür ederim. Şimdi devam edelim.",
+      "normalized_text": "evet. tamam! hayır, teşekkür ederim. şimdi devam edelim.",
+      "wav": "demo-07.wav",
+      "say_runs": [
+        {
+          "generation_ms": 125.35187497269362,
+          "audio_seconds": 5.088,
+          "rtf": 0.024636767879853305,
+          "realtime_factor": 40.5897398910735
+        },
+        {
+          "generation_ms": 126.52241601608694,
+          "audio_seconds": 5.088,
+          "rtf": 0.024866827047186898,
+          "realtime_factor": 40.214217845421764
+        },
+        {
+          "generation_ms": 133.86145897675306,
+          "audio_seconds": 5.088,
+          "rtf": 0.02630924901272662,
+          "realtime_factor": 38.00944677350038
+        },
+        {
+          "generation_ms": 119.3339999881573,
+          "audio_seconds": 5.088,
+          "rtf": 0.02345400943163469,
+          "realtime_factor": 42.63663331912894
+        },
+        {
+          "generation_ms": 119.17133297538385,
+          "audio_seconds": 5.088,
+          "rtf": 0.023422038713715378,
+          "realtime_factor": 42.69483165931342
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 117.63804202200845,
+        "audio_seconds": 5.088,
+        "rtf": 0.023120684359671472,
+        "realtime_factor": 43.25131490243697
+      },
+      "warmup_stream": {
+        "generation_ms": 132.8645420144312,
+        "audio_seconds": 5.088,
+        "rtf": 0.026113314075163367,
+        "realtime_factor": 38.29464146609832,
+        "first_chunk_ms": 132.8589170007035,
+        "chunks": 1
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 118.21308400249109,
+          "audio_seconds": 5.088,
+          "rtf": 0.0232337036168418,
+          "realtime_factor": 43.04092091779605,
+          "first_chunk_ms": 118.20974998408929,
+          "chunks": 1
+        },
+        {
+          "generation_ms": 117.42591601796448,
+          "audio_seconds": 5.088,
+          "rtf": 0.023078992928059056,
+          "realtime_factor": 43.32944696144937,
+          "first_chunk_ms": 117.4226250150241,
+          "chunks": 1
+        },
+        {
+          "generation_ms": 117.80504102353007,
+          "audio_seconds": 5.088,
+          "rtf": 0.023153506490473676,
+          "realtime_factor": 43.190002361475656,
+          "first_chunk_ms": 117.79987503541633,
+          "chunks": 1
+        },
+        {
+          "generation_ms": 121.11700000241399,
+          "audio_seconds": 5.088,
+          "rtf": 0.02380444182437382,
+          "realtime_factor": 42.00896653565223,
+          "first_chunk_ms": 121.11354200169444,
+          "chunks": 1
+        },
+        {
+          "generation_ms": 121.69387500034645,
+          "audio_seconds": 5.088,
+          "rtf": 0.023917821344407713,
+          "realtime_factor": 41.8098281444774,
+          "first_chunk_ms": 121.69058300787583,
+          "chunks": 1
+        }
+      ],
+      "median_generation_ms": 125.35187497269362,
+      "median_first_chunk_ms": 118.20974998408929,
+      "median_realtime_factor": 40.5897398910735
+    },
+    {
+      "text": "İstanbul'un iki yakasını birbirine bağlayan köprüler, her gün yüz binlerce kişinin işe, okula ve evine ulaşmasını sağlıyor. Ancak yoğun saatlerde trafik yolculuk süresini uzatıyor. Bu yüzden yola çıkmadan önce güzergâhınızı kontrol edin. Alternatif yolları da değerlendirin.",
+      "normalized_text": "istanbul'un iki yakasını birbirine bağlayan köprüler, her gün yüz binlerce kişinin işe, okula ve evine ulaşmasını sağlıyor. ancak yoğun saatlerde trafik yolculuk süresini uzatıyor. bu yüzden yola çıkmadan önce güzergâhınızı kontrol edin. alternatif yolları da değerlendirin.",
+      "wav": "demo-08.wav",
+      "say_runs": [
+        {
+          "generation_ms": 328.34858301794156,
+          "audio_seconds": 17.261333333333333,
+          "rtf": 0.019022202785683312,
+          "realtime_factor": 52.57014717310396
+        },
+        {
+          "generation_ms": 346.06675000395626,
+          "audio_seconds": 17.261333333333333,
+          "rtf": 0.020048668507876347,
+          "realtime_factor": 49.87862408953186
+        },
+        {
+          "generation_ms": 323.38324998272583,
+          "audio_seconds": 17.261333333333333,
+          "rtf": 0.018734546383983034,
+          "realtime_factor": 53.3773265444496
+        },
+        {
+          "generation_ms": 413.62412500893697,
+          "audio_seconds": 17.261333333333333,
+          "rtf": 0.023962466689070195,
+          "realtime_factor": 41.73193073049203
+        },
+        {
+          "generation_ms": 364.76420797407627,
+          "audio_seconds": 17.261333333333333,
+          "rtf": 0.021131867447903383,
+          "realtime_factor": 47.32189440735943
+        }
+      ],
+      "warmup_say": {
+        "generation_ms": 323.6423749476671,
+        "audio_seconds": 17.261333333333333,
+        "rtf": 0.018749558258207195,
+        "realtime_factor": 53.33458987292528
+      },
+      "warmup_stream": {
+        "generation_ms": 316.02420803392306,
+        "audio_seconds": 17.261333333333333,
+        "rtf": 0.01830821535805981,
+        "realtime_factor": 54.62028823905935,
+        "first_chunk_ms": 161.42062499420717,
+        "chunks": 2
+      },
+      "stream_runs": [
+        {
+          "generation_ms": 324.23158298479393,
+          "audio_seconds": 17.261333333333333,
+          "rtf": 0.018783692819295185,
+          "realtime_factor": 53.23766788673042,
+          "first_chunk_ms": 156.44654096104205,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 402.0161670050584,
+          "audio_seconds": 17.261333333333333,
+          "rtf": 0.023289983412157714,
+          "realtime_factor": 42.9369133632781,
+          "first_chunk_ms": 212.182458024472,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 329.05212498735636,
+          "audio_seconds": 17.261333333333333,
+          "rtf": 0.019062961049012613,
+          "realtime_factor": 52.457747641035866,
+          "first_chunk_ms": 162.96491696266457,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 318.30345903290436,
+          "audio_seconds": 17.261333333333333,
+          "rtf": 0.01844025909737975,
+          "realtime_factor": 54.229172958968554,
+          "first_chunk_ms": 158.7547090020962,
+          "chunks": 2
+        },
+        {
+          "generation_ms": 358.740666997619,
+          "audio_seconds": 17.261333333333333,
+          "rtf": 0.02078290593605857,
+          "realtime_factor": 48.116466632560225,
+          "first_chunk_ms": 191.13120896508917,
+          "chunks": 2
+        }
+      ],
+      "median_generation_ms": 346.06675000395626,
+      "median_first_chunk_ms": 162.96491696266457,
+      "median_realtime_factor": 49.87862408953186
+    }
+  ],
+  "notes": [
+    "WAV yazma ve ses çalma ölçüm dışında.",
+    "İlk parça gecikmesi hoparlörden duyulma gecikmesi değildir.",
+    "Yükleme süresi ilk çalışmada indirmeyi içerebilir.",
+    "Metinler ve WAV dosyaları yerelde saklanır; özel metni paylaşmayın."
+  ]
+}

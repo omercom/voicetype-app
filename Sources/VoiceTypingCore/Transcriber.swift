@@ -108,7 +108,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
 
     public func start() {
         lock.lock()
-        guard webSocketTask == nil, !isCancelled else {
+        guard webSocketTask == nil, !isCancelled, !isCompleted else {
             lock.unlock()
             return
         }
@@ -213,7 +213,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         }
     }
 
-    private func handleIncomingData(_ data: Data) {
+    func handleIncomingData(_ data: Data) {
         guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             return
         }
@@ -230,6 +230,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
             streamQueue.async { [weak self] in
                 guard let self = self else { return }
                 self.lock.lock()
+                guard !self.isCompleted, !self.isCancelled else { self.lock.unlock(); return }
                 self.isSetupComplete = true
                 let queued = self.pendingChunks
                 self.pendingChunks.removeAll()
@@ -255,6 +256,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let trimmed = Self.cleanNoiseTags(interimText)
                 if !trimmed.isEmpty {
                     lock.lock()
+                    guard !isCompleted, !isCancelled else { lock.unlock(); return }
                     let preview = GeminiTranscriptProcessor.applyPartial(
                         accumulator: &self.transcriptAccumulator,
                         text: trimmed,
@@ -273,6 +275,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let trimmed = Self.cleanNoiseTags(text)
                 if !trimmed.isEmpty {
                     lock.lock()
+                    guard !isCompleted, !isCancelled else { lock.unlock(); return }
                     let current = GeminiTranscriptProcessor.applyFinal(
                         accumulator: &self.transcriptAccumulator,
                         text: trimmed
@@ -298,13 +301,15 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let text = textParts.compactMap { $0["text"] as? String }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
                     lock.lock()
+                    guard !isCompleted, !isCancelled else { lock.unlock(); return }
                     self.modelTurnFallbackText = text
                     let hasAccum = !self.transcriptAccumulator.committedText.isEmpty
                     let endSent = self.hasSentStreamEnd
+                    let callback = onInterim
                     lock.unlock()
 
                     if !hasAccum {
-                        onInterim?(text)
+                        callback?(text)
                     }
 
                     if endSent {
@@ -397,6 +402,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
 
     private func sendRawStreamEnd(ws: URLSessionWebSocketTask) {
         lock.lock()
+        guard !isCompleted, !isCancelled, !hasSentStreamEnd else { lock.unlock(); return }
         hasSentStreamEnd = true
         streamEndSentTime = CFAbsoluteTimeGetCurrent()
         lock.unlock()
@@ -422,7 +428,9 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     }
 
     private func startSafetyTimeout(seconds: Double) {
-        cancelSafetyTimer()
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isCompleted, !isCancelled, safetyTimer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
         timer.schedule(deadline: .now() + seconds)
         timer.setEventHandler { [weak self] in
@@ -432,15 +440,10 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         self.safetyTimer = timer
     }
 
-    private func cancelSafetyTimer() {
-        lock.lock()
-        safetyTimer?.cancel()
-        safetyTimer = nil
-        lock.unlock()
-    }
-
     private func scheduleFinalization(delayMs: Int) {
         lock.lock()
+        defer { lock.unlock() }
+        guard !isCompleted, !isCancelled else { return }
         finalizationTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
         timer.schedule(deadline: .now() + .milliseconds(delayMs))
@@ -449,14 +452,6 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         }
         timer.resume()
         self.finalizationTimer = timer
-        lock.unlock()
-    }
-
-    private func cancelFinalizationTimer() {
-        lock.lock()
-        finalizationTimer?.cancel()
-        finalizationTimer = nil
-        lock.unlock()
     }
 
     // MARK: - Normalizasyon ve Mükerrer İfade Çözümleme
@@ -514,15 +509,21 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         var wordTokens: [String] = []
         var wordRanges: [Range<String.Index>] = []
 
-        trimmed.enumerateSubstrings(in: trimmed.startIndex..<trimmed.endIndex, options: .byWords) { substring, range, _, _ in
+        // Packet overlap is already reconciled by StreamingTranscriptAccumulator.
+        // Whole-document repetition guesses can delete intentional closing sentences
+        // and the exhaustive search below has cubic copying cost. Keep this legacy
+        // correction bounded to short utterances; never rewrite a long dictation.
+        let maximumCleanupWords = 256
+        trimmed.enumerateSubstrings(in: trimmed.startIndex..<trimmed.endIndex, options: .byWords) { substring, range, _, stop in
             if let word = substring {
                 wordTokens.append(word.lowercased(with: Locale(identifier: "tr_TR")))
                 wordRanges.append(range)
+                if wordTokens.count > maximumCleanupWords { stop = true }
             }
         }
 
         let totalWords = wordTokens.count
-        guard totalWords >= 4 else { return trimmed }
+        guard totalWords >= 4, totalWords <= maximumCleanupWords else { return trimmed }
 
         // 1. Cümlenin sonundaki K kelimelik blok, cümlenin başındaki K kelimelik blok ile aynı mı? (K >= 2)
         // Kullanıcının bildirdiği hata: "Sen harika bir insansın. Seni çok seviyorum. Çok güzel. Sen harika bir insansın. Seni çok seviyorum. Çok"
@@ -530,7 +531,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         for k in stride(from: maxK, through: 2, by: -1) {
             let tail = wordTokens.suffix(k)
             let head = wordTokens.prefix(k)
-            if Array(tail) == Array(head) {
+            if tail.elementsEqual(head) {
                 let tailStartIndex = totalWords - k
                 if tailStartIndex >= k {
                     let cutIndex = wordRanges[tailStartIndex].lowerBound
@@ -546,7 +547,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
             while i + 2 * k <= wordTokens.count {
                 let block1 = wordTokens[i..<(i + k)]
                 let block2 = wordTokens[(i + k)..<(i + 2 * k)]
-                if Array(block1) == Array(block2) {
+                if block1.elementsEqual(block2) {
                     let cutStart = wordRanges[i + k].lowerBound
                     let cutEnd = wordRanges[i + 2 * k - 1].upperBound
                     var before = String(trimmed[trimmed.startIndex..<cutStart]).trimmingCharacters(in: .whitespaces)
@@ -569,7 +570,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 let searchLimit = totalWords - tailLen
                 for start in 0...(searchLimit - tailLen) {
                     let candidate = wordTokens[start..<(start + tailLen)]
-                    if Array(tailSlice) == Array(candidate) {
+                    if tailSlice.elementsEqual(candidate) {
                         let cutIndex = wordRanges[totalWords - tailLen].lowerBound
                         let result = String(trimmed[trimmed.startIndex..<cutIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
                         return result
@@ -585,25 +586,23 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         StreamingTranscriptReconciler.merge(existing: accumulated, incoming: interim)
     }
 
-    private func finishAndComplete() {
-        cancelSafetyTimer()
-        cancelFinalizationTimer()
-
+    func finishAndComplete() {
         lock.lock()
         guard !isCompleted else {
             lock.unlock()
             return
         }
         isCompleted = true
+        safetyTimer?.cancel()
+        safetyTimer = nil
+        finalizationTimer?.cancel()
+        finalizationTimer = nil
         let latency = CFAbsoluteTimeGetCurrent() - startTime
 
         var text = transcriptAccumulator.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
             text = modelTurnFallbackText.trimmingCharacters(in: .whitespacesAndNewlines)
         }
-
-        text = Self.cleanNoiseTags(text)
-        text = Self.deduplicateRepeatedPhrases(text)
 
         let ws = webSocketTask
         webSocketTask = nil
@@ -617,6 +616,12 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         ws?.cancel(with: .normalClosure, reason: nil)
         sess?.finishTasksAndInvalidate()
 
+        // No text processing while holding the socket/cancellation lock.
+        let cleanupStarted = ProcessInfo.processInfo.systemUptime
+        text = Self.deduplicateRepeatedPhrases(Self.cleanNoiseTags(text))
+        let cleanupMs = (ProcessInfo.processInfo.systemUptime - cleanupStarted) * 1000
+        print("[GeminiLive] Final text: \(text.utf16.count) UTF-16 units, cleanup=\(String(format: "%.1f", cleanupMs))ms")
+
         let result = TranscriptionResult(
             success: true,
             text: text,
@@ -629,12 +634,13 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     }
 
     public func cancel() {
-        cancelSafetyTimer()
-        cancelFinalizationTimer()
-
         lock.lock()
         isCancelled = true
         isCompleted = true
+        safetyTimer?.cancel()
+        safetyTimer = nil
+        finalizationTimer?.cancel()
+        finalizationTimer = nil
         pendingChunks.removeAll()
         transcriptAccumulator.reset()
         modelTurnFallbackText = ""
@@ -660,15 +666,16 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     }
 
     private func notifyCompletion(success: Bool, text: String, error: String?) {
-        cancelSafetyTimer()
-        cancelFinalizationTimer()
-
         lock.lock()
         guard !isCompleted else {
             lock.unlock()
             return
         }
         isCompleted = true
+        safetyTimer?.cancel()
+        safetyTimer = nil
+        finalizationTimer?.cancel()
+        finalizationTimer = nil
         let latency = CFAbsoluteTimeGetCurrent() - startTime
         let ws = webSocketTask
         webSocketTask = nil
@@ -1232,6 +1239,8 @@ public class Transcriber {
         return URLSession(configuration: configuration)
     }()
 
+    private let seda = SedaTranscriber()
+
     private init() {}
 
     /// Sağlayıcıların sessizlik için döndürdüğü hata/mesajları gerçek teknik
@@ -1270,6 +1279,7 @@ public class Transcriber {
     }
 
     public func cancel() {
+        seda.cancel()
         lock.lock()
         defer { lock.unlock() }
         currentTask?.cancel()
@@ -1313,6 +1323,18 @@ public class Transcriber {
         lock.unlock()
 
         session.start()
+        return session
+    }
+
+    public func startLiveSedaSession(
+        config: AppConfig,
+        onInterim: ((String) -> Void)? = nil,
+        completion: @escaping (TranscriptionResult) -> Void
+    ) -> any LiveStreamSession {
+        let session = seda.startLive(language: config.language, onInterim: onInterim, completion: completion)
+        lock.lock()
+        activeLiveSession = session
+        lock.unlock()
         return session
     }
 
@@ -1390,6 +1412,8 @@ public class Transcriber {
             transcribeGroq(audioData: audioData, config: config, completion: completion)
         case "assemblyai":
             transcribeAssemblyAI(audioData: audioData, config: config, completion: completion)
+        case "seda":
+            seda.transcribe(audioData: audioData, language: config.language, completion: completion)
         default:
             transcribeAppleSpeech(audioData: audioData, config: config, completion: completion)
         }

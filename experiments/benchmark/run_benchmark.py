@@ -208,6 +208,13 @@ def evaluate_predictions(ground_truth: str, predicted: str) -> Dict[str, float]:
         "tr_char_recall": round(tr_char_recall, 2)
     }
 
+def sample_audio_path(sample: Dict[str, Any], benchmark_dir: str) -> str:
+    """Resolve generated samples locally while preserving custom audio paths."""
+    if "filename" in sample:
+        return os.path.join(benchmark_dir, "samples", sample["filename"])
+    return sample["filepath"]
+
+
 def main():
     parser = argparse.ArgumentParser(description="Groq Whisper vs Gemini Türkçe STT Benchmark")
     parser.add_argument("--groq-key", help="Groq API Key")
@@ -275,7 +282,7 @@ def main():
     for sample in samples:
         print(f"\n➔ Test Örneği: [{sample['id']}] - {sample['category']}")
         print(f"  Referans: \"{sample['ground_truth']}\"")
-        audio_path = sample["filepath"]
+        audio_path = sample_audio_path(sample, base_dir)
         
         for m in models_to_test:
             m_id = m["id"]

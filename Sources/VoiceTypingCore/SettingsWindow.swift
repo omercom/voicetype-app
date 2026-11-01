@@ -56,6 +56,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         )
     ]
     private var languageField: NSTextField!
+    public var translationCheckbox: NSButton!
+    public var targetLanguagePopUp: NSPopUpButton!
     private var playSoundsCheckbox: NSButton!
     private var hapticFeedbackCheckbox: NSButton!
     private var removeFillerWordsCheckbox: NSButton!
@@ -66,6 +68,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var launchAtLoginCheckbox: NSButton!
     private var showDockIconCheckbox: NSButton!
     private var onlyInTextFieldsCheckbox: NSButton!
+    private(set) var targetFocusPopUp: NSPopUpButton!
 
     // Tab 2: Yapay Zeka & Modeller
     private var providerSegmentedControl: NSSegmentedControl!
@@ -357,7 +360,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 550))
 
         // 1. Kısayol Tuşu
-        let keyLabel = createSectionLabel(text: "Tetikleyici Tuş", y: 18)
+        let keyLabel = createSectionLabel(text: "Normal Dikte Tuşu", y: 18)
         container.addSubview(keyLabel)
 
         triggerKeyPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 16, width: 260, height: 26), pullsDown: false)
@@ -440,11 +443,11 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(createSeparator(y: 224))
 
         // 4. Konuşma Dili
-        let langLabel = createSectionLabel(text: "Konuşma Dili", y: 238)
+        let langLabel = createSectionLabel(text: "Konuşma Dili", y: 232)
         container.addSubview(langLabel)
 
         languageField = createSingleLineInputField(
-            frame: NSRect(x: 175, y: 236, width: 60, height: 24),
+            frame: NSRect(x: 175, y: 230, width: 60, height: 24),
             placeholder: "tr",
             isMonospaced: false
         )
@@ -453,49 +456,83 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(languageField)
 
         let langHint = NSTextField(labelWithString: "('tr': Türkçe, 'en': İngilizce, 'auto': Otomatik Algıla)")
-        langHint.frame = NSRect(x: 245, y: 239, width: 370, height: 20)
+        langHint.frame = NSRect(x: 245, y: 233, width: 370, height: 20)
         langHint.font = NSFont.systemFont(ofSize: 11)
         langHint.textColor = .secondaryLabelColor
         container.addSubview(langHint)
 
+        // Çeviri (Translation)
+        translationCheckbox = NSButton(checkboxWithTitle: "Sağ Option ile Çevir", target: self, action: #selector(checkboxChanged(_:)))
+        translationCheckbox.toolTip = "Sağ Option çevirili dikteyi başlatır. Normal dikte tuşu çevirmeden yazar. Metin Groq veya Gemini'ye gönderilir. Otomatik seçimde Groq başarısızsa metin Gemini'ye de gönderilebilir. Ara cümleler konuşma sürerken gönderilebilir. Normal dikte tuşu da Sağ Option ise çeviri önceliklidir."
+        translationCheckbox.setButtonType(.switch)
+        translationCheckbox.frame = NSRect(x: 175, y: 258, width: 200, height: 20)
+        container.addSubview(translationCheckbox)
+
+        let targetLangLabel = NSTextField(labelWithString: "Hedef Dil:")
+        targetLangLabel.frame = NSRect(x: 385, y: 259, width: 65, height: 18)
+        targetLangLabel.font = NSFont.systemFont(ofSize: 12)
+        targetLangLabel.textColor = .secondaryLabelColor
+        container.addSubview(targetLangLabel)
+
+        targetLanguagePopUp = NSPopUpButton(frame: NSRect(x: 450, y: 256, width: 165, height: 24), pullsDown: false)
+        targetLanguagePopUp.addItem(withTitle: "İngilizce [en]")
+        targetLanguagePopUp.lastItem?.representedObject = "en"
+        targetLanguagePopUp.addItem(withTitle: "Almanca [de]")
+        targetLanguagePopUp.lastItem?.representedObject = "de"
+        targetLanguagePopUp.addItem(withTitle: "İspanyolca [es]")
+        targetLanguagePopUp.lastItem?.representedObject = "es"
+        targetLanguagePopUp.addItem(withTitle: "Fransızca [fr]")
+        targetLanguagePopUp.lastItem?.representedObject = "fr"
+        targetLanguagePopUp.target = self
+        targetLanguagePopUp.action = #selector(targetLanguageChanged(_:))
+        container.addSubview(targetLanguagePopUp)
+
         // Ayırıcı
-        container.addSubview(createSeparator(y: 266))
+        container.addSubview(createSeparator(y: 284))
 
         // 5. Seçenekler (Tercihler)
-        let optsLabel = createSectionLabel(text: "Seçenekler", y: 280)
+        let optsLabel = createSectionLabel(text: "Seçenekler", y: 298)
         container.addSubview(optsLabel)
 
         hapticFeedbackCheckbox = NSButton(checkboxWithTitle: "Dokunsal titreşim (Trackpad Force Touch tıkı)", target: self, action: #selector(checkboxChanged(_:)))
-        hapticFeedbackCheckbox.frame = NSRect(x: 175, y: 278, width: 440, height: 18)
+        hapticFeedbackCheckbox.frame = NSRect(x: 175, y: 296, width: 440, height: 18)
         container.addSubview(hapticFeedbackCheckbox)
 
         removeFillerWordsCheckbox = NSButton(checkboxWithTitle: "Dolgu kelimelerini otomatik temizle ('ııı', 'şey', 'yani', 'hımm')", target: self, action: #selector(checkboxChanged(_:)))
-        removeFillerWordsCheckbox.frame = NSRect(x: 175, y: 300, width: 440, height: 18)
+        removeFillerWordsCheckbox.frame = NSRect(x: 175, y: 316, width: 440, height: 18)
         container.addSubview(removeFillerWordsCheckbox)
 
         saveHistoryCheckbox = NSButton(checkboxWithTitle: "Dikte geçmişini menü çubuğunda sakla (Son 15 dikte)", target: self, action: #selector(checkboxChanged(_:)))
-        saveHistoryCheckbox.frame = NSRect(x: 175, y: 322, width: 440, height: 18)
+        saveHistoryCheckbox.frame = NSRect(x: 175, y: 336, width: 440, height: 18)
         container.addSubview(saveHistoryCheckbox)
 
         playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal", target: self, action: #selector(checkboxChanged(_:)))
-        playSoundsCheckbox.frame = NSRect(x: 175, y: 344, width: 440, height: 18)
+        playSoundsCheckbox.frame = NSRect(x: 175, y: 356, width: 440, height: 18)
         container.addSubview(playSoundsCheckbox)
 
         micBoostCheckbox = NSButton(checkboxWithTitle: "Mikrofon Akıllı Kazanç (AGC Boost - Fısıltı Güçlendirme & Tanh Sınırlayıcı)", target: self, action: #selector(checkboxChanged(_:)))
-        micBoostCheckbox.frame = NSRect(x: 175, y: 366, width: 440, height: 18)
+        micBoostCheckbox.frame = NSRect(x: 175, y: 376, width: 440, height: 18)
         container.addSubview(micBoostCheckbox)
 
         launchAtLoginCheckbox = NSButton(checkboxWithTitle: "Mac açıldığında otomatik başlat", target: self, action: #selector(checkboxChanged(_:)))
-        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 388, width: 440, height: 18)
+        launchAtLoginCheckbox.frame = NSRect(x: 175, y: 396, width: 440, height: 18)
         container.addSubview(launchAtLoginCheckbox)
 
         showDockIconCheckbox = NSButton(checkboxWithTitle: "Dock simgesini kalıcı olarak göster", target: self, action: #selector(checkboxChanged(_:)))
-        showDockIconCheckbox.frame = NSRect(x: 175, y: 410, width: 440, height: 18)
+        showDockIconCheckbox.frame = NSRect(x: 175, y: 416, width: 440, height: 18)
         container.addSubview(showDockIconCheckbox)
 
-        onlyInTextFieldsCheckbox = NSButton(checkboxWithTitle: "Yalnızca yazı yazma alanındayken çalıştır (Target-Lock)", target: self, action: #selector(checkboxChanged(_:)))
-        onlyInTextFieldsCheckbox.frame = NSRect(x: 175, y: 432, width: 440, height: 18)
+        onlyInTextFieldsCheckbox = NSButton(checkboxWithTitle: "Yalnızca yazı alanında başlat", target: self, action: #selector(checkboxChanged(_:)))
+        onlyInTextFieldsCheckbox.frame = NSRect(x: 175, y: 436, width: 225, height: 18)
         container.addSubview(onlyInTextFieldsCheckbox)
+
+        targetFocusPopUp = NSPopUpButton(frame: NSRect(x: 405, y: 433, width: 210, height: 26), pullsDown: false)
+        targetFocusPopUp.addItems(withTitles: ["Hedef: İlk alana dön", "Hedef değişirse uyar"])
+        targetFocusPopUp.toolTip = "İlk alana dön seçiliyse kayıt başındaki uygulama, pencere ve alan yeniden odaklanır. Hedef doğrulanamazsa metin panoda tutulur."
+        targetFocusPopUp.setAccessibilityLabel("Dikte hedefi")
+        targetFocusPopUp.target = self
+        targetFocusPopUp.action = #selector(targetFocusChanged(_:))
+        container.addSubview(targetFocusPopUp)
 
         // Dummy backwards compatibility
         muteSystemAudioCheckbox = NSButton(checkboxWithTitle: "", target: self, action: #selector(checkboxChanged(_:)))
@@ -503,13 +540,13 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(muteSystemAudioCheckbox)
 
         // Ayırıcı
-        container.addSubview(createSeparator(y: 456))
+        container.addSubview(createSeparator(y: 460))
 
         // 6. Arka Plan Sesi Yönetimi
-        let bgAudioLabel = createSectionLabel(text: "Arka Plan Sesi", y: 470)
+        let bgAudioLabel = createSectionLabel(text: "Arka Plan Sesi", y: 474)
         container.addSubview(bgAudioLabel)
 
-        backgroundAudioPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 468, width: 440, height: 26), pullsDown: false)
+        backgroundAudioPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 472, width: 440, height: 26), pullsDown: false)
         backgroundAudioPopUp.addItem(withTitle: "🔉 Ses Kısma (Audio Ducking - %20'ye İndir) [Varsayılan]")
         backgroundAudioPopUp.addItem(withTitle: "⏸️ Medyayı Duraklat (Play/Pause Tuşu)")
         backgroundAudioPopUp.addItem(withTitle: "❌ Arka Plan Sesine Dokunma (Kapalı)")
@@ -517,7 +554,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         backgroundAudioPopUp.action = #selector(backgroundAudioChanged(_:))
         container.addSubview(backgroundAudioPopUp)
 
-        let bgAudioHint = createNoteLabel(text: "Dikte sırasında arka plandaki müzik veya video sesini otomatik kısar veya duraklatır.", y: 498)
+        let bgAudioHint = createNoteLabel(text: "Dikte sırasında arka plandaki müzik veya video sesini otomatik kısar veya duraklatır.", y: 502)
         container.addSubview(bgAudioHint)
 
         return container
@@ -530,6 +567,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     }
 
     @objc private func backgroundAudioChanged(_ sender: NSPopUpButton) {
+        autoSave()
+    }
+
+    @objc private func targetFocusChanged(_ sender: NSPopUpButton) {
+        autoSave()
+    }
+
+    @objc public func targetLanguageChanged(_ sender: NSPopUpButton) {
         autoSave()
     }
 
@@ -562,7 +607,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(provLabel)
 
         providerSegmentedControl = NSSegmentedControl(
-            labels: ["🍎 Apple", "✨ Gemini", "⚡ Groq", "🎙 AssemblyAI"],
+            labels: TranscriptionProviderRegistry.all.map(\.readinessShortName),
             trackingMode: .selectOne,
             target: self,
             action: #selector(providerSegmentedChanged(_:))
@@ -579,6 +624,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         providerPopUp.addItem(withTitle: "Google Gemini Live (Canlı Akış)")
         providerPopUp.addItem(withTitle: "Groq Whisper (whisper-large-v3)")
         providerPopUp.addItem(withTitle: "AssemblyAI Dictation API (Universal-3.5 Pro)")
+        providerPopUp.addItem(withTitle: "Harfiyen · Seda-v0.1 (Yerel Türkçe)")
         providerPopUp.isHidden = true
         container.addSubview(providerPopUp)
 
@@ -801,6 +847,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             providerNoteLabel.stringValue = "⚡ Groq Whisper: API anahtarı ve internet bağlantısı gerekir; ses kaydı bulutta işlenir."
         case "assemblyai":
             providerNoteLabel.stringValue = "🎙 AssemblyAI Dictation API: Sesi gönderime hazır metne dönüştürür; dolgu ve öz-düzeltmeleri varsayılan olarak temizler."
+        case "seda":
+            providerNoteLabel.stringValue = "Seda-v0.1: Yerel canlı Türkçe dikte ve HUD önizlemesi. Beam 4 + dil modeli; noktalama ve özel sözlük yoktur."
         default:
             providerNoteLabel.stringValue = "Sağlayıcı ayarını kontrol edin."
         }
@@ -967,6 +1015,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         let provider = providers[index].id
         providerPopUp.selectItem(at: index)
+        if provider == "seda" { languageField.stringValue = "tr" }
         updateProviderNote(for: provider)
         updateProviderStatusLabels()
         updateSystemPromptVisibility()
@@ -1266,7 +1315,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         speechActionButton.action = #selector(openSpeechSettingsClicked)
         container.addSubview(speechActionButton)
 
-        let speechNote = createNoteLabel(text: "Apple Speech ve yerel ses tanıma motorunun sesinizi çözümlemesi için gereklidir.", y: 110)
+        let speechNote = createNoteLabel(text: "Yalnızca Apple Speech için gereklidir; Seda-v0.1 bu izni kullanmaz.", y: 110)
         container.addSubview(speechNote)
 
         // Ayırıcı
@@ -1579,7 +1628,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let wasSpeechAuthorized = lastKnownSpeechStatus
         let wasAccAuthorized = lastKnownAccStatus
         let speechRequired = TranscriptionProviderRegistry
-            .supports(.onDevice, providerID: ConfigManager.shared.config.provider)
+            .supports(.requiresSpeechPermission, providerID: ConfigManager.shared.config.provider)
         let mic = PermissionManager.shared.getMicrophoneStatus()
         micStatusLabel.stringValue = "\(mic.badge) \(mic.description)"
         switch mic.status {
@@ -1704,6 +1753,19 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         // Language
         languageField.stringValue = cfg.language
 
+        // Translation
+        translationCheckbox.state = cfg.enable_translation ? .on : .off
+        switch cfg.translation_target_language.lowercased() {
+        case "de":
+            targetLanguagePopUp.selectItem(at: 1)
+        case "es":
+            targetLanguagePopUp.selectItem(at: 2)
+        case "fr":
+            targetLanguagePopUp.selectItem(at: 3)
+        default:
+            targetLanguagePopUp.selectItem(at: 0) // "en"
+        }
+
         // Trigger Key
         selectedTriggerKeyCode = cfg.trigger_key
         updateTriggerKeyUI()
@@ -1745,6 +1807,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         launchAtLoginCheckbox.state = LaunchAtLoginManager.shared.isEnabled ? .on : .off
         showDockIconCheckbox.state = cfg.show_dock_icon ? .on : .off
         onlyInTextFieldsCheckbox.state = cfg.only_in_text_fields ? .on : .off
+        targetFocusPopUp.selectItem(at: cfg.restore_target_focus ? 0 : 1)
 
         // Arka Plan Ses Yönetimi
         switch cfg.background_audio_mode.lowercased() {
@@ -2209,6 +2272,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             : AppConfig.defaultConfig.gemini_model
 
         let language = languageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let enableTranslation = translationCheckbox.state == .on
+        let targetLanguage: String
+        switch targetLanguagePopUp.indexOfSelectedItem {
+        case 1: targetLanguage = "de"
+        case 2: targetLanguage = "es"
+        case 3: targetLanguage = "fr"
+        default: targetLanguage = "en"
+        }
 
         let modeStr: String
         switch modePopUp.indexOfSelectedItem {
@@ -2225,6 +2296,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let removeFillerOn = removeFillerWordsCheckbox.state == .on
         let saveHistOn = saveHistoryCheckbox.state == .on
         let onlyInTextFieldsOn = onlyInTextFieldsCheckbox.state == .on
+        let restoreTargetFocus = targetFocusPopUp.indexOfSelectedItem == 0
 
         let playSounds = playSoundsCheckbox.state == .on
         let micBoostOn = micBoostCheckbox.state == .on
@@ -2274,6 +2346,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.groq_model = groqModel
             cfg.gemini_model = geminiModel
             cfg.language = language.isEmpty ? "tr" : language
+            cfg.enable_translation = enableTranslation
+            cfg.translation_target_language = targetLanguage
             cfg.trigger_key = triggerKey
             cfg.trigger_mode = modeStr
             cfg.dictation_mode = "direct"
@@ -2290,6 +2364,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.mute_system_audio = (bgAudioMode == "ducking" || bgAudioMode == "pause")
             cfg.show_dock_icon = showDock
             cfg.only_in_text_fields = onlyInTextFieldsOn
+            cfg.restore_target_focus = restoreTargetFocus
             cfg.enable_auto_submit = autoSubmitOn
             cfg.auto_submit_key = autoSubmitKey
             cfg.enable_app_profiles = appProfilesOn

@@ -6,6 +6,7 @@ public class KeyListener {
     public static let shared = KeyListener()
 
     public var onStart: ((TimeInterval) -> Void)?
+    var onShortcutStart: ((TimeInterval, DictationShortcutKind) -> Void)?
     public var onStop: ((Double) -> Void)?
     public var onCancel: (() -> Void)?
     public var isBusy: (() -> Bool)?
@@ -15,11 +16,7 @@ public class KeyListener {
     private var thread: Thread?
     private var isRunning: Bool = false
 
-    private var isKeyDown: Bool = false
-    private var isRecording: Bool = false
-    private var pressStartTime: CFAbsoluteTime = 0
-    private var recordingStartTime: CFAbsoluteTime = 0
-    private var inToggleMode: Bool = false
+    private var shortcutState = DictationShortcutState()
 
     private let lock = NSLock()
     private var targetKeyCode: Int64 {
@@ -32,9 +29,7 @@ public class KeyListener {
 
     public func resetState() {
         lock.lock()
-        isKeyDown = false
-        isRecording = false
-        inToggleMode = false
+        shortcutState = DictationShortcutState()
         lock.unlock()
     }
 
@@ -47,7 +42,7 @@ public class KeyListener {
         }
     }
 
-    private func isModifierPressed(keyCode: Int64, flags: CGEventFlags, currentKeyDown: Bool) -> Bool {
+    static func isModifierPressed(keyCode: Int64, flags: CGEventFlags, currentKeyDown: Bool) -> Bool {
         switch keyCode {
         case 54: // Right Command
             return (flags.rawValue & 0x00000010) != 0 || (flags.contains(.maskCommand) && !currentKeyDown)
@@ -171,7 +166,10 @@ public class KeyListener {
 
             self.eventTap = createdTap
             let keyName = TriggerKeyOption.name(for: Int(targetKeyCode))
-            print("[KeyListener] ✅ Klavye dinleyicisi kuruldu. Aktif tetikleyici tuş: \(keyName) (KeyCode: \(targetKeyCode))")
+            print("[KeyListener] ✅ Klavye dinleyicisi kuruldu. Normal dikte: \(keyName) (KeyCode: \(targetKeyCode))")
+            if ConfigManager.shared.config.enable_translation {
+                print("[KeyListener] 🌐 Çevirili dikte: Sağ Option (KeyCode: \(DictationShortcutState.translationKeyCode))")
+            }
             let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, createdTap, 0)
             self.runLoopSource = runLoopSource
             CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
@@ -195,174 +193,60 @@ public class KeyListener {
 
         // 1. Esc ile İptal (Escape tuşu = 53)
         if type == .keyDown && keyCode == escKeyCode {
+            let busy = isBusy?() ?? false
             lock.lock()
-            let shouldCancel = isRecording || (isBusy?() ?? false)
-            isRecording = false
-            isKeyDown = false
-            inToggleMode = false
+            let action = shortcutState.cancel()
             lock.unlock()
 
-            if shouldCancel {
-                DispatchQueue.main.async { [weak self] in
-                    self?.onCancel?()
-                }
+            if action != nil || busy {
+                dispatchAction(.cancel, triggeredAt: ProcessInfo.processInfo.systemUptime)
                 // Esc kaydı iptal ettiğinde aktif penceredeki açık diyaloğu veya tam ekranı kapatmasın
                 return nil
             }
             return Unmanaged.passRetained(event)
         }
 
-        // 2. Modifier tuş basılıyken başka tuşa basıldıysa (örn: Cmd+C, Cmd+V, Cmd+Tab)
-        // Bu durum bir sesle yazma değil, normal klavye kısayoludur; kaydı hemen iptal et
-        if isKeyDown && KeyListener.isModifier(keyCode: targetKeyCode) && type == .keyDown && keyCode != targetKeyCode {
-            lock.lock()
-            let wasActive = isRecording
-            isRecording = false
-            isKeyDown = false
-            inToggleMode = false
-            lock.unlock()
-
-            if wasActive {
-                DispatchQueue.main.async { [weak self] in
-                    self?.onCancel?()
-                }
-            }
+        // 2. Modifier ile başka tuş birleşirse (örn: Cmd+C), dikte iptal edilir.
+        // 3. Normal ve çevirili dikte için tetikleyici tuş kontrolü.
+        let shortcutEvent: DictationShortcutEvent
+        switch type {
+        case .flagsChanged:
+            shortcutEvent = .flagsChanged(event.flags)
+        case .keyDown:
+            shortcutEvent = .keyDown(isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0)
+        case .keyUp:
+            shortcutEvent = .keyUp
+        default:
             return Unmanaged.passRetained(event)
         }
-
-        // 3. Tetikleyici Tuş Kontrolü
-        if keyCode == targetKeyCode {
-            if KeyListener.isModifier(keyCode: targetKeyCode) {
-                if type == .flagsChanged {
-                    let isPressedNow = isModifierPressed(keyCode: targetKeyCode, flags: event.flags, currentKeyDown: isKeyDown)
-                    if isPressedNow && !isKeyDown {
-                        // TUŞA BASILDI
-                        isKeyDown = true
-                        handleKeyDown()
-                    } else if !isPressedNow && isKeyDown {
-                        // TUŞ BIRAKILDI
-                        isKeyDown = false
-                        handleKeyUp()
-                    }
-                }
-            } else {
-                // Normal tuş (F-tuşları, Space vb.)
-                if type == .keyDown {
-                    let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-                    if !isAutorepeat && !isKeyDown {
-                        isKeyDown = true
-                        handleKeyDown()
-                    }
-                    // Normal tetikleyici tuş basıldığında aktif uygulamaya karakter göndermesin (yutulsun)
-                    return nil
-                } else if type == .keyUp {
-                    if isKeyDown {
-                        isKeyDown = false
-                        handleKeyUp()
-                    }
-                    return nil
-                }
-            }
-        }
-
-        return Unmanaged.passRetained(event)
-    }
-
-    private func handleKeyDown() {
-        let triggerUptime = ProcessInfo.processInfo.systemUptime
-        #if DEBUG
-        print("[KeyListener] 🎙️ Tetikleyici tuşa basıldı! (Kayıt tetikleniyor)")
-        #endif
-        lock.lock()
         let config = ConfigManager.shared.config
-        let mode = config.trigger_mode.lowercased()
-        pressStartTime = CFAbsoluteTimeGetCurrent()
-
-        if mode == "toggle" {
-            if isRecording {
-                let duration = CFAbsoluteTimeGetCurrent() - recordingStartTime
-                isRecording = false
-                lock.unlock()
-                DispatchQueue.main.async { [weak self] in
-                    self?.onStop?(duration)
-                }
-                return
-            } else {
-                isRecording = true
-                recordingStartTime = CFAbsoluteTimeGetCurrent()
-                lock.unlock()
-                DispatchQueue.main.async { [weak self] in
-                    self?.onStart?(triggerUptime)
-                }
-                return
-            }
-        } else if mode == "smart" {
-            if inToggleMode {
-                inToggleMode = false
-                isRecording = false
-                let duration = CFAbsoluteTimeGetCurrent() - recordingStartTime
-                lock.unlock()
-                DispatchQueue.main.async { [weak self] in
-                    self?.onStop?(duration)
-                }
-                return
-            }
-            isRecording = true
-            recordingStartTime = CFAbsoluteTimeGetCurrent()
-            lock.unlock()
-            DispatchQueue.main.async { [weak self] in
-                self?.onStart?(triggerUptime)
-            }
-        } else {
-            // "hold" (Push-to-Talk)
-            if !isRecording {
-                isRecording = true
-                recordingStartTime = CFAbsoluteTimeGetCurrent()
-                lock.unlock()
-                DispatchQueue.main.async { [weak self] in
-                    self?.onStart?(triggerUptime)
-                }
-            } else {
-                lock.unlock()
-            }
-        }
-    }
-
-    private func handleKeyUp() {
-        #if DEBUG
-        print("[KeyListener] ⏹️ Tetikleyici tuş bırakıldı!")
-        #endif
+        let timestamp = ProcessInfo.processInfo.systemUptime
         lock.lock()
-        let config = ConfigManager.shared.config
-        let mode = config.trigger_mode.lowercased()
-        let holdDuration = CFAbsoluteTimeGetCurrent() - pressStartTime
-
-        if mode == "toggle" {
-            lock.unlock()
-            return
-        }
-
-        if mode == "smart" {
-            if holdDuration < 0.25 {
-                // Kısa tıklama -> toggle moduna geç, kayda devam et
-                inToggleMode = true
-                lock.unlock()
-                return
-            }
-            inToggleMode = false
-        }
-
-        guard isRecording else {
-            lock.unlock()
-            return
-        }
-
-        isRecording = false
-        let totalDuration = CFAbsoluteTimeGetCurrent() - recordingStartTime
+        let result = shortcutState.handle(keyCode: keyCode, event: shortcutEvent,
+                                          primaryKeyCode: Int64(config.trigger_key),
+                                          translationEnabled: config.enable_translation,
+                                          triggerMode: config.trigger_mode, time: timestamp)
         lock.unlock()
+        if let action = result.action { dispatchAction(action, triggeredAt: timestamp) }
+        // Normal tetikleyici tuş aktif uygulamaya karakter göndermesin (yutulsun).
+        return result.consume ? nil : Unmanaged.passRetained(event)
+    }
 
+    private func dispatchAction(_ action: DictationShortcutAction, triggeredAt: TimeInterval) {
         DispatchQueue.main.async { [weak self] in
-            self?.onStop?(totalDuration)
+            guard let self else { return }
+            switch action {
+            case .start(let kind):
+                if let onShortcutStart = self.onShortcutStart {
+                    onShortcutStart(triggeredAt, kind)
+                } else {
+                    self.onStart?(triggeredAt)
+                }
+            case .stop(let duration):
+                self.onStop?(duration)
+            case .cancel:
+                self.onCancel?()
+            }
         }
     }
 }

@@ -10,6 +10,7 @@
   "trigger_mode": "hold",
   "play_sounds": true,
   "restore_clipboard": false,
+  "restore_target_focus": true,
   "paste_delay_ms": 20,
   "min_record_duration": 0.2,
   "mute_system_audio": true,

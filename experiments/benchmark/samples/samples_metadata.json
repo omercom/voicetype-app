@@ -2,7 +2,6 @@
   {
     "id": "01_gunluk_konusma",
     "filename": "01_gunluk_konusma.mp3",
-    "filepath": "samples/01_gunluk_konusma.mp3",
     "category": "Günlük Konuşma & Soru Ekleri",
     "voice": "tr-TR-AhmetNeural",
     "rate": "+0%",
@@ -12,7 +11,6 @@
   {
     "id": "02_hizli_tekerleme",
     "filename": "02_hizli_tekerleme.mp3",
-    "filepath": "samples/02_hizli_tekerleme.mp3",
     "category": "Hızlı Konuşma & Fonetik Zorluk",
     "voice": "tr-TR-EmelNeural",
     "rate": "+30%",
@@ -22,7 +20,6 @@
   {
     "id": "03_teknik_hibrit_terimler",
     "filename": "03_teknik_hibrit_terimler.mp3",
-    "filepath": "samples/03_teknik_hibrit_terimler.mp3",
     "category": "Teknik & İngilizce Melez Terimler",
     "voice": "tr-TR-AhmetNeural",
     "rate": "+0%",
@@ -32,7 +29,6 @@
   {
     "id": "04_sayilar_ve_tarihler",
     "filename": "04_sayilar_ve_tarihler.mp3",
-    "filepath": "samples/04_sayilar_ve_tarihler.mp3",
     "category": "Sayılar, Tarihler, Saat & Para",
     "voice": "tr-TR-EmelNeural",
     "rate": "+0%",
@@ -42,7 +38,6 @@
   {
     "id": "05_morfoloji_ve_ekler",
     "filename": "05_morfoloji_ve_ekler.mp3",
-    "filepath": "samples/05_morfoloji_ve_ekler.mp3",
     "category": "Aglütinatif Morfoloji & Bağlaçlar",
     "voice": "tr-TR-AhmetNeural",
     "rate": "+0%",
