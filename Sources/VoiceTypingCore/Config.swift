@@ -39,7 +39,8 @@ public struct TriggerKeyOption: Identifiable, Equatable {
         TriggerKeyOption(keyCode: 96, name: "F5 Tuşu", shortName: "F5", isModifier: false),
         TriggerKeyOption(keyCode: 97, name: "F6 Tuşu", shortName: "F6", isModifier: false),
         TriggerKeyOption(keyCode: 98, name: "F7 Tuşu", shortName: "F7", isModifier: false),
-        TriggerKeyOption(keyCode: 100, name: "F8 Tuşu", shortName: "F8", isModifier: false)
+        TriggerKeyOption(keyCode: 100, name: "F8 Tuşu", shortName: "F8", isModifier: false),
+        TriggerKeyOption(keyCode: 176, name: "MacBook Mikrofon Tuşu (Dictation / F5)", shortName: "Mikrofon", isModifier: false)
     ]
 
     public static func name(for keyCode: Int) -> String {
@@ -143,6 +144,9 @@ public struct AppConfig: Codable {
     public var enable_translation: Bool
     public var translation_target_language: String
     public var translation_provider: String // "auto", "groq", "gemini"
+    public var keep_microphone_warm_seconds: Int
+    public var enable_caps_lock_dictation: Bool
+    public var mouse_trigger_button: Int // 0=kapalı, 3=Mouse 4, 4=Mouse 5
 
     public static let defaultGeminiSystemPrompt = "Sen profesyonel bir ses deşifre asistanısın. Kullanıcının konuşmasını dinle ve doğrudan yazıya dök. Asla selamlama, özet, onaylama ('Tabii ki', 'Anladım' gibi) veya fazladan yorum ekleme; sadece konuşulan metni temiz, doğru imla ve akıcı bir dille yaz."
 
@@ -191,7 +195,10 @@ public struct AppConfig: Codable {
         vad_max_segment_sec: 8.0,
         enable_translation: false,
         translation_target_language: "en",
-        translation_provider: "auto"
+        translation_provider: "auto",
+        keep_microphone_warm_seconds: 20,
+        enable_caps_lock_dictation: false,
+        mouse_trigger_button: 0
     )
 
     enum CodingKeys: String, CodingKey {
@@ -207,6 +214,7 @@ public struct AppConfig: Codable {
         case decode_tokens_per_sec, decode_token_base
         case vad_gate_db, vad_stay_ratio, vad_silence_hold_sec, vad_max_segment_sec
         case enable_translation, translation_target_language, translation_provider
+        case keep_microphone_warm_seconds, enable_caps_lock_dictation, mouse_trigger_button
     }
 
     public init(
@@ -254,7 +262,10 @@ public struct AppConfig: Codable {
         vad_max_segment_sec: Double = 8.0,
         enable_translation: Bool = false,
         translation_target_language: String = "en",
-        translation_provider: String = "auto"
+        translation_provider: String = "auto",
+        keep_microphone_warm_seconds: Int = 20,
+        enable_caps_lock_dictation: Bool = false,
+        mouse_trigger_button: Int = 0
     ) {
         self.provider = provider
         self.groq_api_key = groq_api_key
@@ -301,6 +312,9 @@ public struct AppConfig: Codable {
         self.enable_translation = enable_translation
         self.translation_target_language = translation_target_language
         self.translation_provider = translation_provider
+        self.keep_microphone_warm_seconds = keep_microphone_warm_seconds
+        self.enable_caps_lock_dictation = enable_caps_lock_dictation
+        self.mouse_trigger_button = mouse_trigger_button
     }
 
     public init(from decoder: Decoder) throws {
@@ -350,6 +364,9 @@ public struct AppConfig: Codable {
         enable_translation = try container.decodeIfPresent(Bool.self, forKey: .enable_translation) ?? false
         translation_target_language = try container.decodeIfPresent(String.self, forKey: .translation_target_language) ?? "en"
         translation_provider = try container.decodeIfPresent(String.self, forKey: .translation_provider) ?? "auto"
+        keep_microphone_warm_seconds = try container.decodeIfPresent(Int.self, forKey: .keep_microphone_warm_seconds) ?? 20
+        enable_caps_lock_dictation = try container.decodeIfPresent(Bool.self, forKey: .enable_caps_lock_dictation) ?? false
+        mouse_trigger_button = try container.decodeIfPresent(Int.self, forKey: .mouse_trigger_button) ?? 0
     }
 
     public static func parseVoiceSnippets(from text: String) -> [String: String] {
@@ -420,6 +437,7 @@ public class ConfigManager {
 
     public private(set) var config: AppConfig
     public private(set) var configURL: URL
+    private var pendingCorruptBackupData: Data?
 
     public static let availableAppleModels: [ModelOption] = [
         ModelOption(
@@ -502,12 +520,16 @@ public class ConfigManager {
         ]
 
         var bestConfig: AppConfig? = nil
+        var primaryCorruptData: Data? = nil
 
         for path in potentialPaths {
             let url = URL(fileURLWithPath: path)
-            if FileManager.default.fileExists(atPath: path),
-               let data = try? Data(contentsOf: url),
-               let decoded = try? JSONDecoder().decode(AppConfig.self, from: data) {
+            let outcome = ConfigPersistenceGuard.load(from: url)
+            if path == primaryConfigURL.path, let corrupt = outcome.unreadableOriginalData {
+                primaryCorruptData = corrupt
+                print("[Config] ⚠️ config.json okunamadı (\(outcome.errorDescription ?? "bilinmeyen hata")); kaydederken yedeği alınacak.")
+            }
+            if let decoded = outcome.config {
                 // Eğer daha önce config bulunmadıysa veya bu config dolu API anahtarlarına sahipse seç
                 if bestConfig == nil {
                     bestConfig = decoded
@@ -517,6 +539,7 @@ public class ConfigManager {
                 }
             }
         }
+        self.pendingCorruptBackupData = primaryCorruptData
 
         var finalConfig = bestConfig ?? AppConfig.defaultConfig
 
@@ -595,14 +618,20 @@ public class ConfigManager {
         let candidateURLs = [configURL, legacyURL]
 
         for url in candidateURLs {
-            if let data = try? Data(contentsOf: url),
-               var decoded = try? JSONDecoder().decode(AppConfig.self, from: data) {
+            let outcome = ConfigPersistenceGuard.load(from: url)
+            if url == configURL, let corrupt = outcome.unreadableOriginalData {
+                pendingCorruptBackupData = corrupt
+                print("[Config] ⚠️ Güncel config.json geçersiz (\(outcome.errorDescription ?? "hata")); bellek ayarları korundu.")
+                return
+            }
+            if var decoded = outcome.config {
                 if decoded.groq_model == "whisper-large-v3-turbo" {
                     decoded.groq_model = "whisper-large-v3"
                 }
                 if decoded.provider.lowercased() == "openai" {
                     decoded.provider = TranscriptionProviderRegistry.defaultProviderID
                 }
+                pendingCorruptBackupData = nil
                 self.config = decoded
                 return
             }
@@ -636,6 +665,10 @@ public class ConfigManager {
         if Self.isRunningTests { return true }
 
         do {
+            if let corruptData = pendingCorruptBackupData {
+                _ = ConfigPersistenceGuard.backupCorruptConfig(originalData: corruptData, nextTo: configURL)
+                pendingCorruptBackupData = nil
+            }
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(config)

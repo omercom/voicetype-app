@@ -47,9 +47,21 @@ public class AudioRecorder: NSObject {
     private var recoveryCountInSession = 0
     private var isRecoveringEngine = false
     private var stallWatchdogTimer: DispatchSourceTimer?
+    private var lingerPolicy = MicrophoneLingerPolicy(lingerSeconds: 0)
+    private var lingerTimer: DispatchSourceTimer?
+    private var isLingering = false
+    private var digitalSilenceDetector = DigitalSilenceDetector()
+    private var overloadTracker = AudioOverloadTracker()
     private let watchdogQueue = DispatchQueue(label: "com.voicetyping.audio-recorder.watchdog", qos: .utility)
     private var configChangeObserver: NSObjectProtocol?
     private var sleepObserver: NSObjectProtocol?
+
+    private static let isRunningTests: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        if env["XCTestConfigurationFilePath"] != nil { return true }
+        if env["XCTestBundlePath"] != nil { return true }
+        return NSClassFromString("XCTestCase") != nil
+    }()
 
     /// Çift eşikli konuşma kapısı. `currentPower` zaten her tamponda
     /// hesaplandığı için kapıyı beslemek ek analiz maliyeti getirmez.
@@ -287,6 +299,76 @@ public class AudioRecorder: NSObject {
         timer.resume()
     }
 
+    private static func isDefaultInputBluetooth() -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &deviceID
+        ) == noErr, deviceID != kAudioObjectUnknown else {
+            return false
+        }
+
+        var transportAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var transportType: UInt32 = 0
+        var transportSize = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(
+            deviceID,
+            &transportAddress,
+            0,
+            nil,
+            &transportSize,
+            &transportType
+        ) == noErr else {
+            return false
+        }
+        return transportType == kAudioDeviceTransportTypeBluetooth
+            || transportType == kAudioDeviceTransportTypeBluetoothLE
+    }
+
+    private func scheduleLingerExpirationLocked(after delay: TimeInterval) {
+        lingerTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: watchdogQueue)
+        timer.schedule(deadline: .now() + max(0.5, delay))
+        timer.setEventHandler { [weak self] in
+            self?.releaseLinger()
+        }
+        lingerTimer = timer
+        timer.resume()
+    }
+
+    /// Boşta sıcak bekleyen (linger) mikrofon motorunu kapatır ve bir sonraki kayıt için grafı hazırlar.
+    public func releaseLinger() {
+        lock.lock()
+        lingerTimer?.cancel()
+        lingerTimer = nil
+        lingerPolicy.clear()
+        guard isLingering, !recordingState, !isStopping else {
+            isLingering = false
+            lock.unlock()
+            return
+        }
+        isLingering = false
+        let engine = audioEngine
+        lock.unlock()
+
+        stopEngine(engine, removeTap: false)
+        warm()
+    }
+
     private func stopStallWatchdogLocked() {
         stallWatchdogTimer?.cancel()
         stallWatchdogTimer = nil
@@ -516,7 +598,9 @@ public class AudioRecorder: NSObject {
             return
         }
 
-        let calculatedPower = calculatePower(buffer: buffer)
+        let metrics = calculatePowerAndPeak(buffer: buffer)
+        let calculatedPower = metrics.powerDB
+        let maxAbsSample = metrics.maxAbs
         outputBuffer.frameLength = 0
         var error: NSError?
         var haveData = true
@@ -546,6 +630,17 @@ public class AudioRecorder: NSObject {
 
         var readyChunks: [Data]? = nil
         var localCallback: ((Data) -> Void)? = nil
+        var overloadBurst: Int? = nil
+        var shouldRecoverDeadMic = false
+        let nowUptime = ProcessInfo.processInfo.systemUptime
+        let bufferDuration = Double(buffer.frameLength) / max(1.0, buffer.format.sampleRate)
+
+        if status == .error || error != nil {
+            lock.lock()
+            overloadBurst = overloadTracker.record(at: nowUptime)
+            lock.unlock()
+        }
+
         if let rawChunk {
             let chunk = boostEnabled
                 ? MicrophoneBoostProcessor.shared.processPCM16Data(rawChunk, enabled: true)
@@ -555,10 +650,14 @@ public class AudioRecorder: NSObject {
             let cancelled = cancelledDeliveryGeneration == generation
             if !cancelled {
                 currentPower = calculatedPower
+                if digitalSilenceDetector.observe(bufferDuration: bufferDuration, maxAbsSample: maxAbsSample),
+                   !isRecoveringEngine, !isStopping {
+                    shouldRecoverDeadMic = true
+                }
                 // Kapıyı aynı güç değeriyle besle: ek analiz yok, tek kaynak.
                 speechGate.update(
                     powerDB: calculatedPower,
-                    now: ProcessInfo.processInfo.systemUptime,
+                    now: nowUptime,
                     isRecording: recordingState
                 )
                 bufferedPCMData.append(chunk)
@@ -584,6 +683,14 @@ public class AudioRecorder: NSObject {
         }
         converterLock.unlock()
 
+        if let overloadBurst {
+            print("[AudioRecorder] ⚠️ Ses dönüştürme aşırı yükü (\(overloadBurst) blok hatası).")
+        }
+        if shouldRecoverDeadMic {
+            watchdogQueue.async { [weak self] in
+                self?.recoverActiveRecordingIfNeeded(reason: "dijital sessizlik (dead mic)")
+            }
+        }
         if let callback = localCallback, let readyChunks, !readyChunks.isEmpty {
             enqueueReadyChunks(readyChunks, callback: callback, generation: generation)
         }
@@ -598,6 +705,14 @@ public class AudioRecorder: NSObject {
         defer { lock.unlock() }
 
         guard !recordingState, !isStopping else { return false }
+        lingerTimer?.cancel()
+        lingerTimer = nil
+        let wasLingering = isLingering
+        isLingering = false
+        lingerPolicy.markCaptureStarted()
+        digitalSilenceDetector.reset()
+        _ = overloadTracker.flush()
+
         let reusedWarmPipeline = audioEngine != nil && inputTapInstalled
         guard preparePipelineLocked(),
               let engine = audioEngine,
@@ -651,9 +766,12 @@ public class AudioRecorder: NSObject {
         // bağlanır ve dönüşten hemen sonra ilerler; ilk tampon boşa atılmaz.
         recordingState = true
         do {
-            try engine.start()
+            let hotLingerReuse = wasLingering && engine.isRunning
+            if !engine.isRunning {
+                try engine.start()
+            }
             startStallWatchdogLocked()
-            let mode = reusedWarmPipeline ? "warm" : "cold"
+            let mode = hotLingerReuse ? "hot-linger" : (reusedWarmPipeline ? "warm" : "cold")
             print("[AudioRecorder] ✅ Mikrofon başarıyla aktif edildi [\(mode)] (Örnekleme: \(hwFormat.sampleRate)Hz, Kanal: \(hwFormat.channelCount)).")
             return true
         } catch {
@@ -718,14 +836,29 @@ public class AudioRecorder: NSObject {
         recordingState = false
         isStopping = true
         stopStallWatchdogLocked()
+        let flushedOverloads = overloadTracker.flush()
+        let configuredLinger = Self.isRunningTests ? 0.0 : Double(max(0, ConfigManager.shared.config.keep_microphone_warm_seconds))
+        lingerPolicy.lingerSeconds = configuredLinger
+        let lingerWindow = lingerPolicy.markCaptureEnded(
+            at: ProcessInfo.processInfo.systemUptime,
+            isBluetoothRoute: Self.isDefaultInputBluetooth()
+        )
+        let shouldLingerEngine = lingerWindow != nil && (audioEngine?.isRunning == true)
+        isLingering = shouldLingerEngine
         let engine = audioEngine
         let callbackGroup = activeTapCallbacks
         let generation = deliveryGeneration
         lock.unlock()
 
-        // Motor durur ve mikrofon donanımı serbest kalır; hazırlanmış graph/tap
-        // bir sonraki kayıt için korunur. Aktif callback'ler yine eksiksiz beklenir.
-        stopEngine(engine, removeTap: false)
+        if flushedOverloads > 0 {
+            print("[AudioRecorder] ℹ️ Oturumda toplam \(flushedOverloads) ses dönüştürme aşırı yükü kaydedildi.")
+        }
+
+        // Bluetooth veya linger kapalıyken motor anında serbest bırakılır;
+        // dahili/kablolu mikrofonda linger açıksa bir sonraki kayıt sıfır gecikmeyle başlar.
+        if !shouldLingerEngine {
+            stopEngine(engine, removeTap: false)
+        }
         callbackGroup.wait()
         flushChunkDeliveryQueue()
 
@@ -746,6 +879,9 @@ public class AudioRecorder: NSObject {
         activeTapCallbacks = DispatchGroup()
         isStopping = false
         cancelledDeliveryGeneration = nil
+        if shouldLingerEngine, let lingerWindow {
+            scheduleLingerExpirationLocked(after: lingerWindow)
+        }
         lock.unlock()
 
         // Hazır bloklar flush edildikten sonra kalan son parçayı ilet.
@@ -753,9 +889,11 @@ public class AudioRecorder: NSObject {
             deliverRemainingChunk(remainingChunk, callback: cb, generation: generation)
         }
 
-        // Stop graph'ı uninitialize eder; sonraki tuş basışından önce arka planda
-        // yeniden prepare ederek warm-start durumunu geri kur.
-        warm()
+        if !shouldLingerEngine {
+            // Stop graph'ı uninitialize eder; sonraki tuş basışından önce arka planda
+            // yeniden prepare ederek warm-start durumunu geri kur.
+            warm()
+        }
 
         let preparation = Self.prepareRecordingPCM(
             fullPCM,
@@ -780,6 +918,10 @@ public class AudioRecorder: NSObject {
 
     public func cancel() {
         lock.lock()
+        lingerTimer?.cancel()
+        lingerTimer = nil
+        isLingering = false
+        lingerPolicy.clear()
         guard recordingState, !isStopping else {
             lock.unlock()
             return
@@ -818,6 +960,10 @@ public class AudioRecorder: NSObject {
     /// Ses motorunu tamamen kapatır, donanım tap'ini söker ve kaynakları serbest bırakır.
     public func cleanTeardown() {
         lock.lock()
+        lingerTimer?.cancel()
+        lingerTimer = nil
+        isLingering = false
+        lingerPolicy.clear()
         warmupGeneration &+= 1
         guard !isStopping else {
             lock.unlock()
@@ -879,15 +1025,17 @@ public class AudioRecorder: NSObject {
         }
     }
 
-    private func calculatePower(buffer: AVAudioPCMBuffer) -> Float {
-        guard let floatData = buffer.floatChannelData else { return -160.0 }
+    private func calculatePowerAndPeak(buffer: AVAudioPCMBuffer) -> (powerDB: Float, maxAbs: Float) {
+        guard let floatData = buffer.floatChannelData else { return (-160.0, 0.0) }
         let frameCount = Int(buffer.frameLength)
-        guard frameCount > 0 else { return -160.0 }
+        guard frameCount > 0 else { return (-160.0, 0.0) }
 
         var rms: Float = 0
+        var maxAbs: Float = 0
         vDSP_rmsqv(floatData[0], 1, &rms, vDSP_Length(frameCount))
+        vDSP_maxmgv(floatData[0], 1, &maxAbs, vDSP_Length(frameCount))
         let db = 20.0 * log10(max(rms, 0.00001))
-        return max(-160.0, min(0.0, db))
+        return (max(-160.0, min(0.0, db)), maxAbs)
     }
 
     // MARK: - WAV ve Ses Yardımcıları

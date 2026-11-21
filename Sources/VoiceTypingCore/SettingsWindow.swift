@@ -103,6 +103,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var voiceSnippetsScrollView: NSScrollView!
     private var restoreClipboardCheckbox: NSButton!
     private var repasteShortcutCheckbox: NSButton!
+    private var micLingerPopUp: NSPopUpButton!
+    private var capsLockDictationCheckbox: NSButton!
+    private var mouseTriggerPopUp: NSPopUpButton!
 
     // Tab 3: Sistem & İzinler
     private var micStatusLabel: NSTextField!
@@ -1055,7 +1058,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // TAB: Gelişmiş & Kısayollar (Auto-Submit, App Profiles, Voice Snippets, Sound Themes)
     // =========================================================================
     private func buildTabAdvancedView() -> NSView {
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 655))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 815))
 
         // 1. Otomatik Gönderim (Auto-Submit / Enter)
         let autoSubmitLabel = createSectionLabel(text: "Otomatik Gönderim", y: 16)
@@ -1268,6 +1271,53 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         )
         container.addSubview(hudAutoNote)
 
+        container.addSubview(createSeparator(y: 646))
+
+        // 7. Anlık Mikrofon & Ek Tetikleyiciler
+        let quickMicLabel = createSectionLabel(text: "Anlık Mikrofon", y: 662)
+        container.addSubview(quickMicLabel)
+
+        micLingerPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 658, width: 260, height: 26), pullsDown: false)
+        micLingerPopUp.addItem(withTitle: "Kapalı (her kayıtta kapat)")
+        micLingerPopUp.addItem(withTitle: "20 saniye sıcak tut (önerilen)")
+        micLingerPopUp.addItem(withTitle: "60 saniye sıcak tut")
+        micLingerPopUp.target = self
+        micLingerPopUp.action = #selector(micLingerChanged(_:))
+        container.addSubview(micLingerPopUp)
+
+        let micLingerNote = createNoteLabel(
+            text: "Dahili veya kablolu mikrofonda art arda dikteleri ~0 ms gecikmeyle başlatır (Bluetooth kulaklıklarda ses kalitesi için otomatik kapatılır).",
+            y: 688
+        )
+        container.addSubview(micLingerNote)
+
+        capsLockDictationCheckbox = NSButton(
+            checkboxWithTitle: "Caps Lock ile eller serbest dikte (bas-konuş olmadan aç/kapat)",
+            target: self,
+            action: #selector(checkboxChanged(_:))
+        )
+        capsLockDictationCheckbox.frame = NSRect(x: 175, y: 724, width: 440, height: 18)
+        container.addSubview(capsLockDictationCheckbox)
+
+        let mouseLabel = NSTextField(labelWithString: "Ek Fare Tuşu:")
+        mouseLabel.frame = NSRect(x: 175, y: 752, width: 95, height: 20)
+        mouseLabel.font = NSFont.systemFont(ofSize: 11)
+        container.addSubview(mouseLabel)
+
+        mouseTriggerPopUp = NSPopUpButton(frame: NSRect(x: 270, y: 748, width: 215, height: 26), pullsDown: false)
+        mouseTriggerPopUp.addItem(withTitle: "Kapalı")
+        mouseTriggerPopUp.addItem(withTitle: "Fare Yan Tuş 4 (Geri)")
+        mouseTriggerPopUp.addItem(withTitle: "Fare Yan Tuş 5 (İleri)")
+        mouseTriggerPopUp.target = self
+        mouseTriggerPopUp.action = #selector(mouseTriggerChanged(_:))
+        container.addSubview(mouseTriggerPopUp)
+
+        let mouseNote = createNoteLabel(
+            text: "MacBook Mikrofon/Dikte tuşunu Genel sekmesindeki Tetikleyici listesinden de seçebilirsiniz.",
+            y: 780
+        )
+        container.addSubview(mouseNote)
+
         let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
@@ -1276,6 +1326,35 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         scrollView.documentView = container
         container.scroll(.zero)
         return scrollView
+    }
+
+    private func selectedMicLingerSeconds() -> Int {
+        switch micLingerPopUp.indexOfSelectedItem {
+        case 0: return 0
+        case 2: return 60
+        default: return 20
+        }
+    }
+
+    private func selectedMouseTriggerButton() -> Int {
+        switch mouseTriggerPopUp.indexOfSelectedItem {
+        case 1: return 3
+        case 2: return 4
+        default: return 0
+        }
+    }
+
+    @objc private func micLingerChanged(_ sender: NSPopUpButton) {
+        let secs = selectedMicLingerSeconds()
+        if secs == 0 {
+            AudioRecorder.shared.releaseLinger()
+        }
+        ConfigManager.shared.update { $0.keep_microphone_warm_seconds = secs }
+    }
+
+    @objc private func mouseTriggerChanged(_ sender: NSPopUpButton) {
+        let button = selectedMouseTriggerButton()
+        ConfigManager.shared.update { $0.mouse_trigger_button = button }
     }
 
     private func selectedHudStyleString() -> String {
@@ -1965,6 +2044,21 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         restoreClipboardCheckbox.state = cfg.restore_clipboard ? .on : .off
         repasteShortcutCheckbox.state = cfg.enable_repaste_shortcut ? .on : .off
 
+        // Gelişmiş: Anlık Mikrofon & Ek Tetikleyiciler
+        if cfg.keep_microphone_warm_seconds <= 0 {
+            micLingerPopUp.selectItem(at: 0)
+        } else if cfg.keep_microphone_warm_seconds >= 45 {
+            micLingerPopUp.selectItem(at: 2)
+        } else {
+            micLingerPopUp.selectItem(at: 1)
+        }
+        capsLockDictationCheckbox.state = cfg.enable_caps_lock_dictation ? .on : .off
+        switch cfg.mouse_trigger_button {
+        case 3: mouseTriggerPopUp.selectItem(at: 1)
+        case 4: mouseTriggerPopUp.selectItem(at: 2)
+        default: mouseTriggerPopUp.selectItem(at: 0)
+        }
+
         updateSystemPromptVisibility()
 
         statusMessageLabel.stringValue = "Değişiklikler anında kaydedilir."
@@ -2478,6 +2572,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.voice_snippets = snippets
             cfg.hud_style = selectedHudStyleString()
             cfg.hud_processing_effect = selectedProcessingEffectString()
+            cfg.keep_microphone_warm_seconds = selectedMicLingerSeconds()
+            cfg.enable_caps_lock_dictation = capsLockDictationCheckbox.state == .on
+            cfg.mouse_trigger_button = selectedMouseTriggerButton()
         }
 
         AppDelegate.updateDockVisibility(showDock)

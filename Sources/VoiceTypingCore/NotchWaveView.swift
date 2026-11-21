@@ -37,8 +37,10 @@ final class NotchWaveView: NSView {
 
     func configure(processingStyle: DotScopeProcessingStyle, accentMode: DotScopeAccentMode) {
         var tuning = simulation.tuning
-        tuning.processingStyle = processingStyle
-        simulation.updateTuning(tuning)
+        if tuning.processingStyle != processingStyle {
+            tuning.processingStyle = processingStyle
+            simulation.updateTuning(tuning)
+        }
         simulation.accentMode = accentMode
         needsDisplay = true
     }

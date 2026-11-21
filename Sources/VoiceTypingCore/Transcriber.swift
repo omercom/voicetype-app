@@ -1596,10 +1596,11 @@ public class Transcriber {
 
     // MARK: - Apple Silicon Yerel Ses Motoru (On-Device SFSpeechRecognizer)
 
-    /// Uzun ses kayıtlarını sessizlik sınırlarından parçalayıp sırayla deşifre eder
-    /// ve örtüşen metni tekilleştirerek birleştirir.
-    private func transcribeWAVChunksSequentially(
+    /// Uzun ses kayıtlarını sessizlik sınırlarından parçalayıp sınırlı eşzamanlılıkla
+    /// (maxConcurrency) deşifre eder, sırasını koruyarak örtüşen kelimeleri tekilleştirir.
+    private func transcribeWAVChunks(
         chunks: [Data],
+        maxConcurrency: Int = 1,
         transcribeSingle: @escaping (Data, @escaping (TranscriptionResult) -> Void) -> Void,
         completion: @escaping (TranscriptionResult) -> Void
     ) {
@@ -1615,61 +1616,111 @@ public class Transcriber {
         lock.unlock()
 
         let startTime = CFAbsoluteTimeGetCurrent()
-        var mergedText = ""
+        let stateLock = NSLock()
+        let concurrencyLimit = max(1, min(maxConcurrency, chunks.count))
+        var nextIndex = 0
+        var inFlight = 0
+        var completedCount = 0
+        var pieceTexts = Array<String?>(repeating: nil, count: chunks.count)
         var lastProvider = ""
         var lastModel = ""
+        var lastNoSpeechError: String?
+        var hasFinished = false
 
-        func step(index: Int) {
-            self.lock.lock()
-            let active = self.batchGeneration == generation
-            self.lock.unlock()
-            guard active else { return }
-
-            guard index < chunks.count else {
-                completion(TranscriptionResult(
-                    success: true,
-                    text: mergedText.trimmingCharacters(in: .whitespacesAndNewlines),
-                    latency: CFAbsoluteTimeGetCurrent() - startTime,
-                    error: nil,
-                    provider: lastProvider,
-                    model: lastModel
-                ))
-                return
-            }
-
-            transcribeSingle(chunks[index]) { result in
+        func launchNext() {
+            while true {
                 self.lock.lock()
-                let stillActive = self.batchGeneration == generation
+                let isBatchActive = self.batchGeneration == generation
                 self.lock.unlock()
-                guard stillActive else { return }
+                guard isBatchActive else { return }
 
-                lastProvider = result.provider
-                lastModel = result.model
-                guard result.success else {
-                    if !mergedText.isEmpty && Self.isNoSpeechMessage(result.error ?? "") {
-                        step(index: index + 1)
-                        return
-                    }
-                    completion(TranscriptionResult(
-                        success: false,
-                        text: "",
-                        latency: CFAbsoluteTimeGetCurrent() - startTime,
-                        error: result.error,
-                        provider: result.provider,
-                        model: result.model
-                    ))
+                let chunkIndex: Int
+                stateLock.lock()
+                if hasFinished || inFlight >= concurrencyLimit || nextIndex >= chunks.count {
+                    stateLock.unlock()
                     return
                 }
+                chunkIndex = nextIndex
+                nextIndex += 1
+                inFlight += 1
+                stateLock.unlock()
 
-                let piece = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !piece.isEmpty {
-                    mergedText = StreamingTranscriptReconciler.mergeCommitted(existing: mergedText, incoming: piece)
+                transcribeSingle(chunks[chunkIndex]) { result in
+                    self.lock.lock()
+                    let stillActive = self.batchGeneration == generation
+                    self.lock.unlock()
+                    guard stillActive else { return }
+
+                    var immediateFailure: TranscriptionResult?
+                    var finalResult: TranscriptionResult?
+
+                    stateLock.lock()
+                    inFlight = max(0, inFlight - 1)
+                    if hasFinished {
+                        stateLock.unlock()
+                        return
+                    }
+                    lastProvider = result.provider
+                    lastModel = result.model
+
+                    if result.success {
+                        let trimmed = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        pieceTexts[chunkIndex] = trimmed.isEmpty ? nil : trimmed
+                    } else if Self.isNoSpeechMessage(result.error ?? "") {
+                        lastNoSpeechError = result.error
+                    } else {
+                        hasFinished = true
+                        immediateFailure = TranscriptionResult(
+                            success: false,
+                            text: "",
+                            latency: CFAbsoluteTimeGetCurrent() - startTime,
+                            error: result.error,
+                            provider: result.provider,
+                            model: result.model
+                        )
+                    }
+
+                    if immediateFailure == nil {
+                        completedCount += 1
+                        if completedCount == chunks.count {
+                            hasFinished = true
+                            let orderedPieces = pieceTexts.compactMap { $0 }
+                            if orderedPieces.isEmpty, let noSpeech = lastNoSpeechError {
+                                finalResult = TranscriptionResult(
+                                    success: false,
+                                    text: "",
+                                    latency: CFAbsoluteTimeGetCurrent() - startTime,
+                                    error: noSpeech,
+                                    provider: lastProvider,
+                                    model: lastModel
+                                )
+                            } else {
+                                let merged = AudioChunker.mergeChunkTranscripts(orderedPieces)
+                                finalResult = TranscriptionResult(
+                                    success: true,
+                                    text: merged,
+                                    latency: CFAbsoluteTimeGetCurrent() - startTime,
+                                    error: nil,
+                                    provider: lastProvider,
+                                    model: lastModel
+                                )
+                            }
+                        }
+                    }
+                    stateLock.unlock()
+
+                    if let immediateFailure {
+                        completion(immediateFailure)
+                    } else if let finalResult {
+                        completion(finalResult)
+                    } else {
+                        launchNext()
+                    }
                 }
-                step(index: index + 1)
             }
         }
 
-        step(index: 0)
+        launchNext()
     }
 
     public func transcribeAppleSpeech(
@@ -1678,7 +1729,7 @@ public class Transcriber {
         completion: @escaping (TranscriptionResult) -> Void
     ) {
         let chunks = AudioChunker.splitWAV(audioData, maxChunkSeconds: 45.0, overlapSeconds: 0.6)
-        transcribeWAVChunksSequentially(chunks: chunks, transcribeSingle: { chunkData, done in
+        transcribeWAVChunks(chunks: chunks, maxConcurrency: 1, transcribeSingle: { chunkData, done in
             self.transcribeAppleSpeechChunk(audioData: chunkData, config: config, completion: done)
         }, completion: completion)
     }
@@ -1930,7 +1981,7 @@ public class Transcriber {
         completion: @escaping (TranscriptionResult) -> Void
     ) {
         let chunks = AudioChunker.splitWAV(audioData, maxChunkSeconds: 480.0, overlapSeconds: 0.6)
-        transcribeWAVChunksSequentially(chunks: chunks, transcribeSingle: { chunkData, done in
+        transcribeWAVChunks(chunks: chunks, maxConcurrency: 3, transcribeSingle: { chunkData, done in
             self.transcribeGroqChunk(audioData: chunkData, config: config, completion: done)
         }, completion: completion)
     }
@@ -2141,7 +2192,7 @@ public class Transcriber {
         completion: @escaping (TranscriptionResult) -> Void
     ) {
         let chunks = AudioChunker.splitWAV(audioData, maxChunkSeconds: 300.0, overlapSeconds: 0.6)
-        transcribeWAVChunksSequentially(chunks: chunks, transcribeSingle: { chunkData, done in
+        transcribeWAVChunks(chunks: chunks, maxConcurrency: 3, transcribeSingle: { chunkData, done in
             self.transcribeGeminiChunk(audioData: chunkData, config: config, targetContext: targetContext, completion: done)
         }, completion: completion)
     }

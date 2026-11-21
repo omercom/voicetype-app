@@ -3,7 +3,7 @@ import Metal
 import QuartzCore
 import simd
 
-private struct DotScopeUniforms {
+struct DotScopeUniforms {
     var resolution: SIMD2<Float>
     var backingScale: Float
     var width: Float
@@ -30,10 +30,17 @@ private struct DotScopeUniforms {
     var shadow: SIMD4<Float>
 }
 
-private enum DotScopeMetalPipeline {
+enum DotScopeMetalPipeline {
     static let device: MTLDevice? = MTLCreateSystemDefaultDevice()
     static let commandQueue: MTLCommandQueue? = device?.makeCommandQueue()
     static let pipelineState: MTLRenderPipelineState? = buildPipeline()
+
+    static func warmAsync() {
+        DispatchQueue.global(qos: .utility).async {
+            _ = pipelineState
+            _ = commandQueue
+        }
+    }
 
     private static let shaderSource = """
     #include <metal_stdlib>
@@ -266,6 +273,10 @@ public final class DotScopeView: NSView {
         DotScopeMetalPipeline.pipelineState != nil && DotScopeMetalPipeline.commandQueue != nil
     }
 
+    public static func warmMetalPipelineAsync() {
+        DotScopeMetalPipeline.warmAsync()
+    }
+
     public init(frame frameRect: NSRect, tuning: DotScopeTuning = .compactDefault, dotsOnly: Bool = false) {
         self.simulation = DotScopeSimulation(tuning: tuning)
         self.dotsOnly = dotsOnly
@@ -334,14 +345,18 @@ public final class DotScopeView: NSView {
         if let processingStyle {
             next.processingStyle = processingStyle
         }
-        simulation.updateTuning(next)
+        if next != simulation.tuning {
+            simulation.updateTuning(next)
+        }
         if let accentMode {
             simulation.accentMode = accentMode
         }
         if let dotsOnly {
             self.dotsOnly = dotsOnly
         }
-        renderNow()
+        if !isHidden {
+            renderNow()
+        }
     }
 
     public func reset(reduceMotion: Bool) {

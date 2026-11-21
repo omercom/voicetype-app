@@ -1858,6 +1858,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         currentLiveSession?.cancel()
         currentLiveSession = nil
         Transcriber.shared.cancel()
+        AudioRecorder.shared.releaseLinger()
         AudioRecorder.shared.cleanTeardown()
         SystemAudioManager.shared.restoreAfterDictation()
         BackgroundAudioController.shared.handleDictationEnded(config: ConfigManager.shared.config)

@@ -719,6 +719,8 @@ public class RecordingHUD: NSObject {
     }
 
     private func syncDotScopeStyling() {
+        notchWave.configure(processingStyle: activeProcessingStyle, accentMode: currentAccentMode)
+        guard placement != .notch else { return }
         let usesFullHexPill = placement == .compact && !isCompactMessageState
         let tuning = usesFullHexPill
             ? Self.compactTuning(processingStyle: activeProcessingStyle)
@@ -730,7 +732,6 @@ public class RecordingHUD: NSObject {
             dotsOnly: !usesFullHexPill
         )
         dotScopeView.setStage(dotScopeStageForCurrentState())
-        notchWave.configure(processingStyle: activeProcessingStyle, accentMode: currentAccentMode)
     }
 
     private func updateReactivePillBorder() {
@@ -830,8 +831,19 @@ public class RecordingHUD: NSObject {
                 notchShapeView.rimGlowIntensity = 0.20 + 0.75 * demoNorm
             }
         }
-        if placement == .notch && currentState == .preparing {
-            notchWave.render(level: 0, mode: .preparing, animated: !reduceMotion)
+        if placement == .notch && !isDemoPreviewActive {
+            switch currentState {
+            case .preparing:
+                notchWave.render(level: 0, mode: .preparing, animated: !reduceMotion)
+            case .recording:
+                updateWaveform()
+            case .transcribing:
+                notchWave.render(level: 0, mode: .processing, animated: !reduceMotion)
+            case .idle, .success, .notice, .error:
+                break
+            }
+        } else if currentState == .recording && !isDemoPreviewActive {
+            updateWaveform()
         }
         updateElapsedTimerDisplay()
         updateReactivePillBorder()
@@ -1166,7 +1178,6 @@ public class RecordingHUD: NSObject {
         spinner.stopAnimation(nil)
         spinner.isHidden = true
         elapsedTimerLabel.isHidden = true
-        syncDotScopeStyling()
 
         let isPreparing = currentState == .preparing
         let isRecording = currentState == .recording
@@ -1469,17 +1480,10 @@ public class RecordingHUD: NSObject {
     private var processingTimer: Timer?
     private var processingStartedAt: TimeInterval = 0
 
-    /// Konuşma bitince çubuklar soldan sağa akan yumuşak bir dalgaya dönüşür.
+    /// Konuşma bitince dalga soldan sağa akan yumuşak bir işlem dalgasına dönüşür.
+    /// Kare tikleri birleşik `hudAnimationTimer` üzerinden yürür.
     private func startProcessingAnimation() {
-        guard processingTimer == nil else { return }
-        processingStartedAt = ProcessInfo.processInfo.systemUptime
         animateProcessingBars()
-        guard !reduceMotion else { return }
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.animateProcessingBars()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        processingTimer = timer
     }
 
     private func stopProcessingAnimation() {
@@ -1605,6 +1609,7 @@ public class RecordingHUD: NSObject {
 
     public func warm() {
         precondition(Thread.isMainThread)
+        DotScopeView.warmMetalPipelineAsync()
         panel.contentView?.layoutSubtreeIfNeeded()
         panel.contentView?.displayIfNeeded()
     }
@@ -2080,14 +2085,12 @@ public class RecordingHUD: NSObject {
         }
     }
 
+    /// Birleşik 60 Hz saat (`hudAnimationTimer`) üzerinden ses ölçümü yapar;
+    /// ayrı ikinci bir zamanlayıcı açılmaz.
     private func startMeterTimer() {
         meterTimer?.invalidate()
-        // 60 FPS: dalga sese gecikmesiz tepki versin (yumuşatma zamana bağlı).
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.updateWaveform()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        meterTimer = timer
+        meterTimer = nil
+        startHudAnimationTimer()
     }
 
     private func stopMeterTimer() {

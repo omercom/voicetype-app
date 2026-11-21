@@ -154,4 +154,44 @@ enum AudioChunker {
 
         return alignBytes(bestOffset)
     }
+
+    /// Örtüşmeli parça deşifrelerini birleştirirken sınırda tekrarlanan kelimeleri temizler.
+    static func mergeChunkTranscripts(_ chunks: [String]) -> String {
+        let nonEmpty = chunks
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !nonEmpty.isEmpty else { return "" }
+
+        let trimSet = CharacterSet.punctuationCharacters.union(.symbols)
+        func normalize(_ token: Substring) -> String {
+            token.trimmingCharacters(in: trimSet).lowercased()
+        }
+
+        var mergedWords = nonEmpty[0].split(whereSeparator: \.isWhitespace)
+        for next in nonEmpty.dropFirst() {
+            let nextWords = next.split(whereSeparator: \.isWhitespace)
+            guard !nextWords.isEmpty else { continue }
+            guard !mergedWords.isEmpty else {
+                mergedWords = nextWords
+                continue
+            }
+
+            let prevNorm = mergedWords.map(normalize)
+            let nextNorm = nextWords.map(normalize)
+            let maxOverlap = min(8, prevNorm.count, nextNorm.count)
+            var matchedOverlap = 0
+            if maxOverlap >= 1 {
+                for overlap in stride(from: maxOverlap, through: 1, by: -1) {
+                    let tail = prevNorm.suffix(overlap)
+                    let head = nextNorm.prefix(overlap)
+                    if !tail.contains(where: \.isEmpty), Array(tail) == Array(head) {
+                        matchedOverlap = overlap
+                        break
+                    }
+                }
+            }
+            mergedWords.append(contentsOf: nextWords.dropFirst(matchedOverlap))
+        }
+        return mergedWords.joined(separator: " ")
+    }
 }

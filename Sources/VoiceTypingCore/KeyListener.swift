@@ -25,13 +25,24 @@ public class KeyListener {
         return Int64(ConfigManager.shared.config.trigger_key)
     }
     private let escKeyCode: Int64 = 53     // Escape tuşu
+    private let capsLockKeyCode: Int64 = 57
+    private var capsLockDictationActive = false
+    private var capsLockStartedAt: TimeInterval = 0
+    private var lastCapsLockAlphaShift: Bool?
     private var runLoop: CFRunLoop?
 
     private init() {}
 
+    static func mappedMouseVirtualKeyCode(buttonNumber: Int64, configuredButton: Int) -> Int64? {
+        guard configuredButton >= 2, buttonNumber == Int64(configuredButton) else { return nil }
+        return 10_000 + buttonNumber
+    }
+
     public func resetState() {
         lock.lock()
         shortcutState = DictationShortcutState()
+        capsLockDictationActive = false
+        lastCapsLockAlphaShift = nil
         lock.unlock()
     }
 
@@ -108,7 +119,11 @@ public class KeyListener {
     }
 
     private func runEventTapLoop() {
-        let eventMask = (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
+        let eventMask = (1 << CGEventType.flagsChanged.rawValue)
+            | (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.keyUp.rawValue)
+            | (1 << CGEventType.otherMouseDown.rawValue)
+            | (1 << CGEventType.otherMouseUp.rawValue)
 
         let observer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
 
@@ -227,12 +242,67 @@ public class KeyListener {
             return Unmanaged.passRetained(event)
         }
 
+        let config = ConfigManager.shared.config
+        let timestamp = ProcessInfo.processInfo.systemUptime
+
+        // Ek fare yan tuşları (Mouse 4 / Mouse 5 — sol/sağ tık asla yutulmaz)
+        if type == .otherMouseDown || type == .otherMouseUp {
+            let buttonNumber = event.getIntegerValueField(.mouseEventButtonNumber)
+            guard let virtualMouseKey = Self.mappedMouseVirtualKeyCode(
+                buttonNumber: buttonNumber,
+                configuredButton: config.mouse_trigger_button
+            ) else {
+                return Unmanaged.passRetained(event)
+            }
+            let mouseEvent: DictationShortcutEvent = (type == .otherMouseDown)
+                ? .keyDown(isRepeat: false)
+                : .keyUp
+            lock.lock()
+            let result = shortcutState.handle(
+                keyCode: virtualMouseKey,
+                event: mouseEvent,
+                primaryKeyCode: virtualMouseKey,
+                translationEnabled: false,
+                triggerMode: config.trigger_mode,
+                time: timestamp
+            )
+            lock.unlock()
+            if let action = result.action { dispatchAction(action, triggeredAt: timestamp) }
+            return result.consume ? nil : Unmanaged.passRetained(event)
+        }
+
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+
+        // Caps Lock eller-serbest dikte aç/kapat
+        if type == .flagsChanged && keyCode == capsLockKeyCode && config.enable_caps_lock_dictation {
+            let alphaNow = event.flags.contains(.maskAlphaShift)
+            lock.lock()
+            let isBusyShortcut = shortcutState.activeKeyCode != nil || shortcutState.pressedKeyCode != nil
+            let previousAlpha = lastCapsLockAlphaShift
+            lastCapsLockAlphaShift = alphaNow
+            guard !isBusyShortcut, previousAlpha != alphaNow else {
+                lock.unlock()
+                return Unmanaged.passRetained(event)
+            }
+            let action: DictationShortcutAction
+            if capsLockDictationActive {
+                capsLockDictationActive = false
+                let duration = max(0, timestamp - capsLockStartedAt)
+                action = .stop(duration)
+            } else {
+                capsLockDictationActive = true
+                capsLockStartedAt = timestamp
+                action = .start(.normal)
+            }
+            lock.unlock()
+            dispatchAction(action, triggeredAt: timestamp)
+            return nil
+        }
 
         // 0. Option + Shift + V: Son dikteyi yeniden yapıştır (Hex ⌥⇧V akışı)
         if type == .keyDown,
            event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
-           ConfigManager.shared.config.enable_repaste_shortcut,
+           config.enable_repaste_shortcut,
            !(isBusy?() ?? false) {
             let flags = event.flags
             let hasOptionShift = flags.contains(.maskAlternate) && flags.contains(.maskShift)
@@ -249,11 +319,13 @@ public class KeyListener {
         if type == .keyDown && keyCode == escKeyCode {
             let busy = isBusy?() ?? false
             lock.lock()
+            let wasCapsActive = capsLockDictationActive
+            capsLockDictationActive = false
             let action = shortcutState.cancel()
             lock.unlock()
 
-            if action != nil || busy {
-                dispatchAction(.cancel, triggeredAt: ProcessInfo.processInfo.systemUptime)
+            if action != nil || wasCapsActive || busy {
+                dispatchAction(.cancel, triggeredAt: timestamp)
                 // Esc kaydı iptal ettiğinde aktif penceredeki açık diyaloğu veya tam ekranı kapatmasın
                 return nil
             }
@@ -273,8 +345,6 @@ public class KeyListener {
         default:
             return Unmanaged.passRetained(event)
         }
-        let config = ConfigManager.shared.config
-        let timestamp = ProcessInfo.processInfo.systemUptime
         lock.lock()
         let result = shortcutState.handle(keyCode: keyCode, event: shortcutEvent,
                                           primaryKeyCode: Int64(config.trigger_key),
