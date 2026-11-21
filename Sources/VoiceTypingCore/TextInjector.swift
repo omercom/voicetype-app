@@ -281,8 +281,15 @@ public class TextInjector {
     /// Tetikleyici tuş (ör. Sağ ⌘) bırakıldıktan hemen sonra hızlı yerel deşifrede
     /// fiziksel tuş bayraklarının sıfırlanmasını kısa süre bekler; aksi halde
     /// Cmd+V basılı tuş koruması yüzünden gereksiz yere iptal edilirdi.
+    static func areModifiersSafeForPaste(flags: CGEventFlags, commandAlreadyPosted: Bool) -> Bool {
+        let forbidden: CGEventFlags = commandAlreadyPosted
+            ? [.maskShift, .maskControl, .maskAlternate]
+            : [.maskCommand, .maskShift, .maskControl, .maskAlternate]
+        return flags.intersection(forbidden).isEmpty
+    }
+
     static func waitForClearModifiers(
-        maxWait: TimeInterval = 0.35,
+        maxWait: TimeInterval = 0.75,
         pollInterval: TimeInterval = 0.015,
         areModifiersClear: () -> Bool,
         canContinue: () -> Bool,
@@ -308,24 +315,38 @@ public class TextInjector {
             areModifiersClear: { CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty },
             canContinue: canSendPaste
         ) else {
+            print("[TextInjector] ⚠️ Fiziksel tuşlar (modifier) temizlenmedi veya hedef değişti; Cmd+V iptal edildi.")
             return false
         }
-        return PasteShortcutSequence.run(
+        var commandAlreadyPosted = false
+        let sent = PasteShortcutSequence.run(
             isSafe: {
-                CGEventSource.flagsState(.hidSystemState).intersection(modifiers).isEmpty && canSendPaste()
+                Self.areModifiersSafeForPaste(
+                    flags: CGEventSource.flagsState(.hidSystemState),
+                    commandAlreadyPosted: commandAlreadyPosted
+                ) && canSendPaste()
             },
             post: { phase in
                 let event: CGEvent
                 switch phase {
-                case .commandDown: event = events.commandDown
-                case .pasteDown: event = events.pasteDown
-                case .pasteUp: event = events.pasteUp
-                case .commandUp: event = events.commandUp
+                case .commandDown:
+                    commandAlreadyPosted = true
+                    event = events.commandDown
+                case .pasteDown:
+                    event = events.pasteDown
+                case .pasteUp:
+                    event = events.pasteUp
+                case .commandUp:
+                    event = events.commandUp
                 }
                 Self.postKeyboardEvent(event, targetPID: targetPID)
             },
             wait: { Thread.sleep(forTimeInterval: $0) }
         )
+        if !sent {
+            print("[TextInjector] ⚠️ Cmd+V sekansı güvenli ön kontrolü geçemedi ve durduruldu.")
+        }
+        return sent
     }
 
     private static func postKeyboardEvent(_ event: CGEvent, targetPID: pid_t?) {

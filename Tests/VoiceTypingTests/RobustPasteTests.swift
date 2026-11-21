@@ -74,4 +74,42 @@ final class RobustPasteTests: XCTestCase {
         XCTAssertTrue(TargetInputManager.isEquivalentLiveField(sameElement: false, isDescendantOrAncestor: false, isSameContainerTextInput: true))
         XCTAssertFalse(TargetInputManager.isEquivalentLiveField(sameElement: false, isDescendantOrAncestor: false, isSameContainerTextInput: false))
     }
+
+    func testModifiersSafeForPasteAllowsSyntheticCommandAfterCommandDown() {
+        XCTAssertTrue(TextInjector.areModifiersSafeForPaste(flags: [], commandAlreadyPosted: false))
+        XCTAssertFalse(TextInjector.areModifiersSafeForPaste(flags: .maskCommand, commandAlreadyPosted: false))
+        XCTAssertTrue(TextInjector.areModifiersSafeForPaste(flags: .maskCommand, commandAlreadyPosted: true))
+        XCTAssertFalse(TextInjector.areModifiersSafeForPaste(flags: [.maskCommand, .maskShift], commandAlreadyPosted: true))
+        XCTAssertFalse(TextInjector.areModifiersSafeForPaste(flags: .maskAlternate, commandAlreadyPosted: true))
+        XCTAssertFalse(TextInjector.areModifiersSafeForPaste(flags: .maskControl, commandAlreadyPosted: true))
+    }
+
+    func testPasteShortcutSequenceSucceedsWhenHIDCommandFlagReflectsSyntheticCommandDown() {
+        var hidFlags: CGEventFlags = []
+        var posted: [PasteShortcutSequence.Event] = []
+        var commandAlreadyPosted = false
+
+        let result = PasteShortcutSequence.run(
+            isSafe: {
+                TextInjector.areModifiersSafeForPaste(flags: hidFlags, commandAlreadyPosted: commandAlreadyPosted)
+            },
+            post: { phase in
+                posted.append(phase)
+                switch phase {
+                case .commandDown:
+                    commandAlreadyPosted = true
+                    hidFlags.insert(.maskCommand)
+                case .commandUp:
+                    hidFlags.remove(.maskCommand)
+                case .pasteDown, .pasteUp:
+                    break
+                }
+            },
+            wait: { _ in }
+        )
+
+        XCTAssertTrue(result)
+        XCTAssertEqual(posted, [.commandDown, .pasteDown, .pasteUp, .commandUp])
+        XCTAssertTrue(hidFlags.isEmpty)
+    }
 }
