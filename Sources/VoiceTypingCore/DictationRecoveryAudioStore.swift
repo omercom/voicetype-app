@@ -84,6 +84,7 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
     }
 
     private struct RecoveryFiles {
+        let id: UUID?
         let audio: URL
         let metadata: URL
         let timestamp: Date
@@ -95,12 +96,15 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
         let candidates: [RecoveryFiles] = entries.compactMap { audio in
             let name = audio.lastPathComponent
             let metadata: URL
+            let parsedID: UUID?
             if name == "latest_recovery.wav" {
                 metadata = latestMetadataURL
+                parsedID = nil
             } else {
                 guard name.hasPrefix("recovery_"), name.hasSuffix(".wav") else { return nil }
-                let id = String(name.dropFirst("recovery_".count).dropLast(".wav".count))
-                guard UUID(uuidString: id) != nil else { return nil }
+                let idString = String(name.dropFirst("recovery_".count).dropLast(".wav".count))
+                guard let uuid = UUID(uuidString: idString) else { return nil }
+                parsedID = uuid
                 metadata = audio.deletingPathExtension().appendingPathExtension("json")
             }
             guard let size = audioByteCount(at: audio), includeShort || size > 44,
@@ -109,7 +113,7 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
                 .flatMap { try? JSONDecoder().decode(DictationRecoveryMetadata.self, from: $0) }
             let timestamp = savedMetadata?.timestamp ?? (attributes[.creationDate] as? Date)
                 ?? (attributes[.modificationDate] as? Date) ?? .distantPast
-            return RecoveryFiles(audio: audio, metadata: metadata, timestamp: timestamp)
+            return RecoveryFiles(id: parsedID, audio: audio, metadata: metadata, timestamp: timestamp)
         }
         return candidates
     }
@@ -162,7 +166,29 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
         } catch {
             print("[RecoveryAudioStore] ⚠️ Kurtarma metadata'sı yazılamadı: \(error.localizedDescription)")
         }
+        pruneOldRecordingsLocked()
         return true
+    }
+
+    /// Eski veya limit fazlası `recovery_<UUID>.*` dosyalarını temizler (`latest_recovery.*` korunur).
+    public func pruneOldRecordings(maxCount: Int = 15, maxAge: TimeInterval = 7 * 86400) {
+        lock.lock()
+        defer { lock.unlock() }
+        pruneOldRecordingsLocked(maxCount: maxCount, maxAge: maxAge)
+    }
+
+    private func pruneOldRecordingsLocked(maxCount: Int = 15, maxAge: TimeInterval = 7 * 86400, now: Date = Date()) {
+        let uuidRecordings = recoveryFiles(includeShort: true)
+            .filter { $0.id != nil }
+            .sorted { $0.timestamp > $1.timestamp }
+        for (index, item) in uuidRecordings.enumerated() {
+            let expired = maxAge >= 0 && now.timeIntervalSince(item.timestamp) > maxAge
+            let overCount = maxCount >= 0 && index >= maxCount
+            if expired || overCount {
+                try? fileManager.removeItem(at: item.audio)
+                try? fileManager.removeItem(at: item.metadata)
+            }
+        }
     }
 
     public func clear(recordingID: UUID?) {
@@ -252,6 +278,18 @@ public final class DictationRecoveryAudioStore: @unchecked Sendable {
 
         guard let files = latestRecoveryFiles(includeShort: true) else { return nil }
         return try? Data(contentsOf: files.audio)
+    }
+
+    /// Son kurtarılabilir ses kaydını varsa UUID kimliğiyle birlikte döner.
+    public func latestRecoveryEntry() -> (id: UUID?, data: Data)? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let files = latestRecoveryFiles(includeShort: false),
+              let data = try? Data(contentsOf: files.audio) else {
+            return nil
+        }
+        return (id: files.id, data: data)
     }
 
     static func availableExportURL(in directory: URL, baseName: String, exists: (URL) -> Bool) -> URL {

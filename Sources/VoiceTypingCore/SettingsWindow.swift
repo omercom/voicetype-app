@@ -94,12 +94,15 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private var soundThemePopUp: NSPopUpButton!
     private var soundVolumeSlider: NSSlider!
     private var hudStylePopUp: NSPopUpButton!
+    private var hudProcessingEffectPopUp: NSPopUpButton!
+    private var hudPreviewButton: NSButton!
     private var hudNotchNoteLabel: NSTextField!
     private var soundVolumeLabel: NSTextField!
     private var testSoundButton: NSButton!
     private var voiceSnippetsTextView: NSTextView!
     private var voiceSnippetsScrollView: NSScrollView!
     private var restoreClipboardCheckbox: NSButton!
+    private var repasteShortcutCheckbox: NSButton!
 
     // Tab 3: Sistem & İzinler
     private var micStatusLabel: NSTextField!
@@ -1052,7 +1055,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // TAB: Gelişmiş & Kısayollar (Auto-Submit, App Profiles, Voice Snippets, Sound Themes)
     // =========================================================================
     private func buildTabAdvancedView() -> NSView {
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 570))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 655))
 
         // 1. Otomatik Gönderim (Auto-Submit / Enter)
         let autoSubmitLabel = createSectionLabel(text: "Otomatik Gönderim", y: 16)
@@ -1208,22 +1211,51 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         )
         container.addSubview(clipboardNote)
 
-        container.addSubview(createSeparator(y: 470))
+        repasteShortcutCheckbox = NSButton(
+            checkboxWithTitle: "Son dikteyi yeniden yapıştırma kısayolu (⌥⇧V)",
+            target: self,
+            action: #selector(checkboxChanged(_:))
+        )
+        repasteShortcutCheckbox.frame = NSRect(x: 175, y: 472, width: 440, height: 18)
+        container.addSubview(repasteShortcutCheckbox)
+
+        container.addSubview(createSeparator(y: 500))
 
         // 6. Gösterge Stili (HUD)
-        let hudLabel = createSectionLabel(text: "Gösterge Stili", y: 484)
+        let hudLabel = createSectionLabel(text: "Gösterge Stili", y: 514)
         container.addSubview(hudLabel)
 
-        hudStylePopUp = NSPopUpButton(frame: NSRect(x: 175, y: 480, width: 300, height: 26), pullsDown: false)
+        hudStylePopUp = NSPopUpButton(frame: NSRect(x: 175, y: 510, width: 285, height: 26), pullsDown: false)
         hudStylePopUp.addItem(withTitle: "Alt-ortada kapsül (varsayılan)")
         hudStylePopUp.addItem(withTitle: "MacBook çentiği · Dynamic Island")
+        hudStylePopUp.addItem(withTitle: "Hex Minimal · Sadece Dot Scope (Yazısız)")
         hudStylePopUp.target = self
         hudStylePopUp.action = #selector(hudStyleChanged(_:))
         container.addSubview(hudStylePopUp)
 
+        hudPreviewButton = NSButton(frame: NSRect(x: 470, y: 509, width: 105, height: 28))
+        hudPreviewButton.title = "Önizle"
+        hudPreviewButton.bezelStyle = .rounded
+        hudPreviewButton.target = self
+        hudPreviewButton.action = #selector(previewHudClicked)
+        container.addSubview(hudPreviewButton)
+
+        let effectLabel = NSTextField(labelWithString: "İşleme Efekti:")
+        effectLabel.frame = NSRect(x: 175, y: 548, width: 90, height: 20)
+        effectLabel.font = NSFont.systemFont(ofSize: 11)
+        container.addSubview(effectLabel)
+
+        hudProcessingEffectPopUp = NSPopUpButton(frame: NSRect(x: 265, y: 544, width: 195, height: 26), pullsDown: false)
+        hudProcessingEffectPopUp.addItem(withTitle: "Akış (Flow)")
+        hudProcessingEffectPopUp.addItem(withTitle: "Nabız (Pulse)")
+        hudProcessingEffectPopUp.addItem(withTitle: "Tarama (Sweep)")
+        hudProcessingEffectPopUp.target = self
+        hudProcessingEffectPopUp.action = #selector(hudProcessingEffectChanged(_:))
+        container.addSubview(hudProcessingEffectPopUp)
+
         hudNotchNoteLabel = createNoteLabel(
-            text: "Dynamic Island yalnızca çentikli MacBook ekranlarında görünür. Çentik yoksa kapsül alt-ortada kalır.",
-            y: 506
+            text: "Dynamic Island yalnızca çentikli MacBook ekranlarında görünür. Hex Minimal ise alt-ortada yazısız GPU dot-scope kapsülü gösterir.",
+            y: 576
         )
         container.addSubview(hudNotchNoteLabel)
 
@@ -1232,17 +1264,49 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         // Etkisi olmayan bir kontrol göstermek yanıltıcı olurdu.
         let hudAutoNote = createNoteLabel(
             text: "Yazı boyutu otomatiktir: ada genişliği sabittir, uzun metin alt satırlara sarar ve yazı gerektiği kadar küçülür (okunabilirlik sınırına kadar).",
-            y: 528
+            y: 604
         )
         container.addSubview(hudAutoNote)
 
-        return container
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.documentView = container
+        container.scroll(.zero)
+        return scrollView
+    }
+
+    private func selectedHudStyleString() -> String {
+        switch hudStylePopUp.indexOfSelectedItem {
+        case 1: return "notch"
+        case 2: return "compact"
+        default: return "pill"
+        }
+    }
+
+    private func selectedProcessingEffectString() -> String {
+        switch hudProcessingEffectPopUp.indexOfSelectedItem {
+        case 1: return "pulse"
+        case 2: return "sweep"
+        default: return "flow"
+        }
     }
 
     @objc private func hudStyleChanged(_ sender: NSPopUpButton) {
-        let style = sender.indexOfSelectedItem == 1 ? "notch" : "pill"
+        let style = selectedHudStyleString()
         ConfigManager.shared.update { $0.hud_style = style }
         updateHudControls()
+    }
+
+    @objc private func hudProcessingEffectChanged(_ sender: NSPopUpButton) {
+        let effect = selectedProcessingEffectString()
+        ConfigManager.shared.update { $0.hud_processing_effect = effect }
+    }
+
+    @objc private func previewHudClicked() {
+        RecordingHUD.shared.runDemoPreview()
     }
 
     /// Ada seçeneğini mevcut donanıma göre etkinleştirir/pasifleştirir.
@@ -1250,8 +1314,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let hasNotch = RecordingHUD.notchedScreen() != nil
         let notchItem = hudStylePopUp.item(at: 1)
         notchItem?.isEnabled = hasNotch
+        hudStylePopUp.item(at: 0)?.isEnabled = true
+        hudStylePopUp.item(at: 2)?.isEnabled = true
         if !hasNotch {
             hudNotchNoteLabel.stringValue = "Bu ekranda çentik bulunamadı; Dynamic Island kullanılamaz."
+        } else {
+            hudNotchNoteLabel.stringValue = "Dynamic Island yalnızca çentikli MacBook ekranlarında görünür. Hex Minimal ise alt-ortada yazısız GPU dot-scope kapsülü gösterir."
         }
     }
 
@@ -1875,8 +1943,17 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         soundVolumeSlider.doubleValue = cfg.sound_volume
         soundVolumeLabel.stringValue = "Ses: \(Int(cfg.sound_volume * 100))%"
 
-        // Gösterge stili: yazı boyutu artık ayarlanmaz (otomatik hesaplanır).
-        hudStylePopUp.selectItem(at: HUDPlacement.resolve(cfg.hud_style) == .notch ? 1 : 0)
+        // Gösterge stili ve efekt: yazı boyutu otomatik hesaplanır.
+        switch HUDPlacement.resolve(cfg.hud_style) {
+        case .notch: hudStylePopUp.selectItem(at: 1)
+        case .compact: hudStylePopUp.selectItem(at: 2)
+        case .pill: hudStylePopUp.selectItem(at: 0)
+        }
+        switch DotScopeProcessingStyle.resolve(cfg.hud_processing_effect) {
+        case .pulse: hudProcessingEffectPopUp.selectItem(at: 1)
+        case .sweep: hudProcessingEffectPopUp.selectItem(at: 2)
+        case .flow: hudProcessingEffectPopUp.selectItem(at: 0)
+        }
         updateHudControls()
 
         // Gelişmiş: Voice Snippets. Alanı örnek metinle doldurmak yerine boş
@@ -1884,8 +1961,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         // istemeden etkinleşmez. Örnek için "+ Örnek Ekle" kullanılabilir.
         voiceSnippetsTextView.string = AppConfig.formatVoiceSnippets(cfg.voice_snippets)
 
-        // Gelişmiş: Pano
+        // Gelişmiş: Pano & Kısayol
         restoreClipboardCheckbox.state = cfg.restore_clipboard ? .on : .off
+        repasteShortcutCheckbox.state = cfg.enable_repaste_shortcut ? .on : .off
 
         updateSystemPromptVisibility()
 
@@ -2384,6 +2462,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.save_history = saveHistOn
             cfg.play_sounds = playSounds
             cfg.restore_clipboard = restoreClipboardCheckbox.state == .on
+            cfg.enable_repaste_shortcut = repasteShortcutCheckbox.state == .on
             cfg.background_audio_mode = bgAudioMode
             cfg.enable_microphone_boost = micBoostOn
             cfg.pause_media_playback = (bgAudioMode == "pause")
@@ -2397,7 +2476,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.sound_theme = soundTheme
             cfg.sound_volume = soundVolume
             cfg.voice_snippets = snippets
-            cfg.hud_style = hudStylePopUp.indexOfSelectedItem == 1 ? "notch" : "pill"
+            cfg.hud_style = selectedHudStyleString()
+            cfg.hud_processing_effect = selectedProcessingEffectString()
         }
 
         AppDelegate.updateDockVisibility(showDock)

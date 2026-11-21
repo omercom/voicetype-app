@@ -18,12 +18,14 @@ final class AppleSpeechFinalization {
         error: "Apple canlı tanıma final sonucu 1800 ms içinde alınamadı."
     )
 
+    private let timeoutDuration: TimeInterval
     private let schedule: Schedule
     private var cancelTimer: (() -> Void)?
     private var hasEndedAudio = false
     private var isTerminal = false
 
-    init(schedule: @escaping Schedule) {
+    init(timeout: TimeInterval = AppleSpeechFinalization.timeout, schedule: @escaping Schedule) {
+        self.timeoutDuration = timeout
         self.schedule = schedule
     }
 
@@ -41,7 +43,7 @@ final class AppleSpeechFinalization {
     func finishAudio(onTimeout: @escaping () -> Void) -> Bool {
         guard !isTerminal, !hasEndedAudio else { return false }
         hasEndedAudio = true
-        cancelTimer = schedule(Self.timeout, onTimeout)
+        cancelTimer = schedule(timeoutDuration, onTimeout)
         return true
     }
 

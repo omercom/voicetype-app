@@ -82,7 +82,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeDelivery: PendingDictationDelivery?
     private var pendingDeliveries: [UInt64: PendingDictationDelivery] = [:]
     private var recoverAudioMenuItem: NSMenuItem?
+    private var retranscribeRecoveryMenuItem: NSMenuItem?
+    private var repasteLastMenuItem: NSMenuItem?
     private var postRollWorkItem: DispatchWorkItem?
+    private var postRollGeneration: UInt64 = 0
     private var currentLiveSession: (any LiveStreamSession)?
     private var liveTranslation: LiveTranslationCoordinator?
     private var lastRecordedAudioData: Data?
@@ -286,6 +289,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(toggleRecordMenuItem)
         }
 
+        repasteLastMenuItem = NSMenuItem(title: "📋 Son Dikteyi Yeniden Yapıştır (⌥⇧V)", action: #selector(repasteLastDictationMenuAction), keyEquivalent: "")
+        repasteLastMenuItem?.target = self
+        if let repasteLastMenuItem {
+            menu.addItem(repasteLastMenuItem)
+        }
+
         menu.addItem(NSMenuItem.separator())
 
         // 1. Ayarlar Penceresi (Temiz Apple HIG standardı, çift ikon önlendi)
@@ -404,6 +413,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
 
         // Kurtarma Ses Deposu (Dictation Recovery)
+        retranscribeRecoveryMenuItem = NSMenuItem(title: "🔄 Son Başarısız Sesi Yeniden Deşifre Et", action: #selector(retranscribeRecoveredAudioAction), keyEquivalent: "")
+        retranscribeRecoveryMenuItem?.target = self
+        if let retranscribeItem = retranscribeRecoveryMenuItem {
+            menu.addItem(retranscribeItem)
+        }
+
         recoverAudioMenuItem = NSMenuItem(title: Self.recoveryMenuTitle, action: #selector(exportRecoveredAudioAction), keyEquivalent: "")
         recoverAudioMenuItem?.target = self
         if let recItem = recoverAudioMenuItem {
@@ -525,7 +540,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshRecoveryMenu() {
-        Self.updateRecoveryMenu(recoverAudioMenuItem, hasRecovery: DictationRecoveryAudioStore.shared.hasRecovery())
+        let hasRecovery = DictationRecoveryAudioStore.shared.hasRecovery()
+        Self.updateRecoveryMenu(recoverAudioMenuItem, hasRecovery: hasRecovery)
+        retranscribeRecoveryMenuItem?.isHidden = !hasRecovery
     }
 
     @objc private func toggleRecordAction() {
@@ -582,6 +599,122 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func repasteLastDictationMenuAction() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            self?.repasteLastDictation()
+        }
+    }
+
+    private func repasteLastDictation() {
+        guard !isDictationActive else { return }
+        guard let latest = DictationHistoryManager.shared.getEntries().first else {
+            RecordingHUD.shared.showNotice(message: "Yeniden yapıştırılacak dikte yok")
+            setStatus(title: "ℹ️", menuText: "Yeniden yapıştırılacak dikte yok", revertAfter: 1.8)
+            return
+        }
+        let trimmed = latest.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            RecordingHUD.shared.showNotice(message: "Yeniden yapıştırılacak dikte yok")
+            return
+        }
+
+        let config = ConfigManager.shared.config
+        let target = TargetInputManager.shared.captureTargetContext()
+        let textToInject = TextPolisher.applySmartSpacing(trimmed)
+        setStatus(title: "⏳", menuText: "Durum: Son dikte yapıştırılıyor...")
+
+        _ = TextInjector.shared.inject(
+            text: textToInject,
+            targetContext: target,
+            pasteDelayMs: config.paste_delay_ms
+        ) { [weak self] outcome in
+            DispatchQueue.main.async {
+                self?.presentInjectionOutcome(outcome, latency: 0.0, recoveryAvailable: false)
+            }
+        }
+    }
+
+    @objc private func retranscribeRecoveredAudioAction() {
+        guard !isDictationActive else {
+            RecordingHUD.shared.showNotice(message: "Önce mevcut işlemi tamamlayın")
+            return
+        }
+        guard let recovery = DictationRecoveryAudioStore.shared.latestRecoveryEntry() else {
+            RecordingHUD.shared.showNotice(message: "Yeniden deşifre edilecek ses yok")
+            setStatus(title: "ℹ️", menuText: "Yeniden deşifre edilecek ses yok", revertAfter: 1.8)
+            refreshRecoveryMenu()
+            return
+        }
+
+        let config = ConfigManager.shared.config
+        let target = TargetInputManager.shared.captureTargetContext()
+        isTranscribing = true
+        RecordingHUD.shared.setTranslationMode(config.enable_translation)
+        RecordingHUD.shared.showTranscribing()
+        setStatus(title: "🔄", menuText: "Durum: Kurtarılan ses yeniden deşifre ediliyor...")
+
+        Transcriber.shared.transcribe(audioData: recovery.data, config: config, targetContext: target) { [weak self] result in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isTranscribing = false
+                let store = DictationRecoveryAudioStore.shared
+
+                if !result.success {
+                    let msg = result.error ?? "Yeniden deşifre başarısız"
+                    let kept = recovery.id.map { store.markFailed(error: msg, recordingID: $0) } ?? store.markFailed(error: msg)
+                    self.refreshRecoveryMenu()
+                    RecordingHUD.shared.showError(message: msg, autoDismissDelay: 2.5)
+                    self.setStatus(title: "⚠️", menuText: kept ? "\(msg) · Ses korundu" : msg, revertAfter: 3.0)
+                    return
+                }
+
+                let recognizedText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !recognizedText.isEmpty else {
+                    RecordingHUD.shared.showNotice(message: "Konuşma algılanamadı")
+                    self.setStatus(title: "ℹ️", menuText: "Konuşma algılanamadı", revertAfter: 2.0)
+                    return
+                }
+
+                let polished = TextPolisher.shared.polish(text: recognizedText, config: config, targetContext: target)
+                guard !polished.isEmpty else {
+                    RecordingHUD.shared.showNotice(message: "Metin oluşturulamadı")
+                    return
+                }
+
+                DictationHistoryManager.shared.addEntry(
+                    text: polished,
+                    provider: result.provider,
+                    model: result.model,
+                    appName: target?.appName
+                )
+
+                let textToInject = TextPolisher.applySmartSpacing(polished)
+                _ = TextInjector.shared.inject(
+                    text: textToInject,
+                    targetContext: target,
+                    pasteDelayMs: config.paste_delay_ms
+                ) { [weak self] outcome in
+                    DispatchQueue.main.async {
+                        let recoveryAvailable: Bool
+                        if outcome == .verified {
+                            if let recID = recovery.id {
+                                store.clear(recordingID: recID)
+                            } else {
+                                store.clear()
+                            }
+                            recoveryAvailable = false
+                        } else {
+                            let err = "Metin teslimi doğrulanamadı"
+                            recoveryAvailable = recovery.id.map { store.markFailed(error: err, recordingID: $0) } ?? store.markFailed(error: err)
+                        }
+                        self?.refreshRecoveryMenu()
+                        self?.presentInjectionOutcome(outcome, latency: result.latency, recoveryAvailable: recoveryAvailable)
+                    }
+                }
+            }
+        }
+    }
+
     private var isDictationActive: Bool {
         isPreparingRecord || isTranscribing || isFinishingRecord || AudioRecorder.shared.isRecording
     }
@@ -603,6 +736,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         listener.onCancel = { [weak self] in
             self?.handleCancel()
+        }
+
+        listener.onRepasteLast = { [weak self] in
+            self?.repasteLastDictation()
         }
 
         listener.start()
@@ -748,6 +885,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         // Görsel tepki tüm TCC, AX ve CoreAudio işlerinden önce gelir. Devamı bir
         // sonraki main-run-loop turuna bırakılır; WindowServer hazırlık kapsülünü
         // gerçekten sunabilir ve spinner ağır başlangıç boyunca donmuş görünmez.
+        RecordingHUD.shared.setTranslationMode(config.enable_translation)
         RecordingHUD.shared.showPreparing()
         trace.mark(.preparingPresented)
 
@@ -1125,13 +1263,48 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Akustik ve Nöromüsküler Uzatma Penceresi (Post-Roll Grace Period):
-        // Kullanıcı konuşmayı bitirdiği anda tuşu bıraksa dahi, son hecelerin / son kelimelerin
-        // ve CoreAudio donanım tamponundaki seslerin eksiksiz alınması için mikrofon kısa bir süre daha dinler.
-        // Streaming transport does not eliminate the acoustic tail at key release.
-        let postRollDelay: Double = 0.18
-        self.postRollWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + postRollDelay, execute: workItem)
+        // Akustik ve Nöromüsküler Uyarlanabilir Kuyruk Penceresi (Adaptive Post-Roll):
+        // Kullanıcı konuşmayı bitirdiği anda tuşu bıraksa dahi son heceler kesilmez;
+        // ses aktivitesi sürdükçe maxTail sınırına kadar bekler, sessizlik oturunca hemen kapanır.
+        self.scheduleAdaptivePostRoll(workItem: workItem)
+    }
+
+    private func scheduleAdaptivePostRoll(workItem: DispatchWorkItem) {
+        postRollGeneration &+= 1
+        let token = postRollGeneration
+        var policy = ReleaseTailPolicy()
+        let startedAt = ProcessInfo.processInfo.systemUptime
+
+        func scheduleStep(after delay: TimeInterval) {
+            let step = DispatchWorkItem { [weak self] in
+                guard let self,
+                      self.postRollGeneration == token,
+                      let activeItem = self.postRollWorkItem,
+                      !activeItem.isCancelled else {
+                    return
+                }
+                let elapsed = max(0, ProcessInfo.processInfo.systemUptime - startedAt)
+                let isSpeaking = AudioRecorder.shared.speechGateState() != .silent || AudioRecorder.shared.averagePower() > -46.0
+                switch policy.decision(elapsed: elapsed, isSpeaking: isSpeaking) {
+                case .wait(let nextDelay):
+                    scheduleStep(after: nextDelay)
+                case .finish:
+                    self.postRollWorkItem = nil
+                    workItem.perform()
+                }
+            }
+            self.postRollWorkItem = step
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: step)
+        }
+
+        let initialSpeaking = AudioRecorder.shared.speechGateState() != .silent || AudioRecorder.shared.averagePower() > -46.0
+        switch policy.decision(elapsed: 0, isSpeaking: initialSpeaking) {
+        case .wait(let delay):
+            scheduleStep(after: delay)
+        case .finish:
+            self.postRollWorkItem = workItem
+            DispatchQueue.main.async(execute: workItem)
+        }
     }
 
     private func handleTranscriptionResult(result: TranscriptionResult, config: AppConfig, generation: UInt64, attempt: UInt64) {
@@ -1373,9 +1546,12 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             // Başarı sesi çalınmaz: tuş bırakılınca "mikrofon kapandı" sesi zaten
             // çalıyor; hızlanan akışta ikisi art arda "çift ses" gibi duyuluyordu.
             HapticManager.shared.playSuccess()
-            // Başarı bildirimi gösterilmez: metnin ekrana gelmesi yeterli geri
-            // bildirimdir. Ada hemen çentiğe geri çekilir.
-            RecordingHUD.shared.dismiss(animated: true)
+            // Compact/Hex Minimal modunda tamamlanma dalgası göster; Pill/Notch doğrudan kapanır.
+            if HUDPlacement.resolve(ConfigManager.shared.config.hud_style) == .compact {
+                RecordingHUD.shared.showSuccess(text: "Yapıştırıldı", autoDismissDelay: 0.32)
+            } else {
+                RecordingHUD.shared.dismiss(animated: true)
+            }
             setStatus(title: "✅", menuText: "Durum: Yapıştırıldı (\(String(format: "%.2f", latency))s)", revertAfter: 1.5)
         case .unverifiable, .unverifiableClipboardChanged:
             Self.presentUnverifiedDelivery(

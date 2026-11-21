@@ -9,6 +9,7 @@ public class KeyListener {
     var onShortcutStart: ((TimeInterval, DictationShortcutKind) -> Void)?
     public var onStop: ((Double) -> Void)?
     public var onCancel: (() -> Void)?
+    public var onRepasteLast: (() -> Void)?
     public var isBusy: (() -> Bool)?
 
     private var eventTap: CFMachPort?
@@ -19,6 +20,7 @@ public class KeyListener {
     private var shortcutState = DictationShortcutState()
 
     private let lock = NSLock()
+    private var cachedVKeyCode: Int64?
     private var targetKeyCode: Int64 {
         return Int64(ConfigManager.shared.config.trigger_key)
     }
@@ -181,15 +183,67 @@ public class KeyListener {
         }
     }
 
+    private func resolveVKeyCode() -> Int64 {
+        lock.lock()
+        let cached = cachedVKeyCode
+        lock.unlock()
+        if let cached { return cached }
+        let resolved: Int64 = Thread.isMainThread
+            ? Int64(TextInjector.keyCodeForCharacter("v", fallback: 0x09))
+            : Int64(DispatchQueue.main.sync { TextInjector.keyCodeForCharacter("v", fallback: 0x09) })
+        lock.lock()
+        cachedVKeyCode = resolved
+        lock.unlock()
+        return resolved
+    }
+
     private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
+            let hidFlags = CGEventSource.flagsState(.hidSystemState)
+            let timestamp = ProcessInfo.processInfo.systemUptime
+            lock.lock()
+            let stuckKey = shortcutState.pressedKeyCode
+            let recoveryAction: DictationShortcutAction?
+            if let stuckKey,
+               Self.isModifier(keyCode: stuckKey),
+               !Self.isModifierPressed(keyCode: stuckKey, flags: hidFlags, currentKeyDown: true) {
+                recoveryAction = shortcutState.release(keyCode: stuckKey, time: timestamp)
+            } else {
+                recoveryAction = nil
+            }
+            lock.unlock()
+            if let recoveryAction {
+                dispatchAction(recoveryAction, triggeredAt: timestamp)
+            }
             return nil
         }
 
+        // Uygulamanın kendi sentetik yapıştırma / Enter olaylarını asla dikte veya
+        // kısayol iptali olarak işleme alma.
+        if event.getIntegerValueField(.eventSourceUserData) == TextInjector.syntheticEventUserData {
+            return Unmanaged.passRetained(event)
+        }
+
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+
+        // 0. Option + Shift + V: Son dikteyi yeniden yapıştır (Hex ⌥⇧V akışı)
+        if type == .keyDown,
+           event.getIntegerValueField(.keyboardEventAutorepeat) == 0,
+           ConfigManager.shared.config.enable_repaste_shortcut,
+           !(isBusy?() ?? false) {
+            let flags = event.flags
+            let hasOptionShift = flags.contains(.maskAlternate) && flags.contains(.maskShift)
+            let hasCmdOrCtrl = flags.contains(.maskCommand) || flags.contains(.maskControl)
+            if hasOptionShift && !hasCmdOrCtrl && keyCode == resolveVKeyCode() {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onRepasteLast?()
+                }
+                return nil
+            }
+        }
 
         // 1. Esc ile İptal (Escape tuşu = 53)
         if type == .keyDown && keyCode == escKeyCode {

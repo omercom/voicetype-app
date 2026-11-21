@@ -60,7 +60,9 @@ struct ClipboardPasteTransaction {
         }
         guard !env.isCancelled() else { return cancelBeforeSending() }
         guard env.ownsClipboard() else { return .failed(reason: "Pano başka bir işlem tarafından değiştirildi") }
-        guard env.sendPaste() else { return .failed(reason: "Yapıştırma tuşu gönderilemedi") }
+        guard env.sendPaste() else {
+            return env.isCancelled() ? cancelBeforeSending() : .failed(reason: "Yapıştırma tuşu gönderilemedi")
+        }
         onAttempted()
 
         // An unreadable editor gives no delivery acknowledgement. Keep the text

@@ -17,9 +17,13 @@ public enum HUDPlacement: String {
     case pill
     /// MacBook çentiğine yapışan Dynamic Island.
     case notch
+    /// Hex tarzı saf Metal Dot Scope mini kapsül (metinsiz odak modu).
+    case compact
 
     public static func resolve(_ raw: String) -> HUDPlacement {
-        HUDPlacement(rawValue: raw.lowercased()) ?? .pill
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "hex" { return .compact }
+        return HUDPlacement(rawValue: normalized) ?? .pill
     }
 }
 
@@ -252,16 +256,24 @@ public class RecordingHUD: NSObject {
     private var visualEffectView: NSVisualEffectView!
     private var darkTintView: NSBox!
     private var statusLabel: NSTextField!
+    private var elapsedTimerLabel: NSTextField!
     private var microphoneFeedbackBadge: NSView!
     private var microphoneFeedbackImageView: NSImageView!
 
     // Göstergeler (Ultra Minimal & Orantılı)
+    private var indicatorArea: NSView!
     private var pulsingDot: NSView!
     private var waveformContainer: NSView!
     private var waveformBars: [NSView] = []
+    /// Hex GPU/CoreGraphics Dot Scope görselleştiricisi (pill + compact modları).
+    private var dotScopeView: DotScopeView!
     /// Çentik moduna özel ekolayzır (alt kapsülünkinden bağımsız).
     private var notchMeterContainer: NSView!
     private var notchWave: NotchWaveView!
+    /// Çentik sağ kanat göstergesi (sade durum etiketi / süre + durum noktası LED'i).
+    private var notchWingDot: NSView!
+    private var notchWingStatusLabel: NSTextField!
+    private var notchStatusFadeMask: CAGradientLayer?
     /// Çentik moduna özel arka plan (gerçek çentik formu: konkav üst + konveks alt).
     private var notchShapeView: NotchShapeView!
     private var spinner: NSProgressIndicator!
@@ -274,7 +286,13 @@ public class RecordingHUD: NSObject {
     private let visibilityTransition = HUDTransition()
     private var reduceMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     private var meterTimer: Timer?
+    private var hudAnimationTimer: Timer?
     private var dismissTimer: Timer?
+    private var recordingSessionStartedAt: TimeInterval = 0
+    private var isDemoPreviewActive = false
+    private var demoPreviewStartedAt: TimeInterval = 0
+    private var demoPreviewGeneration: UInt64 = 0
+    private var currentAccentMode: DotScopeAccentMode = .normal
     private var smoothedAudioLevel: CGFloat = 0.0
     /// Çentik ekolayzırı için ayrı, zaman-tabanlı yumuşatılmış seviye.
     /// Referansın `AudioLevelMeter` davranışını birebir uygular; kapsülün
@@ -284,15 +302,40 @@ public class RecordingHUD: NSObject {
     private var isAudioReactiveSpeaking = false
     private var microphoneFeedbackTracker = MicrophoneFeedbackTracker()
     private(set) var currentRecordingLayout: RecordingHUDLayout?
+    private var currentNotchAnchor: NotchAnchor?
     var lowInputAnnouncementHandler: (String) -> Void = { _ in }
 
     // Orantılı Minimal Kapsül Ölçüleri
     private let hudWidth: CGFloat = 152.0
     private let hudHeight: CGFloat = 34.0
+    private let compactPanelSize = CGSize(width: 132.0, height: 38.0)
 
     /// Gösterge yerleşimi. Config'ten okunur; varsayılan mevcut kapsül.
     private var placement: HUDPlacement {
         HUDPlacement.resolve(ConfigManager.shared.config.hud_style)
+    }
+
+    private var activeProcessingStyle: DotScopeProcessingStyle {
+        DotScopeProcessingStyle.resolve(ConfigManager.shared.config.hud_processing_effect)
+    }
+
+    private static func pillBadgeTuning(processingStyle: DotScopeProcessingStyle = .flow) -> DotScopeTuning {
+        DotScopeTuning(
+            columns: 15,
+            rows: 7,
+            spacing: 2.1,
+            recordingWidth: 34.0,
+            processingWidth: 34.0,
+            height: 22.0,
+            historySpeed: 95.0,
+            processingStyle: processingStyle
+        )
+    }
+
+    private static func compactTuning(processingStyle: DotScopeProcessingStyle = .flow) -> DotScopeTuning {
+        var tuning = DotScopeTuning.compactDefault
+        tuning.processingStyle = processingStyle
+        return tuning
     }
 
     /// Çentik modunda yazı boyutu TAMAMEN OTOMATİKTİR (bkz. NotchTypography):
@@ -364,22 +407,23 @@ public class RecordingHUD: NSObject {
         visualEffectView.wantsLayer = true
         visualEffectView.layer?.cornerRadius = cornerRadius
         visualEffectView.layer?.masksToBounds = true
-        visualEffectView.layer?.borderWidth = 0.5
-        visualEffectView.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        visualEffectView.layer?.borderWidth = 0.6
+        visualEffectView.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
         contentView.addSubview(visualEffectView)
 
-        // 2. Yarı saydam koyu katman (Yüksek kontrast & Dynamic Island hissi)
+        // 2. Yarı saydam koyu obsidyen katman (Hex renk uyumu & yüksek kontrast)
         darkTintView = NSBox(frame: contentView.bounds)
         darkTintView.autoresizingMask = [.width, .height]
         darkTintView.boxType = .custom
         darkTintView.borderWidth = 0
         darkTintView.cornerRadius = cornerRadius
-        darkTintView.fillColor = NSColor.black.withAlphaComponent(0.38)
+        darkTintView.fillColor = NSColor(calibratedRed: 17.0 / 255.0, green: 17.0 / 255.0, blue: 20.0 / 255.0, alpha: 0.84)
         contentView.addSubview(darkTintView)
 
-        // 3. Sol Gösterge Alanı: Kırmızı Nokta + 4'lü Dalga Çubukları
-        let indicatorArea = NSView(frame: NSRect(x: 12, y: (hudHeight - 14) / 2.0, width: 31, height: 14))
+        // 3. Sol Gösterge Alanı (uyumluluk katmanı + katman animasyonu)
+        indicatorArea = NSView(frame: NSRect(x: 12, y: (hudHeight - 14) / 2.0, width: 31, height: 14))
         indicatorArea.wantsLayer = true
+        indicatorArea.alphaValue = 0.0
         contentView.addSubview(indicatorArea)
 
         // 3a. Yanıp Sönen Kırmızı Kayıt Noktası (Pulsing Red Dot - 6px)
@@ -389,7 +433,7 @@ public class RecordingHUD: NSObject {
         pulsingDot.layer?.backgroundColor = NSColor(red: 1.0, green: 0.23, blue: 0.20, alpha: 1.0).cgColor
         indicatorArea.addSubview(pulsingDot)
 
-        // 3b. Dinamik 4'lü Ses Dalga Çubukları (Micro Waveform Bars - Kırmızı nokta ile arası 10px ferah boşluk)
+        // 3b. Dinamik 4'lü Ses Dalga Çubukları
         waveformContainer = NSView(frame: NSRect(x: 16, y: 0, width: 14, height: 14))
         waveformContainer.wantsLayer = true
         indicatorArea.addSubview(waveformContainer)
@@ -439,6 +483,14 @@ public class RecordingHUD: NSObject {
         notchWave = NotchWaveView(frame: NSRect(origin: .zero, size: NotchWaveView.size))
         notchMeterContainer.addSubview(notchWave)
 
+        // 3e. Hex Dot Scope Metal/CoreGraphics Görselleştiricisi (kapsül & kompakt mod)
+        dotScopeView = DotScopeView(
+            frame: NSRect(x: 8, y: (hudHeight - 22.0) / 2.0, width: 34.0, height: 22.0),
+            tuning: Self.pillBadgeTuning(),
+            dotsOnly: true
+        )
+        contentView.addSubview(dotScopeView)
+
         // 4. Spinner (Deşifre Ediliyor Durumu - 14x14)
         spinner = NSProgressIndicator(frame: NSRect(x: 14, y: (hudHeight - 14) / 2.0, width: 14, height: 14))
         spinner.style = .spinning
@@ -482,6 +534,32 @@ public class RecordingHUD: NSObject {
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.alignment = .left
         contentView.addSubview(statusLabel)
+
+        // 6b. Uzun kayıtlarda geçen süre sayacı (5 sn sonrası belirir)
+        elapsedTimerLabel = NSTextField(labelWithString: "")
+        elapsedTimerLabel.frame = NSRect(x: hudWidth - 44, y: (hudHeight - 14) / 2.0, width: 34, height: 14)
+        elapsedTimerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+        elapsedTimerLabel.textColor = NSColor(white: 0.72, alpha: 1.0)
+        elapsedTimerLabel.alignment = .right
+        elapsedTimerLabel.isHidden = true
+        contentView.addSubview(elapsedTimerLabel)
+
+        // 6c. Çentik sağ kanat bileşenleri (notchShapeView üzerinde eklenir)
+        notchWingDot = NSView(frame: NSRect(x: 0, y: 0, width: 6, height: 6))
+        notchWingDot.wantsLayer = true
+        notchWingDot.layer?.cornerRadius = 3.0
+        notchWingDot.isHidden = true
+        contentView.addSubview(notchWingDot)
+
+        notchWingStatusLabel = NSTextField(labelWithString: "")
+        notchWingStatusLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        notchWingStatusLabel.textColor = NSColor(calibratedWhite: 0.88, alpha: 1.0)
+        notchWingStatusLabel.alignment = .right
+        notchWingStatusLabel.lineBreakMode = .byTruncatingTail
+        notchWingStatusLabel.maximumNumberOfLines = 1
+        notchWingStatusLabel.usesSingleLineMode = true
+        notchWingStatusLabel.isHidden = true
+        contentView.addSubview(notchWingStatusLabel)
 
         microphoneFeedbackBadge = NSView(frame: NSRect(x: 0, y: 5, width: 24, height: 24))
         microphoneFeedbackBadge.wantsLayer = true
@@ -577,6 +655,235 @@ public class RecordingHUD: NSObject {
         )
     }
 
+    public func setTranslationMode(_ enabled: Bool) {
+        executeOnMainThread { [weak self] in
+            guard let self else { return }
+            self.currentAccentMode = enabled ? .translation : .normal
+            self.syncDotScopeStyling()
+        }
+    }
+
+    /// Ayarlardan veya komutla canlı Hex Dot Scope animasyon önizlemesini çalıştırır.
+    public func runDemoPreview() {
+        executeOnMainThread { [weak self] in
+            guard let self else { return }
+            self.demoPreviewGeneration &+= 1
+            let gen = self.demoPreviewGeneration
+            self.isDemoPreviewActive = true
+            self.demoPreviewStartedAt = ProcessInfo.processInfo.systemUptime
+            self.startRecordingHUD(cancelDemo: false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.85) { [weak self] in
+                guard let self, self.isDemoPreviewActive, self.demoPreviewGeneration == gen else { return }
+                self.startTranscribingHUD(cancelDemo: false)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.05) { [weak self] in
+                guard let self, self.isDemoPreviewActive, self.demoPreviewGeneration == gen else { return }
+                self.showSuccess(text: "Önizleme tamamlandı", autoDismissDelay: 0.7) { [weak self] in
+                    guard let self, self.demoPreviewGeneration == gen else { return }
+                    self.isDemoPreviewActive = false
+                }
+            }
+        }
+    }
+
+    private func cancelDemoPreviewIfNeeded() {
+        guard isDemoPreviewActive else { return }
+        isDemoPreviewActive = false
+        demoPreviewGeneration &+= 1
+    }
+
+    private var isCompactMessageState: Bool {
+        switch currentState {
+        case .notice, .error:
+            return true
+        case .idle, .preparing, .recording, .transcribing, .success:
+            return false
+        }
+    }
+
+    private func dotScopeStageForCurrentState() -> DotScopeStage {
+        switch currentState {
+        case .preparing:
+            return .preparing
+        case .recording, .idle:
+            return .recording
+        case .transcribing:
+            return .processing
+        case .success:
+            return .done
+        case .notice:
+            return .notice
+        case .error:
+            return .failed
+        }
+    }
+
+    private func syncDotScopeStyling() {
+        let usesFullHexPill = placement == .compact && !isCompactMessageState
+        let tuning = usesFullHexPill
+            ? Self.compactTuning(processingStyle: activeProcessingStyle)
+            : Self.pillBadgeTuning(processingStyle: activeProcessingStyle)
+        dotScopeView.configure(
+            tuning: tuning,
+            processingStyle: activeProcessingStyle,
+            accentMode: currentAccentMode,
+            dotsOnly: !usesFullHexPill
+        )
+        dotScopeView.setStage(dotScopeStageForCurrentState())
+        notchWave.configure(processingStyle: activeProcessingStyle, accentMode: currentAccentMode)
+    }
+
+    private func updateReactivePillBorder() {
+        let baseAlpha: CGFloat
+        let borderColor: NSColor
+        switch currentState {
+        case .recording:
+            let levelGlow = min(1.0, max(0.0, notchSmoothedLevel))
+            baseAlpha = 0.16 + levelGlow * 0.24
+            borderColor = currentAccentMode == .translation
+                ? NSColor(calibratedRed: 0.45, green: 0.78, blue: 1.0, alpha: baseAlpha)
+                : NSColor(calibratedRed: 0.96, green: 0.86, blue: 0.65, alpha: baseAlpha)
+        case .transcribing:
+            borderColor = currentAccentMode == .translation
+                ? NSColor(calibratedRed: 0.56, green: 0.68, blue: 1.0, alpha: 0.34)
+                : NSColor(calibratedRed: 0.36, green: 0.70, blue: 1.0, alpha: 0.34)
+        case .success:
+            borderColor = NSColor.systemGreen.withAlphaComponent(0.38)
+        case .error:
+            borderColor = NSColor.systemOrange.withAlphaComponent(0.42)
+        case .notice:
+            borderColor = NSColor.systemYellow.withAlphaComponent(0.36)
+        case .preparing, .idle:
+            borderColor = NSColor.white.withAlphaComponent(0.18)
+        }
+        visualEffectView.layer?.borderColor = borderColor.cgColor
+    }
+
+    private func updateCompactPosition(screen: NSScreen, animated: Bool) {
+        let screenFrame = screen.visibleFrame
+        let targetW = compactPanelSize.width
+        let targetH = compactPanelSize.height
+        let x = round(screenFrame.midX - (targetW / 2.0))
+        let y = round(screenFrame.minY + 64.0)
+        let target = NSRect(x: x, y: y, width: targetW, height: targetH)
+
+        visualEffectView.isHidden = true
+        darkTintView.isHidden = true
+        indicatorArea.isHidden = true
+        notchMeterContainer.isHidden = true
+        notchShapeView.isHidden = true
+        notchWingDot.isHidden = true
+        notchWingStatusLabel.isHidden = true
+        statusLabel.isHidden = true
+        statusLabel.layer?.mask = nil
+        elapsedTimerLabel.isHidden = true
+        microphoneFeedbackBadge.isHidden = true
+        spinner.isHidden = true
+        checkmarkLabel.isHidden = true
+        errorIconLabel.isHidden = true
+        noticeIconLabel.isHidden = true
+
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.contentView?.wantsLayer = true
+        panel.contentView?.layer?.cornerRadius = targetH / 2.0
+        panel.contentView?.layer?.masksToBounds = false
+
+        frameTransition.cancel()
+        panel.setFrame(target, display: true)
+        dotScopeView.isHidden = false
+        dotScopeView.frame = NSRect(origin: .zero, size: target.size)
+        syncDotScopeStyling()
+        dotScopeView.renderNow()
+        _ = animated
+    }
+
+    private func startHudAnimationTimer() {
+        hudAnimationTimer?.invalidate()
+        let interval: TimeInterval = reduceMotion ? (1.0 / 15.0) : (1.0 / 60.0)
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            self?.tickHudVisuals()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        hudAnimationTimer = timer
+        tickHudVisuals()
+    }
+
+    private func stopHudAnimationTimer() {
+        hudAnimationTimer?.invalidate()
+        hudAnimationTimer = nil
+    }
+
+    private func tickHudVisuals() {
+        if isDemoPreviewActive {
+            let elapsed = Float(max(0.0, ProcessInfo.processInfo.systemUptime - demoPreviewStartedAt))
+            let demoDB = DotScopeSimulation.demoLoudness(at: elapsed)
+            dotScopeView.pushAudioLevel(dBFS: demoDB)
+            let demoNorm = max(0, min(1, CGFloat((demoDB + 52.0) / 36.0)))
+            notchSmoothedLevel = demoNorm
+            let mode: NotchWaveView.Mode = currentState == .transcribing ? .processing : .listening
+            if placement == .notch {
+                notchWave.render(level: demoNorm, mode: mode, animated: !reduceMotion)
+                notchShapeView.rimGlowColor = currentState == .transcribing
+                    ? NSColor(calibratedRed: 0.36, green: 0.70, blue: 1.0, alpha: 1.0)
+                    : NSColor(calibratedRed: 0.96, green: 0.86, blue: 0.65, alpha: 1.0)
+                notchShapeView.rimGlowIntensity = 0.20 + 0.75 * demoNorm
+            }
+        }
+        if placement == .notch && currentState == .preparing {
+            notchWave.render(level: 0, mode: .preparing, animated: !reduceMotion)
+        }
+        updateElapsedTimerDisplay()
+        updateReactivePillBorder()
+        if !dotScopeView.isHidden {
+            dotScopeView.step(dt: nil, visible: panel.isVisible || isDemoPreviewActive, reduceMotion: reduceMotion)
+        }
+    }
+
+    private func updateElapsedTimerDisplay() {
+        guard currentState == .recording,
+              recordingSessionStartedAt > 0,
+              !(placement == .compact && !isCompactMessageState) else {
+            if !elapsedTimerLabel.isHidden {
+                elapsedTimerLabel.isHidden = true
+            }
+            return
+        }
+        let elapsed = max(0, ProcessInfo.processInfo.systemUptime - recordingSessionStartedAt)
+        guard elapsed >= 5.0 else {
+            if !elapsedTimerLabel.isHidden {
+                elapsedTimerLabel.isHidden = true
+            }
+            return
+        }
+        let totalSeconds = Int(elapsed)
+        let formatted = String(format: "%d:%02d", totalSeconds / 60, totalSeconds % 60)
+        if elapsedTimerLabel.stringValue != formatted {
+            elapsedTimerLabel.stringValue = formatted
+        }
+        if placement == .notch {
+            if let anchor = currentNotchAnchor ?? targetScreen().map(Self.anchor(for:)), anchor.hasNotch {
+                if !elapsedTimerLabel.isHidden { elapsedTimerLabel.isHidden = true }
+                notchWingStatusLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
+                notchWingStatusLabel.stringValue = formatted
+            } else if elapsedTimerLabel.isHidden {
+                elapsedTimerLabel.isHidden = false
+                if let screen = targetScreen() {
+                    let anchor = Self.anchor(for: screen)
+                    layoutNotchContent(for: notchIslandFrame(anchor: anchor).size, anchor: anchor)
+                }
+            }
+            return
+        }
+        if elapsedTimerLabel.isHidden {
+            elapsedTimerLabel.isHidden = false
+            if placement == .pill {
+                let frame = panel.frame
+                elapsedTimerLabel.frame = NSRect(x: max(50, frame.width - 42), y: (hudHeight - 14) / 2.0, width: 32, height: 14)
+            }
+        }
+    }
+
     private func updatePosition(width: CGFloat? = nil, layout: RecordingHUDLayout? = nil, animated: Bool = true) {
         precondition(Thread.isMainThread)
         guard let screen = targetScreen() else { return }
@@ -586,13 +893,38 @@ public class RecordingHUD: NSObject {
             return
         }
 
+        if placement == .compact && !isCompactMessageState {
+            updateCompactPosition(screen: screen, animated: animated)
+            return
+        }
+
         self.visualEffectView.isHidden = false
         self.darkTintView.isHidden = false
+        self.indicatorArea.isHidden = false
+        self.statusLabel.isHidden = false
+        self.statusLabel.layer?.mask = nil
         self.panel.backgroundColor = .clear
         self.panel.hasShadow = true
-        // Kapsül modunda çentiğe özel ekolayzır ve ada formu gizlenir.
+        // Kapsül modunda çentiğe özel ekolayzır, kanat ve ada formu gizlenir.
         self.notchMeterContainer.isHidden = true
         self.notchShapeView.isHidden = true
+        self.notchWingDot.isHidden = true
+        self.notchWingStatusLabel.isHidden = true
+
+        let showDotScopeBadge: Bool
+        switch currentState {
+        case .preparing, .recording, .transcribing:
+            showDotScopeBadge = true
+        case .idle, .success, .notice, .error:
+            showDotScopeBadge = false
+        }
+        self.dotScopeView.isHidden = !showDotScopeBadge
+        if showDotScopeBadge {
+            self.dotScopeView.frame = NSRect(x: 8, y: (hudHeight - 22.0) / 2.0, width: 34.0, height: 22.0)
+            self.syncDotScopeStyling()
+        }
+        self.updateReactivePillBorder()
+
         // Çentik modu paylaşılan statusLabel'ı 28pt yapar. Burada geri
         // alınmazsa kapsülün yazısı mod değiştirdikten sonra kocaman kalır
         // (kullanıcı bildirimi: "alt kapsül bozuldu, yazı çok büyük oldu").
@@ -648,7 +980,13 @@ public class RecordingHUD: NSObject {
             if layout?.warningFrame != nil {
                 status.size.width = min(status.width, max(0, badge.minX - 8 - status.minX))
             }
-            status.size.width = min(status.width, max(0, frame.width - 10 - status.minX))
+            if !self.elapsedTimerLabel.isHidden {
+                let timerX = max(50, frame.width - 42)
+                self.elapsedTimerLabel.frame = NSRect(x: timerX, y: (self.hudHeight - 14) / 2.0, width: 32, height: 14)
+                status.size.width = min(status.width, max(0, timerX - 6 - status.minX))
+            } else {
+                status.size.width = min(status.width, max(0, frame.width - 10 - status.minX))
+            }
             self.statusLabel.frame = status
             self.microphoneFeedbackBadge.frame = badge
             self.microphoneFeedbackBadge.isHidden = self.microphoneFeedbackState == .hidden || badge.width < 24
@@ -670,28 +1008,65 @@ public class RecordingHUD: NSObject {
     //                           çentikten büyür ve kapanırken çentiğe geri çekilir.
 
     private enum NotchMetrics {
-        static let sideInset: CGFloat = 16
+        static let earInset: CGFloat = NotchShapePath.topCornerRadius
+        static let wingInnerPadding: CGFloat = 12
+        static let trayHorizontalInset: CGFloat = 30
+        static let wingSlotWidth: CGFloat = 88
+        static let compactMinHeight: CGFloat = 38
+        static let trayHeight: CGFloat = 38
+        static let nonNotchHeight: CGFloat = 44
         static let rowHeight: CGFloat = 24
         static let bottomInset: CGFloat = 10
-        static let iconSlot: CGFloat = 20
-        static let meterSlot: CGFloat = 36
-        static let iconTextGap: CGFloat = 8
-        static let fontSize: CGFloat = 14
-        static let minimumWidth: CGFloat = 300
-        static let maximumWidth: CGFloat = 360
-        static let wingAllowance: CGFloat = 100
-        static let openDuration: TimeInterval = 0.32
-        static let closeDuration: TimeInterval = 0.22
+        static let fontSize: CGFloat = 13.5
+        static let openDuration: TimeInterval = 0.28
+        static let morphDuration: TimeInterval = 0.24
+        static let closeDuration: TimeInterval = 0.20
     }
 
     private var isNotchClosing = false
 
+    private var hasNotchLiveInterimText: Bool {
+        guard currentState == .recording || currentState == .transcribing else { return false }
+        let trimmed = statusLabel.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return trimmed != "Dinliyor..." && trimmed != "Yazılıyor..." && trimmed != "Hazırlanıyor…"
+    }
+
+    /// Çentik adası yalnızca gerektiğinde (canlı ara metin, düşük mikrofon uyarısı, hata veya bilgi)
+    /// kameranın altına doğru 2. katmana büyür; aksi halde kanatlarda kompakt kalır.
+    private var notchNeedsExpandedTray: Bool {
+        switch currentState {
+        case .error, .notice:
+            return true
+        case .recording:
+            return microphoneFeedbackState != .hidden || hasNotchLiveInterimText
+        case .transcribing:
+            return hasNotchLiveInterimText
+        case .idle, .preparing, .success:
+            return false
+        }
+    }
+
     private func notchIslandFrame(anchor: NotchAnchor) -> CGRect {
-        let width = min(
-            anchor.screenWidth - 32,
-            min(NotchMetrics.maximumWidth, max(NotchMetrics.minimumWidth, anchor.cameraWidth + NotchMetrics.wingAllowance))
-        )
-        let height = anchor.headerHeight + NotchMetrics.rowHeight + NotchMetrics.bottomInset
+        let maxAllowedWidth = max(300, anchor.screenWidth - 48)
+        let width: CGFloat
+        let height: CGFloat
+
+        if anchor.hasNotch {
+            let topBarHeight = max(anchor.headerHeight, NotchMetrics.compactMinHeight)
+            if notchNeedsExpandedTray {
+                width = min(maxAllowedWidth, min(460, max(380, anchor.cameraWidth + 208)))
+                height = topBarHeight + NotchMetrics.trayHeight
+            } else {
+                let wingWidth = anchor.cameraWidth + 2 * (NotchMetrics.earInset + NotchMetrics.wingSlotWidth)
+                width = min(maxAllowedWidth, min(440, max(356, wingWidth)))
+                height = topBarHeight
+            }
+        } else {
+            width = min(maxAllowedWidth, notchNeedsExpandedTray ? 400 : 320)
+            height = NotchMetrics.nonNotchHeight
+        }
+
         return CGRect(
             x: round(anchor.centerX - width / 2),
             y: anchor.top - height,
@@ -703,22 +1078,23 @@ public class RecordingHUD: NSObject {
     /// Adanın kapalı hali: tam kamera çentiği kadar siyah alan. Siyah çentikle
     /// birleştiği için açılış/kapanış kesintisiz görünür.
     private func notchCollapsedFrame(anchor: NotchAnchor, island: CGRect) -> CGRect {
-        let width = anchor.cameraWidth > 0 ? anchor.cameraWidth : island.width * 0.5
+        let width = anchor.cameraWidth > 0 ? anchor.cameraWidth : max(140, island.width * 0.45)
+        let collapsedHeight = anchor.hasNotch ? anchor.headerHeight : 28
         return CGRect(
             x: round(anchor.centerX - width / 2),
-            y: anchor.top - anchor.headerHeight,
+            y: anchor.top - collapsedHeight,
             width: width,
-            height: anchor.headerHeight
+            height: collapsedHeight
         )
     }
 
     private func updateNotchPosition(screen: NSScreen, animated: Bool) {
         let anchor = Self.anchor(for: screen)
+        currentNotchAnchor = anchor
         let island = notchIslandFrame(anchor: anchor)
 
         // Form `notchShapeView` tarafından çizilir. Pencere gölgesi kapalı:
-        // saydam pencerede gölge siyah formun çevresine gri bir kontur çizer
-        // ve pencere her boyutlandığında yeniden hesaplanıp titriyordu.
+        // saydam pencerede gölge siyah formun çevresine gri bir kontur çizer.
         visualEffectView.isHidden = true
         darkTintView.isHidden = true
         panel.backgroundColor = .clear
@@ -730,69 +1106,362 @@ public class RecordingHUD: NSObject {
         panel.contentView?.layer?.cornerRadius = 0
         panel.contentView?.layer?.masksToBounds = false
 
-        // Görünürken yeni bir durum gelirse (ör. kapanış sırasında yeni kayıt)
-        // süren açılış/kapanışı iptal edip adayı doğrudan tam boyuta getir.
-        let isOpening = frameTransition.isActive && !isNotchClosing
-        if !isOpening {
+        // Panel henüz görünür değilken tam boyutla `display: true` çizmemek 1 karelik siyah flaşı önler.
+        if !panel.isVisible {
             frameTransition.cancel()
             isNotchClosing = false
-            if panel.frame != island {
+            if reduceMotion {
+                panel.setFrame(island, display: false)
+                layoutNotchContent(for: island.size, anchor: anchor)
+                setNotchContentAlpha(1)
+            } else {
+                let collapsed = notchCollapsedFrame(anchor: anchor, island: island)
+                panel.setFrame(collapsed, display: false)
+                layoutNotchContent(for: collapsed.size, anchor: anchor)
+                setNotchContentAlpha(0)
+            }
+            return
+        }
+
+        let isOpening = frameTransition.isActive && !isNotchClosing
+        if isOpening {
+            layoutNotchContent(for: panel.frame.size, anchor: anchor)
+            return
+        }
+
+        if panel.frame != island {
+            isNotchClosing = false
+            if animated && !reduceMotion {
+                let startFrame = panel.frame
+                frameTransition.start(duration: NotchMetrics.morphDuration, update: { [weak self] progress in
+                    guard let self else { return }
+                    let p = CGFloat(IslandTween.easeOut(progress))
+                    let next = Self.interpolate(startFrame, island, p)
+                    self.panel.setFrame(next, display: true)
+                    self.layoutNotchContent(for: next.size, anchor: anchor)
+                    self.setNotchContentAlpha(1)
+                }, completion: { [weak self] in
+                    guard let self else { return }
+                    self.panel.setFrame(island, display: true)
+                    self.layoutNotchContent(for: island.size, anchor: anchor)
+                    self.setNotchContentAlpha(1)
+                })
+                return
+            } else {
+                frameTransition.cancel()
                 panel.setFrame(island, display: true)
             }
         }
-        layoutNotchContent(island: island.size)
-        if !isOpening {
-            setNotchContentAlpha(1)
-        }
+
+        layoutNotchContent(for: island.size, anchor: anchor)
+        setNotchContentAlpha(1)
     }
 
-    private func layoutNotchContent(island: CGSize) {
-        // Simge yuvası dalga genişliğindedir; ✓ / ! simgeleri içinde ortalanır,
-        // böylece metin hangi durumda olursa olsun aynı hizada kalır.
-        let slotY = NotchMetrics.bottomInset + (NotchMetrics.rowHeight - NotchMetrics.iconSlot) / 2
-        let slot = NSRect(x: NotchMetrics.sideInset, y: slotY, width: NotchMetrics.meterSlot, height: NotchMetrics.iconSlot)
-
-        // Pill moduna ait öğeler çentikte hiç görünmez.
+    private func layoutNotchContent(for island: CGSize, anchor: NotchAnchor) {
+        // Pill ve Compact moduna ait öğeler çentikte hiç görünmez.
         pulsingDot.isHidden = true
         microphoneFeedbackBadge.isHidden = true
         waveformContainer.isHidden = true
+        dotScopeView.isHidden = true
+        spinner.stopAnimation(nil)
+        spinner.isHidden = true
+        elapsedTimerLabel.isHidden = true
+        syncDotScopeStyling()
 
-        notchMeterContainer.setFrameOrigin(slot.origin)
-        spinner.frame = NSRect(x: slot.midX - 8, y: slot.midY - 8, width: 16, height: 16)
-        for icon in [checkmarkLabel, errorIconLabel, noticeIconLabel] {
-            icon?.frame = NSRect(x: slot.minX, y: slot.minY + 1, width: slot.width, height: 18)
-        }
-
+        let isPreparing = currentState == .preparing
         let isRecording = currentState == .recording
         let isTranscribing = currentState == .transcribing
-        let isPreparing = currentState == .preparing
-        // Yazılırken de ekolayzır görünür kalır ve dalga gibi akar: kullanıcı
-        // "bir şey oluyor" hissini spinner yerine aynı görsel dilden alır.
-        notchMeterContainer.isHidden = !(isRecording || isTranscribing)
-        spinner.isHidden = !isPreparing
-        if isPreparing { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
-        if isTranscribing { startProcessingAnimation() } else { stopProcessingAnimation() }
+        let showWave = isPreparing || isRecording || isTranscribing
+
+        notchMeterContainer.isHidden = !showWave
+        if isTranscribing {
+            startProcessingAnimation()
+        } else {
+            stopProcessingAnimation()
+        }
+
         if case .success = currentState { checkmarkLabel.isHidden = false } else { checkmarkLabel.isHidden = true }
         if case .error = currentState { errorIconLabel.isHidden = false } else { errorIconLabel.isHidden = true }
         if case .notice = currentState { noticeIconLabel.isHidden = false } else { noticeIconLabel.isHidden = true }
 
-        let font = NSFont.systemFont(ofSize: NotchMetrics.fontSize, weight: .medium)
-        let textHeight = ceil(font.ascender - font.descender + font.leading)
-        let textX = slot.maxX + NotchMetrics.iconTextGap
+        // Kenar ışığı rengi ve yoğunluğu duruma göre ayarlanır.
+        if isTranscribing {
+            notchShapeView.rimGlowColor = currentAccentMode == .translation
+                ? NSColor(calibratedRed: 0.56, green: 0.68, blue: 1.0, alpha: 1.0)
+                : NSColor(calibratedRed: 0.36, green: 0.70, blue: 1.0, alpha: 1.0)
+            notchShapeView.rimGlowIntensity = 0.42
+        } else if case .success = currentState {
+            notchShapeView.rimGlowColor = .systemGreen
+            notchShapeView.rimGlowIntensity = 0.55
+        } else if case .error = currentState {
+            notchShapeView.rimGlowColor = .systemOrange
+            notchShapeView.rimGlowIntensity = 0.58
+        } else if case .notice = currentState {
+            notchShapeView.rimGlowColor = .systemYellow
+            notchShapeView.rimGlowIntensity = 0.42
+        } else if isPreparing || currentState == .idle {
+            notchShapeView.rimGlowIntensity = 0.0
+        }
+
+        guard anchor.hasNotch else {
+            layoutNonNotchedIsland(size: island, showWave: showWave)
+            return
+        }
+
+        let topBarHeight = max(anchor.headerHeight, NotchMetrics.compactMinHeight)
+        let topRowMidY = island.height - topBarHeight / 2.0
+        let cameraHalf = anchor.cameraWidth / 2.0
+
+        // Sol kanat: üst kulak kavisinin (12pt + 12pt pay = 24pt) içinden kamera soluna kadar
+        let leftWingMinX = NotchMetrics.earInset + NotchMetrics.wingInnerPadding
+        let leftWingMaxX = max(leftWingMinX + NotchWaveView.size.width, island.width / 2.0 - cameraHalf - 6.0)
+        let leftWingWidth = max(NotchWaveView.size.width, leftWingMaxX - leftWingMinX)
+        let waveOriginX = round(leftWingMinX + (leftWingWidth - NotchWaveView.size.width) / 2.0)
+        let waveOriginY = round(topRowMidY - NotchWaveView.size.height / 2.0)
+        notchMeterContainer.setFrameOrigin(NSPoint(x: waveOriginX, y: waveOriginY))
+
+        let iconWidth: CGFloat = 20
+        let iconOriginX = round(leftWingMinX + (leftWingWidth - iconWidth) / 2.0)
+        let iconOriginY = round(topRowMidY - 9)
+        for icon in [checkmarkLabel, errorIconLabel, noticeIconLabel] {
+            icon?.frame = NSRect(x: iconOriginX, y: iconOriginY, width: iconWidth, height: 18)
+        }
+
+        // Sağ kanat: kameranın sağından sağ kulak iç boşluğuna kadar
+        let rightWingMinX = min(island.width - leftWingMinX - 40, island.width / 2.0 + cameraHalf + 6.0)
+        let rightWingMaxX = island.width - NotchMetrics.earInset - NotchMetrics.wingInnerPadding
+        configureNotchRightWing(
+            minX: rightWingMinX,
+            maxX: rightWingMaxX,
+            midY: topRowMidY
+        )
+
+        // Alt tepsi: yalnızca ihtiyaç halinde açılır
+        let trayVisible = notchNeedsExpandedTray && island.height >= topBarHeight + 18.0
+        guard trayVisible else {
+            statusLabel.isHidden = true
+            statusLabel.layer?.mask = nil
+            return
+        }
+
+        statusLabel.isHidden = false
+        let trayFont = NSFont.systemFont(ofSize: NotchMetrics.fontSize, weight: .medium)
+        let textHeight = ceil(trayFont.ascender - trayFont.descender + trayFont.leading)
+        let trayInset = NotchMetrics.trayHorizontalInset
+        let trayWidth = max(0, island.width - trayInset * 2.0)
+        let trayY = round(NotchMetrics.bottomInset + (NotchMetrics.trayHeight - NotchMetrics.bottomInset - textHeight) / 2.0)
+
+        let displayText: String
+        let textColor: NSColor
+        let lineBreak: NSLineBreakMode
+        let wantsLeftFadeMask: Bool
+
+        if isRecording && !hasNotchLiveInterimText && microphoneFeedbackState != .hidden {
+            displayText = microphoneFeedbackState == .waitingForVoice
+                ? "Konuşmaya başlayın..."
+                : "Ses düşük · mikrofona biraz yaklaşın"
+            textColor = NSColor(calibratedRed: 1.0, green: 0.78, blue: 0.36, alpha: 0.96)
+            lineBreak = .byTruncatingTail
+            wantsLeftFadeMask = false
+        } else if case let .error(msg) = currentState {
+            displayText = msg
+            textColor = .systemOrange
+            lineBreak = .byTruncatingTail
+            wantsLeftFadeMask = false
+        } else if case let .notice(msg) = currentState {
+            displayText = msg
+            textColor = NSColor(calibratedWhite: 0.95, alpha: 1.0)
+            lineBreak = .byTruncatingTail
+            wantsLeftFadeMask = false
+        } else {
+            displayText = statusLabel.stringValue
+            textColor = NSColor(calibratedWhite: 0.97, alpha: 1.0)
+            lineBreak = .byTruncatingHead
+            let measuredWidth = ceil((displayText as NSString).size(withAttributes: [.font: trayFont]).width)
+            wantsLeftFadeMask = measuredWidth > trayWidth
+        }
+
+        if statusLabel.stringValue != displayText {
+            statusLabel.stringValue = displayText
+        }
+        statusLabel.font = trayFont
+        statusLabel.textColor = textColor
         statusLabel.maximumNumberOfLines = 1
         statusLabel.cell?.wraps = false
         statusLabel.cell?.isScrollable = false
         statusLabel.usesSingleLineMode = true
-        statusLabel.lineBreakMode = .byTruncatingHead
+        statusLabel.lineBreakMode = lineBreak
+        statusLabel.alignment = wantsLeftFadeMask ? .left : .center
+        statusLabel.frame = NSRect(x: trayInset, y: trayY, width: trayWidth, height: textHeight)
+        updateNotchStatusFadeMask(enabled: wantsLeftFadeMask, width: trayWidth, height: textHeight)
+    }
+
+    private func layoutNonNotchedIsland(size: CGSize, showWave: Bool) {
+        let horizontalInset = NotchMetrics.trayHorizontalInset
+        let midY = size.height / 2.0
+        notchMeterContainer.setFrameOrigin(NSPoint(x: horizontalInset, y: round(midY - NotchWaveView.size.height / 2.0)))
+
+        let iconRect = NSRect(x: horizontalInset + 14, y: round(midY - 9), width: 20, height: 18)
+        for icon in [checkmarkLabel, errorIconLabel, noticeIconLabel] {
+            icon?.frame = iconRect
+        }
+
+        notchWingDot.isHidden = true
+        let showTimer = currentState == .recording && recordingSessionStartedAt > 0 &&
+            (ProcessInfo.processInfo.systemUptime - recordingSessionStartedAt) >= 5.0
+        if showTimer {
+            notchWingStatusLabel.isHidden = false
+            notchWingStatusLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
+            notchWingStatusLabel.textColor = NSColor(calibratedWhite: 0.72, alpha: 1.0)
+            notchWingStatusLabel.alignment = .right
+            notchWingStatusLabel.frame = NSRect(x: size.width - horizontalInset - 36, y: round(midY - 8), width: 36, height: 16)
+        } else {
+            notchWingStatusLabel.isHidden = true
+        }
+
+        let leadingX = horizontalInset + (showWave ? NotchWaveView.size.width + 12.0 : 32.0)
+        let trailingReserve: CGFloat = showTimer ? 44.0 : 0.0
+        let labelWidth = max(0, size.width - leadingX - horizontalInset - trailingReserve)
+        let font = NSFont.systemFont(ofSize: NotchMetrics.fontSize, weight: .medium)
+        let textHeight = ceil(font.ascender - font.descender + font.leading)
+
+        statusLabel.isHidden = false
+        statusLabel.maximumNumberOfLines = 1
+        statusLabel.cell?.wraps = false
+        statusLabel.cell?.isScrollable = false
+        statusLabel.usesSingleLineMode = true
         statusLabel.font = font
         statusLabel.alignment = .left
-        statusLabel.textColor = NSColor(calibratedWhite: 0.96, alpha: 1.0)
-        statusLabel.frame = NSRect(
-            x: textX,
-            y: NotchMetrics.bottomInset + (NotchMetrics.rowHeight - textHeight) / 2,
-            width: max(0, island.width - textX - NotchMetrics.sideInset),
-            height: textHeight
+        statusLabel.lineBreakMode = hasNotchLiveInterimText ? .byTruncatingHead : .byTruncatingTail
+        if currentState == .recording && !hasNotchLiveInterimText && microphoneFeedbackState != .hidden {
+            statusLabel.textColor = NSColor(calibratedRed: 1.0, green: 0.78, blue: 0.36, alpha: 0.96)
+        } else if case .error = currentState {
+            statusLabel.textColor = .systemOrange
+        } else {
+            statusLabel.textColor = NSColor(calibratedWhite: 0.96, alpha: 1.0)
+        }
+        statusLabel.frame = NSRect(x: leadingX, y: round(midY - textHeight / 2.0), width: labelWidth, height: textHeight)
+        let measured = ceil((statusLabel.stringValue as NSString).size(withAttributes: [.font: font]).width)
+        updateNotchStatusFadeMask(enabled: hasNotchLiveInterimText && measured > labelWidth, width: labelWidth, height: textHeight)
+    }
+
+    private func configureNotchRightWing(minX: CGFloat, maxX: CGFloat, midY: CGFloat) {
+        let wingWidth = max(0, maxX - minX)
+        guard wingWidth >= 32 else {
+            notchWingDot.isHidden = true
+            notchWingStatusLabel.isHidden = true
+            return
+        }
+
+        let dotSize: CGFloat = 6
+        let dotColor: NSColor
+        let labelText: String
+        let labelColor: NSColor
+        var useMonospace = false
+
+        switch currentState {
+        case .preparing:
+            dotColor = NSColor(calibratedWhite: 0.85, alpha: 0.65)
+            labelText = "Hazır"
+            labelColor = NSColor(calibratedWhite: 0.74, alpha: 1.0)
+        case .recording:
+            let elapsed = recordingSessionStartedAt > 0
+                ? max(0, ProcessInfo.processInfo.systemUptime - recordingSessionStartedAt)
+                : 0
+            if currentAccentMode == .translation {
+                dotColor = NSColor(calibratedRed: 0.45, green: 0.78, blue: 1.0, alpha: 1.0)
+            } else if microphoneFeedbackState != .hidden && !hasNotchLiveInterimText {
+                dotColor = NSColor.systemOrange
+            } else {
+                dotColor = NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.42, alpha: 1.0)
+            }
+            if elapsed >= 5.0 {
+                let sec = Int(elapsed)
+                labelText = String(format: "%d:%02d", sec / 60, sec % 60)
+                labelColor = NSColor(calibratedWhite: 0.90, alpha: 1.0)
+                useMonospace = true
+            } else if hasNotchLiveInterimText {
+                labelText = "Canlı"
+                labelColor = NSColor(calibratedRed: 0.98, green: 0.88, blue: 0.66, alpha: 0.95)
+            } else if microphoneFeedbackState != .hidden {
+                labelText = "Sessiz"
+                labelColor = NSColor(calibratedRed: 1.0, green: 0.78, blue: 0.36, alpha: 0.95)
+            } else {
+                labelText = currentAccentMode == .translation ? "Çeviri" : "Dinliyor"
+                labelColor = NSColor(calibratedWhite: 0.86, alpha: 1.0)
+            }
+        case .transcribing:
+            dotColor = currentAccentMode == .translation
+                ? NSColor(calibratedRed: 0.56, green: 0.68, blue: 1.0, alpha: 1.0)
+                : NSColor(calibratedRed: 0.36, green: 0.70, blue: 1.0, alpha: 1.0)
+            labelText = "Yazılıyor"
+            labelColor = NSColor(calibratedRed: 0.74, green: 0.89, blue: 1.0, alpha: 1.0)
+        case .success:
+            dotColor = .systemGreen
+            labelText = "Tamam"
+            labelColor = .systemGreen
+        case .notice:
+            dotColor = .systemYellow
+            labelText = "Bilgi"
+            labelColor = .systemYellow
+        case .error:
+            dotColor = .systemOrange
+            labelText = "Hata"
+            labelColor = .systemOrange
+        case .idle:
+            dotColor = .clear
+            labelText = ""
+            labelColor = .clear
+        }
+
+        notchWingDot.isHidden = labelText.isEmpty
+        notchWingStatusLabel.isHidden = labelText.isEmpty
+        guard !labelText.isEmpty else { return }
+
+        notchWingDot.layer?.backgroundColor = dotColor.cgColor
+        notchWingDot.frame = NSRect(x: round(maxX - dotSize), y: round(midY - dotSize / 2.0), width: dotSize, height: dotSize)
+
+        let labelFont = useMonospace
+            ? NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .medium)
+            : NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        notchWingStatusLabel.font = labelFont
+        notchWingStatusLabel.textColor = labelColor
+        if notchWingStatusLabel.stringValue != labelText {
+            notchWingStatusLabel.stringValue = labelText
+        }
+        let labelMaxW = max(0, maxX - dotSize - 6.0 - minX)
+        notchWingStatusLabel.frame = NSRect(
+            x: round(minX),
+            y: round(midY - 8.0),
+            width: round(labelMaxW),
+            height: 16
         )
+    }
+
+    private func updateNotchStatusFadeMask(enabled: Bool, width: CGFloat, height: CGFloat) {
+        statusLabel.wantsLayer = true
+        guard enabled, width > 40, height > 0 else {
+            statusLabel.layer?.mask = nil
+            return
+        }
+        let mask = notchStatusFadeMask ?? {
+            let gradient = CAGradientLayer()
+            gradient.colors = [
+                NSColor.clear.cgColor,
+                NSColor.black.cgColor,
+                NSColor.black.cgColor
+            ]
+            gradient.locations = [0.0, 0.12, 1.0]
+            gradient.startPoint = CGPoint(x: 0.0, y: 0.5)
+            gradient.endPoint = CGPoint(x: 1.0, y: 0.5)
+            self.notchStatusFadeMask = gradient
+            return gradient
+        }()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mask.frame = CGRect(x: 0, y: 0, width: width, height: height)
+        CATransaction.commit()
+        statusLabel.layer?.mask = mask
     }
 
     // MARK: - Yazılıyor animasyonu (çentik)
@@ -823,7 +1492,7 @@ public class RecordingHUD: NSObject {
     }
 
     private func setNotchContentAlpha(_ alpha: CGFloat) {
-        for view in [statusLabel, notchMeterContainer, spinner, checkmarkLabel, errorIconLabel, noticeIconLabel] as [NSView?] {
+        for view in [statusLabel, elapsedTimerLabel, notchMeterContainer, notchWingDot, notchWingStatusLabel, spinner, checkmarkLabel, errorIconLabel, noticeIconLabel] as [NSView?] {
             view?.alphaValue = alpha
         }
     }
@@ -832,28 +1501,44 @@ public class RecordingHUD: NSObject {
     private func animateNotchOpen() {
         guard let screen = targetScreen() else { return }
         let anchor = Self.anchor(for: screen)
+        currentNotchAnchor = anchor
         let island = notchIslandFrame(anchor: anchor)
         let collapsed = notchCollapsedFrame(anchor: anchor, island: island)
         panel.alphaValue = 1
         guard !reduceMotion else {
             panel.setFrame(island, display: true)
+            layoutNotchContent(for: island.size, anchor: anchor)
+            setNotchContentAlpha(1)
+            panel.orderFrontRegardless()
             return
         }
-        panel.setFrame(collapsed, display: true)
+        panel.setFrame(collapsed, display: false)
+        layoutNotchContent(for: collapsed.size, anchor: anchor)
         setNotchContentAlpha(0)
+        panel.orderFrontRegardless()
+        isNotchClosing = false
         frameTransition.start(duration: NotchMetrics.openDuration, update: { [weak self] progress in
             guard let self else { return }
             let p = CGFloat(Self.springOut(progress))
-            self.panel.setFrame(Self.interpolate(collapsed, island, p), display: true)
-            self.setNotchContentAlpha(max(0, min(1, (CGFloat(progress) - 0.45) / 0.55)))
+            let next = Self.interpolate(collapsed, island, p)
+            self.panel.setFrame(next, display: true)
+            self.layoutNotchContent(for: next.size, anchor: anchor)
+            self.setNotchContentAlpha(max(0, min(1, (CGFloat(progress) - 0.38) / 0.45)))
         }, completion: { [weak self] in
-            self?.panel.setFrame(island, display: true)
-            self?.setNotchContentAlpha(1)
+            guard let self else { return }
+            self.panel.setFrame(island, display: true)
+            self.layoutNotchContent(for: island.size, anchor: anchor)
+            self.setNotchContentAlpha(1)
         })
     }
 
-    private func animateNotchClose(completion: (() -> Void)?) {
-        guard let screen = targetScreen(), !reduceMotion, panel.isVisible else {
+    private func animateNotchClose(animated: Bool, completion: (() -> Void)?) {
+        guard animated, let screen = targetScreen(), !reduceMotion, panel.isVisible else {
+            frameTransition.cancel()
+            isNotchClosing = false
+            notchWingDot.isHidden = true
+            notchWingStatusLabel.isHidden = true
+            statusLabel.layer?.mask = nil
             panel.orderOut(nil)
             completion?()
             return
@@ -864,19 +1549,24 @@ public class RecordingHUD: NSObject {
         isNotchClosing = true
         frameTransition.start(duration: NotchMetrics.closeDuration, update: { [weak self] progress in
             guard let self else { return }
-            let p = CGFloat(progress)
-            self.setNotchContentAlpha(max(0, 1 - p * 2.5))
-            self.panel.setFrame(Self.interpolate(start, collapsed, p), display: true)
+            let p = CGFloat(IslandTween.easeOut(progress))
+            self.setNotchContentAlpha(max(0, 1 - CGFloat(progress) * 2.8))
+            let next = Self.interpolate(start, collapsed, p)
+            self.panel.setFrame(next, display: true)
         }, completion: { [weak self] in
-            self?.isNotchClosing = false
-            self?.panel.orderOut(nil)
+            guard let self else { return }
+            self.isNotchClosing = false
+            self.notchWingDot.isHidden = true
+            self.notchWingStatusLabel.isHidden = true
+            self.statusLabel.layer?.mask = nil
+            self.panel.orderOut(nil)
             completion?()
         })
     }
 
-    /// Hafif aşmalı yay eğrisi (Dynamic Island açılışı gibi).
+    /// Yumuşak aşmalı Dynamic Island yay eğrisi (~%3.5 nazik oturma).
     private static func springOut(_ t: Double) -> Double {
-        let c1 = 1.2, c3 = c1 + 1
+        let c1 = 0.45, c3 = c1 + 1
         let x = t - 1
         return 1 + c3 * x * x * x + c1 * x * x
     }
@@ -932,6 +1622,20 @@ public class RecordingHUD: NSObject {
     /// `orderOut` ve saydam olduğundan bu çağrı olmadan kullanıcıya görünmez.
     private func reveal(flushImmediately: Bool = false) {
         let wasVisible = panel.isVisible
+        if placement == .notch {
+            visibilityTransition.cancel()
+            if !wasVisible {
+                presentationCount &+= 1
+                animateNotchOpen()
+            } else {
+                panel.alphaValue = 1
+                if let screen = targetScreen() {
+                    updateNotchPosition(screen: screen, animated: true)
+                }
+            }
+            return
+        }
+
         let timing = HUDRevealTiming.resolve(
             isAlreadyVisible: wasVisible,
             currentAlpha: Double(panel.alphaValue),
@@ -948,19 +1652,6 @@ public class RecordingHUD: NSObject {
             CATransaction.flush()
         }
 
-        if placement == .notch {
-            if let screen = targetScreen() {
-                layoutNotchContent(island: notchIslandFrame(anchor: Self.anchor(for: screen)).size)
-            }
-            visibilityTransition.cancel()
-            if wasVisible {
-                panel.alphaValue = 1
-            } else {
-                animateNotchOpen()
-            }
-            return
-        }
-
         let startAlpha = panel.alphaValue
         visibilityTransition.start(duration: timing.duration) { [weak self] progress in
             self?.panel.alphaValue = startAlpha + (1 - startAlpha) * progress
@@ -972,10 +1663,13 @@ public class RecordingHUD: NSObject {
     public func showPreparing() {
         executeOnMainThread { [weak self] in
             guard let self else { return }
+            self.cancelDemoPreviewIfNeeded()
             self.cancelDismissTimer()
             self.stopMeterTimer()
             self.stopPulseAnimation()
             self.endLowInputWarningSession()
+            self.recordingSessionStartedAt = 0
+            self.elapsedTimerLabel.isHidden = true
             self.currentState = .preparing
             self.currentRecordingLayout = nil
 
@@ -984,12 +1678,17 @@ public class RecordingHUD: NSObject {
             self.checkmarkLabel.isHidden = true
             self.errorIconLabel.isHidden = true
             self.noticeIconLabel.isHidden = true
-            self.spinner.isHidden = false
-            self.spinner.startAnimation(nil)
+            self.notchWave.reset()
+            self.notchWave.render(level: 0, mode: .preparing, animated: !self.reduceMotion)
+            self.dotScopeView.reset(reduceMotion: self.reduceMotion)
+            self.syncDotScopeStyling()
+            self.spinner.stopAnimation(nil)
+            self.spinner.isHidden = true
             self.statusLabel.stringValue = "Hazırlanıyor…"
             self.statusLabel.lineBreakMode = .byTruncatingTail
             self.statusLabel.textColor = NSColor(white: 0.92, alpha: 1)
             self.updatePosition(width: self.hudWidth, animated: false)
+            self.startHudAnimationTimer()
             self.reveal(flushImmediately: true)
         }
     }
@@ -997,10 +1696,19 @@ public class RecordingHUD: NSObject {
     // MARK: - Durum 1: Dinliyor (Recording)
 
     public func showRecording() {
+        startRecordingHUD(cancelDemo: true)
+    }
+
+    private func startRecordingHUD(cancelDemo: Bool) {
         executeOnMainThread { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
+            if cancelDemo {
+                self.cancelDemoPreviewIfNeeded()
+            }
             self.cancelDismissTimer()
             self.currentState = .recording
+            self.recordingSessionStartedAt = ProcessInfo.processInfo.systemUptime
+            self.elapsedTimerLabel.isHidden = true
 
             self.currentRecordingLayout = nil
 
@@ -1013,6 +1721,8 @@ public class RecordingHUD: NSObject {
             self.notchSmoothedLevel = 0.0
             self.notchLastTick = nil
             self.notchWave.reset()
+            self.dotScopeView.reset(reduceMotion: self.reduceMotion)
+            self.syncDotScopeStyling()
             self.resetSpeakingIndicatorLayer()
             self.spinner.stopAnimation(nil)
             self.spinner.isHidden = true
@@ -1028,6 +1738,7 @@ public class RecordingHUD: NSObject {
 
             self.startPulseAnimation()
             self.startMeterTimer()
+            self.startHudAnimationTimer()
 
             self.reveal()
         }
@@ -1060,11 +1771,20 @@ public class RecordingHUD: NSObject {
     // MARK: - Durum 2: Deşifre Ediliyor (Transcribing)
 
     public func showTranscribing() {
+        startTranscribingHUD(cancelDemo: true)
+    }
+
+    private func startTranscribingHUD(cancelDemo: Bool) {
         executeOnMainThread { [weak self] in
             guard let self = self else { return }
+            if cancelDemo {
+                self.cancelDemoPreviewIfNeeded()
+            }
             self.cancelDismissTimer()
             self.stopMeterTimer()
             self.stopPulseAnimation()
+            self.recordingSessionStartedAt = 0
+            self.elapsedTimerLabel.isHidden = true
             self.currentState = .transcribing
             self.endLowInputWarningSession()
 
@@ -1074,8 +1794,9 @@ public class RecordingHUD: NSObject {
             self.errorIconLabel.isHidden = true
             self.noticeIconLabel.isHidden = true
 
-            self.spinner.isHidden = false
-            self.spinner.startAnimation(nil)
+            self.spinner.stopAnimation(nil)
+            self.spinner.isHidden = true
+            self.syncDotScopeStyling()
 
             if self.statusLabel.stringValue == "Dinliyor..." || self.statusLabel.stringValue.isEmpty {
                 self.statusLabel.stringValue = "Yazılıyor..."
@@ -1089,6 +1810,7 @@ public class RecordingHUD: NSObject {
                 self.updatePosition(width: self.widthForStatusText(self.statusLabel.stringValue, maxWidth: 520.0))
             }
 
+            self.startHudAnimationTimer()
             self.reveal()
         }
     }
@@ -1101,11 +1823,14 @@ public class RecordingHUD: NSObject {
             self.cancelDismissTimer()
             self.stopMeterTimer()
             self.stopPulseAnimation()
+            self.recordingSessionStartedAt = 0
+            self.elapsedTimerLabel.isHidden = true
             self.currentState = .success
             self.endLowInputWarningSession()
 
             self.statusLabel.lineBreakMode = .byTruncatingTail
             self.statusLabel.stringValue = text
+            self.syncDotScopeStyling()
             self.updatePosition(width: self.widthForStatusText(text))
 
             self.pulsingDot.isHidden = true
@@ -1115,8 +1840,9 @@ public class RecordingHUD: NSObject {
             self.errorIconLabel.isHidden = true
             self.noticeIconLabel.isHidden = true
 
-            self.checkmarkLabel.isHidden = false
+            self.checkmarkLabel.isHidden = self.placement == .compact
             self.statusLabel.textColor = .systemGreen
+            self.startHudAnimationTimer()
             self.reveal()
 
             let timer = Timer(timeInterval: autoDismissDelay, repeats: false) { [weak self] _ in
@@ -1132,10 +1858,13 @@ public class RecordingHUD: NSObject {
     public func showNotice(message: String = "Ses algılanmadı", autoDismissDelay: TimeInterval = 1.6) {
         executeOnMainThread { [weak self] in
             guard let self = self else { return }
+            self.cancelDemoPreviewIfNeeded()
             self.cancelDismissTimer()
             self.stopMeterTimer()
             self.stopPulseAnimation()
             self.spinner.stopAnimation(nil)
+            self.recordingSessionStartedAt = 0
+            self.elapsedTimerLabel.isHidden = true
             self.currentState = .notice(message)
             self.endLowInputWarningSession()
 
@@ -1150,7 +1879,9 @@ public class RecordingHUD: NSObject {
             self.statusLabel.stringValue = message
             // Bilgilendirme metni beyaz kalır; sarı yalnızca simgede kullanılır.
             self.statusLabel.textColor = NSColor(white: 0.95, alpha: 1.0)
+            self.syncDotScopeStyling()
             self.updatePosition(width: self.widthForStatusText(message))
+            self.stopHudAnimationTimer()
             self.reveal()
 
             let timer = Timer(timeInterval: autoDismissDelay, repeats: false) { [weak self] _ in
@@ -1166,13 +1897,19 @@ public class RecordingHUD: NSObject {
     public func showError(message: String = "Hata!", autoDismissDelay: TimeInterval = 1.0) {
         executeOnMainThread { [weak self] in
             guard let self = self else { return }
+            self.cancelDemoPreviewIfNeeded()
             self.cancelDismissTimer()
             self.stopMeterTimer()
             self.stopPulseAnimation()
+            self.recordingSessionStartedAt = 0
+            self.elapsedTimerLabel.isHidden = true
             self.currentState = .error(message)
             self.endLowInputWarningSession()
 
             self.statusLabel.lineBreakMode = .byTruncatingTail
+            self.statusLabel.stringValue = message
+            self.statusLabel.textColor = .systemOrange
+            self.syncDotScopeStyling()
             self.updatePosition(width: self.widthForStatusText(message))
 
             self.pulsingDot.isHidden = true
@@ -1183,8 +1920,7 @@ public class RecordingHUD: NSObject {
             self.noticeIconLabel.isHidden = true
 
             self.errorIconLabel.isHidden = false
-            self.statusLabel.stringValue = message
-            self.statusLabel.textColor = .systemOrange
+            self.stopHudAnimationTimer()
             self.reveal()
 
             let timer = Timer(timeInterval: autoDismissDelay, repeats: false) { [weak self] _ in
@@ -1200,17 +1936,22 @@ public class RecordingHUD: NSObject {
     public func dismiss(animated: Bool = true, completion: (() -> Void)? = nil) {
         executeOnMainThread { [weak self] in
             guard let self = self else { return }
+            self.cancelDemoPreviewIfNeeded()
             self.cancelDismissTimer()
             self.stopMeterTimer()
+            self.stopHudAnimationTimer()
             self.stopPulseAnimation()
             self.spinner.stopAnimation(nil)
+            self.recordingSessionStartedAt = 0
+            self.elapsedTimerLabel.isHidden = true
             self.currentState = .idle
+            self.notchShapeView.rimGlowIntensity = 0.0
             self.endLowInputWarningSession()
 
             self.stopProcessingAnimation()
             if self.placement == .notch {
                 self.visibilityTransition.cancel()
-                self.animateNotchClose(completion: completion)
+                self.animateNotchClose(animated: animated, completion: completion)
                 return
             }
             self.frameTransition.cancel()
@@ -1399,7 +2140,11 @@ public class RecordingHUD: NSObject {
         }
 
         if currentState == .recording {
-            updateRecordingLayout(animated: animated)
+            if placement == .notch {
+                updatePosition(animated: animated)
+            } else {
+                updateRecordingLayout(animated: animated)
+            }
         }
         guard announce else { return }
         switch state {
@@ -1480,8 +2225,10 @@ public class RecordingHUD: NSObject {
 
     private func updateWaveform() {
         guard currentState == .recording else { return }
+        if isDemoPreviewActive { return }
 
         let power = AudioRecorder.shared.averagePower()
+        dotScopeView.pushAudioLevel(dBFS: power)
         // Çift eşikli kapı, tek bir dB eşiğinden daha güvenilir bir "konuşma
         // var mı" sinyali verir: hysteresis sayesinde kısık sesle başlayan
         // konuşma da segmenti açık tutar ve "ses algılanmadı" uyarısı
@@ -1535,6 +2282,17 @@ public class RecordingHUD: NSObject {
         let notchLevel = notchSmoothedLevel
 
         notchWave.render(level: notchLevel, mode: .listening, animated: !reduceMotion)
+        if placement == .notch {
+            notchShapeView.rimGlowColor = currentAccentMode == .translation
+                ? NSColor(calibratedRed: 0.45, green: 0.78, blue: 1.0, alpha: 1.0)
+                : NSColor(calibratedRed: 0.96, green: 0.86, blue: 0.65, alpha: 1.0)
+            notchShapeView.rimGlowIntensity = 0.14 + 0.72 * notchLevel
+            if !notchWingDot.isHidden && !reduceMotion {
+                let scale = 1.0 + min(0.28, notchLevel * 0.28)
+                notchWingDot.layer?.setAffineTransform(CGAffineTransform(scaleX: scale, y: scale))
+                notchWingDot.layer?.opacity = Float(0.76 + min(0.24, notchLevel * 0.24))
+            }
+        }
         CATransaction.commit()
     }
 }

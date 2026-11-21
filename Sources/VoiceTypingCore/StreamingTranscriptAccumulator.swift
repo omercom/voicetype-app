@@ -172,8 +172,9 @@ enum StreamingTranscriptReconciler {
         let lexicalSimilarity = Double(sharedTokenCount) / Double(max(current.count, next.count))
         let comparableLength = abs(current.count - next.count) <= max(2, shorterCount / 2)
         let unstableEdgeCorrection = prefix > 0 && (prefix >= shorterCount - 2 || prefix * 2 >= shorterCount)
-        let suffixCorrection = suffix > 0 && suffix * 2 >= shorterCount && comparableLength
-        let lexicalCorrection = lexicalSimilarity >= 0.5 && comparableLength
+        let dropsOpeningWords = next.count < current.count && prefix == 0
+        let suffixCorrection = !dropsOpeningWords && suffix > 0 && suffix * 2 >= shorterCount && comparableLength
+        let lexicalCorrection = !dropsOpeningWords && lexicalSimilarity >= 0.5 && comparableLength
         if (unstableEdgeCorrection && next.count >= current.count) || suffixCorrection || lexicalCorrection {
             return .correction
         }

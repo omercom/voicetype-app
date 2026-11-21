@@ -63,6 +63,8 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     private var modelTurnFallbackText: String = ""
     private var safetyTimer: DispatchSourceTimer?
     private var finalizationTimer: DispatchSourceTimer?
+    private var pingTimer: DispatchSourceTimer?
+    private var streamedByteCount: Int = 0
     private var serverCloseReason: String?
     private var serverCloseCode: URLSessionWebSocketTask.CloseCode?
 
@@ -124,7 +126,8 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         }
 
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30.0
+        config.timeoutIntervalForRequest = 300.0
+        config.timeoutIntervalForResource = 900.0
         let urlSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         let ws = urlSession.webSocketTask(with: url)
         self.session = urlSession
@@ -132,6 +135,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         lock.unlock()
 
         ws.resume()
+        startPingTimer()
 
         // 1. Setup mesajı gönder
         let setupPayload = Self.setupPayload(
@@ -287,9 +291,9 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
 
                     // Eğer kullanıcı konuşmayı bitirdiyse (streamEnd yollandıysa),
                     // generationComplete sinyali beklenir. Eğer generationComplete gecikirse
-                    // bu son inputTranscription'dan 750ms sonra otomatik tamamla:
+                    // bu son inputTranscription'dan 1200ms sonra otomatik tamamla:
                     if endSent {
-                        scheduleFinalization(delayMs: 750)
+                        scheduleFinalization(delayMs: 1200)
                     }
                 }
             }
@@ -345,6 +349,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
                 self.lock.unlock()
                 return
             }
+            self.streamedByteCount += pcmData.count
             if !self.isSetupComplete {
                 self.pendingChunks.append(pcmData)
                 self.lock.unlock()
@@ -360,6 +365,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
     }
 
     public func finishAudio() {
+        var safetySeconds = 4.5
         streamQueue.async { [weak self] in
             guard let self = self else { return }
             self.lock.lock()
@@ -377,8 +383,16 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
             }
         }
 
-        // Güvenlik zamanlayıcısı: 4.5 saniye içinde sonlanmazsa tamamla
-        startSafetyTimeout(seconds: 4.5)
+        lock.lock()
+        let bytes = streamedByteCount
+        lock.unlock()
+        if bytes > 0 {
+            let audioSeconds = Double(bytes) / 32_000.0
+            safetySeconds = max(6.0, min(15.0, 4.5 + audioSeconds * 0.15))
+        }
+
+        // Güvenlik zamanlayıcısı: ses uzunluğuna göre uyarlanan süre içinde sonlanmazsa tamamla
+        startSafetyTimeout(seconds: safetySeconds)
     }
 
     private func sendRawChunk(_ pcmData: Data, ws: URLSessionWebSocketTask) {
@@ -405,6 +419,7 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         guard !isCompleted, !isCancelled, !hasSentStreamEnd else { lock.unlock(); return }
         hasSentStreamEnd = true
         streamEndSentTime = CFAbsoluteTimeGetCurrent()
+        let bytes = streamedByteCount
         lock.unlock()
 
         let endPayload: [String: Any] = [
@@ -422,9 +437,32 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         }
 
         // Kullanıcının belirttiği gibi: Gemini Live'ın yanıtı tamamlamasını (generationComplete / turnComplete)
-        // bekliyoruz. Normalde sunucu bu sinyali 150-300ms içinde gönderir ve 50ms içinde anında tamamlanır.
-        // Olası bir ağ veya sunucu gecikmesinde erken kesilip eksik/mükerrer olmaması için güvenlik süresini 3000ms yapıyoruz.
-        scheduleFinalization(delayMs: 3000)
+        // bekliyoruz. Uzun kayıtlarda sunucu gecikmesinde erken kesilmemesi için güvenlik süresini ölçekliyoruz.
+        let audioSeconds = Double(bytes) / 32_000.0
+        scheduleFinalization(delayMs: audioSeconds > 20 ? 5000 : 3500)
+    }
+
+    private func startPingTimer() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isCompleted, !isCancelled, pingTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + 20.0, repeating: 20.0)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let ws = self.webSocketTask
+            let active = !self.isCompleted && !self.isCancelled && !self.isAudioFinished
+            self.lock.unlock()
+            guard active, let ws else { return }
+            ws.sendPing { error in
+                if let error {
+                    print("[GeminiLive] Ping hatası: \(error.localizedDescription)")
+                }
+            }
+        }
+        timer.resume()
+        self.pingTimer = timer
     }
 
     private func startSafetyTimeout(seconds: Double) {
@@ -597,6 +635,8 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         safetyTimer = nil
         finalizationTimer?.cancel()
         finalizationTimer = nil
+        pingTimer?.cancel()
+        pingTimer = nil
         let latency = CFAbsoluteTimeGetCurrent() - startTime
 
         var text = transcriptAccumulator.text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -641,6 +681,8 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         safetyTimer = nil
         finalizationTimer?.cancel()
         finalizationTimer = nil
+        pingTimer?.cancel()
+        pingTimer = nil
         pendingChunks.removeAll()
         transcriptAccumulator.reset()
         modelTurnFallbackText = ""
@@ -676,6 +718,8 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
         safetyTimer = nil
         finalizationTimer?.cancel()
         finalizationTimer = nil
+        pingTimer?.cancel()
+        pingTimer = nil
         let latency = CFAbsoluteTimeGetCurrent() - startTime
         let ws = webSocketTask
         webSocketTask = nil
@@ -768,8 +812,11 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
     private var startTime: CFAbsoluteTime = 0
     private var transcriptAccumulator = StreamingTranscriptAccumulator()
     private var pendingChunks: [Data] = []
+    private var recentPCMChunks: [(data: Data, receivedAt: TimeInterval)] = []
+    private var recentPCMByteCount = 0
     private var isTaskReady: Bool = false
     private lazy var finalization = AppleSpeechFinalization(
+        timeout: 3.5,
         schedule: AppleSpeechFinalization.scheduler(on: streamQueue)
     )
     private var safetyTimer: DispatchSourceTimer?
@@ -777,11 +824,15 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
     /// Her tanıma görevine verilen kimlik; yeniden başlatmadan sonra eski görevden
     /// gelen geç geri çağrılar yok sayılır.
     private var taskGeneration: UInt64 = 0
+    private var taskStartedAt: TimeInterval = 0
+    private var lastTranscriptAt: TimeInterval = 0
     private var restartCount = 0
     private static let maximumRestarts = 40
+    private static let maximumTailBufferBytes = 38_400 // ~1.2s @ 16kHz mono PCM16
     /// Tuş bırakıldıktan sonra metin bu süre değişmezse Apple'ın geç gelen
     /// "final" sonucunu beklemeden toplanan metinle tamamlanır (algılanan hız).
-    private static let quietFinishDelay: TimeInterval = 0.4
+    private static let baseQuietFinishDelay: TimeInterval = 0.85
+    private static let longQuietFinishDelay: TimeInterval = 1.25
     private var quietFinishWork: DispatchWorkItem?
 
     public init(
@@ -891,6 +942,9 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
     private func makeRecognitionTask(recognizer: SFSpeechRecognizer) -> SFSpeechAudioBufferRecognitionRequest {
         taskGeneration &+= 1
         let generation = taskGeneration
+        let now = ProcessInfo.processInfo.systemUptime
+        taskStartedAt = now
+        lastTranscriptAt = now
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -962,6 +1016,7 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
             lock.unlock()
             return
         }
+        lastTranscriptAt = receivedAt
         let mergedText = AppleSpeechTranscriptProcessor.apply(
             accumulator: &transcriptAccumulator,
             text: text,
@@ -1014,6 +1069,11 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
                 self.lock.unlock()
                 return
             }
+            let now = ProcessInfo.processInfo.systemUptime
+            let replaySince = max(self.lastTranscriptAt - 0.35, now - 1.2)
+            let tailChunks = self.recentPCMChunks
+                .filter { $0.receivedAt >= replaySince }
+                .map(\.data)
             let oldTask = self.recognitionTask
             let request = self.makeRecognitionTask(recognizer: recognizer)
             self.isTaskReady = true
@@ -1023,6 +1083,9 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
             self.lock.unlock()
 
             oldTask?.cancel()
+            for chunk in tailChunks {
+                self.appendPCMData(chunk, to: request)
+            }
             for chunk in chunks {
                 self.appendPCMData(chunk, to: request)
             }
@@ -1035,6 +1098,7 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
 
     public func sendAudioChunk(_ chunk: Data) {
         guard !chunk.isEmpty else { return }
+        let receivedAt = ProcessInfo.processInfo.systemUptime
         streamQueue.async { [weak self] in
             guard let self = self else { return }
             self.lock.lock()
@@ -1043,10 +1107,27 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
                 return
             }
 
+            self.appendTailBufferLocked(chunk, receivedAt: receivedAt)
+
             if !self.isTaskReady {
                 self.pendingChunks.append(chunk)
                 self.lock.unlock()
                 return
+            }
+
+            let taskAge = receivedAt - self.taskStartedAt
+            if taskAge >= 48.0 {
+                let quietBoundary = AudioRecorder.isPCM16Silent(data: chunk, minAmplitude: 140)
+                if quietBoundary || taskAge >= 54.0 {
+                    if !self.transcriptAccumulator.activeText.isEmpty {
+                        self.transcriptAccumulator.receiveFinal(self.transcriptAccumulator.activeText)
+                    }
+                    self.lock.unlock()
+                    if self.restartIfStillRecording(reason: "proaktif süre yenilemesi") {
+                        return
+                    }
+                    self.lock.lock()
+                }
             }
 
             guard let req = self.recognitionRequest else {
@@ -1056,6 +1137,15 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
             self.lock.unlock()
 
             self.appendPCMData(chunk, to: req)
+        }
+    }
+
+    private func appendTailBufferLocked(_ chunk: Data, receivedAt: TimeInterval) {
+        recentPCMChunks.append((data: chunk, receivedAt: receivedAt))
+        recentPCMByteCount += chunk.count
+        while recentPCMByteCount > Self.maximumTailBufferBytes, recentPCMChunks.count > 1 {
+            let removed = recentPCMChunks.removeFirst()
+            recentPCMByteCount -= removed.data.count
         }
     }
 
@@ -1100,12 +1190,16 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
         isCancelled = true
         safetyTimer?.cancel()
         safetyTimer = nil
+        quietFinishWork?.cancel()
+        quietFinishWork = nil
         finalization.cancel()
         let task = self.recognitionTask
         self.recognitionTask = nil
         self.recognitionRequest = nil
         self.speechRecognizer = nil
         self.pendingChunks.removeAll()
+        self.recentPCMChunks.removeAll()
+        self.recentPCMByteCount = 0
         self.transcriptAccumulator.reset()
         self.onCompletion = nil
         self.onInterim = nil
@@ -1139,8 +1233,13 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
         }
     }
 
+    private func effectiveQuietFinishDelay() -> TimeInterval {
+        let recordedSeconds = max(0.0, CFAbsoluteTimeGetCurrent() - startTime)
+        return recordedSeconds > 15.0 ? Self.longQuietFinishDelay : Self.baseQuietFinishDelay
+    }
+
     /// Ses bittikten sonra gelen her ara sonuçta yeniden kurulur; metin
-    /// `quietFinishDelay` boyunca değişmezse toplanan metinle tamamlanır.
+    /// uyarlanabilir süre boyunca değişmezse toplanan metinle tamamlanır.
     private func scheduleQuietFinish() {
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -1153,8 +1252,9 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
         lock.lock()
         quietFinishWork?.cancel()
         quietFinishWork = work
+        let delay = effectiveQuietFinishDelay()
         lock.unlock()
-        streamQueue.asyncAfter(deadline: .now() + Self.quietFinishDelay, execute: work)
+        streamQueue.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func notifyCompletion(success: Bool, text: String, error: String?, isFinal: Bool = true) {
@@ -1169,12 +1269,16 @@ public final class LiveAppleSpeechSession: NSObject, LiveStreamSession, @uncheck
         isCompleted = true
         safetyTimer?.cancel()
         safetyTimer = nil
+        quietFinishWork?.cancel()
+        quietFinishWork = nil
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
         let task = self.recognitionTask
         self.recognitionTask = nil
         self.recognitionRequest = nil
         self.speechRecognizer = nil
         self.pendingChunks.removeAll()
+        self.recentPCMChunks.removeAll()
+        self.recentPCMByteCount = 0
         let callback = self.onCompletion
         self.onCompletion = nil
         self.onInterim = nil
@@ -1208,6 +1312,7 @@ public class Transcriber {
 
     private var currentTask: URLSessionTask?
     private var activeLiveSession: (any LiveStreamSession)?
+    private var batchGeneration: UInt64 = 0
     private let lock = NSLock()
     private let appleWarmupQueue = DispatchQueue(
         label: "com.voicetyping.apple-speech.warmup",
@@ -1215,11 +1320,11 @@ public class Transcriber {
     )
     private var cachedAppleRecognizers: [String: SFSpeechRecognizer] = [:]
 
-    /// HTTP Keep-Alive bağlantı havuzlu, düşük gecikmeli optimize oturum
+    /// HTTP Keep-Alive bağlantı havuzlu, uzun kayıt yüklemelerine dayanıklı oturum
     private let httpSession: URLSession = {
         let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 20.0
-        configuration.timeoutIntervalForResource = 30.0
+        configuration.timeoutIntervalForRequest = 60.0
+        configuration.timeoutIntervalForResource = 180.0
         configuration.httpMaximumConnectionsPerHost = 6
         configuration.httpShouldUsePipelining = true
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -1282,6 +1387,7 @@ public class Transcriber {
         seda.cancel()
         lock.lock()
         defer { lock.unlock() }
+        batchGeneration &+= 1
         currentTask?.cancel()
         currentTask = nil
         activeLiveSession?.cancel()
@@ -1490,7 +1596,94 @@ public class Transcriber {
 
     // MARK: - Apple Silicon Yerel Ses Motoru (On-Device SFSpeechRecognizer)
 
+    /// Uzun ses kayıtlarını sessizlik sınırlarından parçalayıp sırayla deşifre eder
+    /// ve örtüşen metni tekilleştirerek birleştirir.
+    private func transcribeWAVChunksSequentially(
+        chunks: [Data],
+        transcribeSingle: @escaping (Data, @escaping (TranscriptionResult) -> Void) -> Void,
+        completion: @escaping (TranscriptionResult) -> Void
+    ) {
+        guard chunks.count > 1 else {
+            if let only = chunks.first {
+                transcribeSingle(only, completion)
+            }
+            return
+        }
+
+        lock.lock()
+        let generation = batchGeneration
+        lock.unlock()
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+        var mergedText = ""
+        var lastProvider = ""
+        var lastModel = ""
+
+        func step(index: Int) {
+            self.lock.lock()
+            let active = self.batchGeneration == generation
+            self.lock.unlock()
+            guard active else { return }
+
+            guard index < chunks.count else {
+                completion(TranscriptionResult(
+                    success: true,
+                    text: mergedText.trimmingCharacters(in: .whitespacesAndNewlines),
+                    latency: CFAbsoluteTimeGetCurrent() - startTime,
+                    error: nil,
+                    provider: lastProvider,
+                    model: lastModel
+                ))
+                return
+            }
+
+            transcribeSingle(chunks[index]) { result in
+                self.lock.lock()
+                let stillActive = self.batchGeneration == generation
+                self.lock.unlock()
+                guard stillActive else { return }
+
+                lastProvider = result.provider
+                lastModel = result.model
+                guard result.success else {
+                    if !mergedText.isEmpty && Self.isNoSpeechMessage(result.error ?? "") {
+                        step(index: index + 1)
+                        return
+                    }
+                    completion(TranscriptionResult(
+                        success: false,
+                        text: "",
+                        latency: CFAbsoluteTimeGetCurrent() - startTime,
+                        error: result.error,
+                        provider: result.provider,
+                        model: result.model
+                    ))
+                    return
+                }
+
+                let piece = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !piece.isEmpty {
+                    mergedText = StreamingTranscriptReconciler.mergeCommitted(existing: mergedText, incoming: piece)
+                }
+                step(index: index + 1)
+            }
+        }
+
+        step(index: 0)
+    }
+
     public func transcribeAppleSpeech(
+        audioData: Data,
+        config: AppConfig,
+        completion: @escaping (TranscriptionResult) -> Void
+    ) {
+        let chunks = AudioChunker.splitWAV(audioData, maxChunkSeconds: 45.0, overlapSeconds: 0.6)
+        transcribeWAVChunksSequentially(chunks: chunks, transcribeSingle: { chunkData, done in
+            self.transcribeAppleSpeechChunk(audioData: chunkData, config: config, completion: done)
+        }, completion: completion)
+    }
+
+    private func transcribeAppleSpeechChunk(
         audioData: Data,
         config: AppConfig,
         completion: @escaping (TranscriptionResult) -> Void
@@ -1736,6 +1929,17 @@ public class Transcriber {
         config: AppConfig,
         completion: @escaping (TranscriptionResult) -> Void
     ) {
+        let chunks = AudioChunker.splitWAV(audioData, maxChunkSeconds: 480.0, overlapSeconds: 0.6)
+        transcribeWAVChunksSequentially(chunks: chunks, transcribeSingle: { chunkData, done in
+            self.transcribeGroqChunk(audioData: chunkData, config: config, completion: done)
+        }, completion: completion)
+    }
+
+    private func transcribeGroqChunk(
+        audioData: Data,
+        config: AppConfig,
+        completion: @escaping (TranscriptionResult) -> Void
+    ) {
         let apiKey = config.groq_api_key.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = (config.groq_model.isEmpty || config.groq_model == "whisper-large-v3-turbo") ? "whisper-large-v3" : config.groq_model
 
@@ -1766,7 +1970,9 @@ public class Transcriber {
         let boundary = "Boundary-\(UUID().uuidString)"
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 20.0
+        request.timeoutInterval = AudioChunker.dynamicRequestTimeout(
+            audioSeconds: AudioChunker.pcmDurationSeconds(wavData: audioData)
+        )
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
@@ -1934,6 +2140,18 @@ public class Transcriber {
         targetContext: TargetContext? = nil,
         completion: @escaping (TranscriptionResult) -> Void
     ) {
+        let chunks = AudioChunker.splitWAV(audioData, maxChunkSeconds: 300.0, overlapSeconds: 0.6)
+        transcribeWAVChunksSequentially(chunks: chunks, transcribeSingle: { chunkData, done in
+            self.transcribeGeminiChunk(audioData: chunkData, config: config, targetContext: targetContext, completion: done)
+        }, completion: completion)
+    }
+
+    private func transcribeGeminiChunk(
+        audioData: Data,
+        config: AppConfig,
+        targetContext: TargetContext? = nil,
+        completion: @escaping (TranscriptionResult) -> Void
+    ) {
         let apiKey = config.gemini_api_key.trimmingCharacters(in: .whitespacesAndNewlines)
         var model = config.gemini_model.isEmpty ? "gemini-3.5-transcribe" : config.gemini_model
         if !ConfigManager.supportsGeminiGenerateContent(model: model) {
@@ -1969,7 +2187,9 @@ public class Transcriber {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 25.0
+        request.timeoutInterval = AudioChunker.dynamicRequestTimeout(
+            audioSeconds: AudioChunker.pcmDurationSeconds(wavData: audioData)
+        )
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let base64Audio = audioData.base64EncodedString()
@@ -1995,7 +2215,7 @@ public class Transcriber {
             ],
             "generationConfig": [
                 "temperature": 0.0,
-                "maxOutputTokens": 2048
+                "maxOutputTokens": 8192
             ]
         ]
 
@@ -2075,6 +2295,9 @@ public class Transcriber {
                    let firstCand = candidates.first,
                    let content = firstCand["content"] as? [String: Any],
                    let parts = content["parts"] as? [[String: Any]] {
+                    if let finishReason = firstCand["finishReason"] as? String, finishReason == "MAX_TOKENS" {
+                        print("[Gemini] ⚠️ Çıktı MAX_TOKENS sınırına ulaştı; uzun kayıt kesilmiş olabilir.")
+                    }
                     let textParts = parts.filter { ($0["thought"] as? Bool) != true }
                     let rawText = textParts.compactMap { $0["text"] as? String }.joined(separator: " ")
                     var cleaned = rawText.trimmingCharacters(in: .whitespacesAndNewlines)

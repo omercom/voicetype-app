@@ -42,6 +42,14 @@ public class AudioRecorder: NSObject {
     private var processingModeForRecording: RecordingAudioProcessingMode = .none
     private var hasDeliveredInitialStreamingChunk = false
     private var warmupGeneration: UInt64 = 0
+    private var lastAudioBufferAt: TimeInterval = 0
+    private var lastRecoveryAt: TimeInterval = 0
+    private var recoveryCountInSession = 0
+    private var isRecoveringEngine = false
+    private var stallWatchdogTimer: DispatchSourceTimer?
+    private let watchdogQueue = DispatchQueue(label: "com.voicetyping.audio-recorder.watchdog", qos: .utility)
+    private var configChangeObserver: NSObjectProtocol?
+    private var sleepObserver: NSObjectProtocol?
 
     /// Çift eşikli konuşma kapısı. `currentPower` zaten her tamponda
     /// hesaplandığı için kapıyı beslemek ek analiz maliyeti getirmez.
@@ -68,6 +76,14 @@ public class AudioRecorder: NSObject {
         defer { lock.unlock() }
         guard recordingState else { return 0.0 }
         return max(0.0, CFAbsoluteTimeGetCurrent() - startTime)
+    }
+
+    /// Kayıt esnasında son ses tamponunun alınmasından bu yana geçen süre (sn).
+    public func lastBufferAge() -> TimeInterval {
+        lock.lock()
+        defer { lock.unlock() }
+        guard recordingState else { return 0.0 }
+        return max(0.0, ProcessInfo.processInfo.systemUptime - lastAudioBufferAt)
     }
 
     // MARK: - Donanım Dinleyicisi (Default Input Device & Sleep)
@@ -194,13 +210,22 @@ public class AudioRecorder: NSObject {
         }
 
         // Sistem uykuya geçerken donanımı temizle
-        NSWorkspace.shared.notificationCenter.addObserver(
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.willSleepNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             print("[AudioRecorder] 💤 Sistem uykuya geçiyor, ses motoru kapatılıyor.")
             self?.cleanTeardown()
+        }
+
+        // CoreAudio yapılandırması değişirse (AirPods/Bluetooth geçişi, örnekleme değişimi)
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            self?.handleEngineConfigurationChange(notification)
         }
     }
 
@@ -214,6 +239,14 @@ public class AudioRecorder: NSObject {
             )
             deviceListenerBlock = nil
         }
+        if let sleepObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver)
+            self.sleepObserver = nil
+        }
+        if let configChangeObserver {
+            NotificationCenter.default.removeObserver(configChangeObserver)
+            self.configChangeObserver = nil
+        }
     }
 
     private func handleDefaultDeviceChanged() {
@@ -226,7 +259,134 @@ public class AudioRecorder: NSObject {
             // Boşta veya ılık moddaysa motoru kapat, bir sonraki kayıtta yeni mikrofona anında bağlanacak
             cleanTeardown()
         } else {
-            print("[AudioRecorder] ⚠️ Aktif kayıt esnasında mikrofon değişti, kayıt korunuyor.")
+            print("[AudioRecorder] 🔄 Aktif kayıt esnasında mikrofon değişti; motor kesintisiz yenileniyor.")
+            recoverActiveRecordingIfNeeded(reason: "varsayılan mikrofon değişimi")
+        }
+    }
+
+    private func handleEngineConfigurationChange(_ notification: Notification) {
+        lock.lock()
+        let recording = recordingState
+        let activeEngine = audioEngine
+        lock.unlock()
+        guard recording else { return }
+        if let source = notification.object as? AVAudioEngine, let activeEngine, source !== activeEngine {
+            return
+        }
+        recoverActiveRecordingIfNeeded(reason: "AVAudioEngine yapılandırma değişimi")
+    }
+
+    private func startStallWatchdogLocked() {
+        stallWatchdogTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: watchdogQueue)
+        timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
+        timer.setEventHandler { [weak self] in
+            self?.checkForAudioStall()
+        }
+        stallWatchdogTimer = timer
+        timer.resume()
+    }
+
+    private func stopStallWatchdogLocked() {
+        stallWatchdogTimer?.cancel()
+        stallWatchdogTimer = nil
+    }
+
+    private func checkForAudioStall() {
+        let now = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        let shouldRecover = recordingState
+            && !isStopping
+            && !isRecoveringEngine
+            && (now - lastAudioBufferAt) >= 1.2
+        lock.unlock()
+        if shouldRecover {
+            recoverActiveRecordingIfNeeded(reason: "ses akışı duraklaması (watchdog)")
+        }
+    }
+
+    /// Aktif kayıt tamponlarını, akış geri çağrılarını ve oturum kimliğini koruyarak
+    /// ses motorunu yeniden kurar (uzun konuşmalarda Bluetooth/CoreAudio kesintilerini önler).
+    private func recoverActiveRecordingIfNeeded(reason: String) {
+        let now = ProcessInfo.processInfo.systemUptime
+        lock.lock()
+        guard recordingState, !isStopping, !isRecoveringEngine else {
+            lock.unlock()
+            return
+        }
+        guard recoveryCountInSession < 5, (now - lastRecoveryAt) >= 1.5 else {
+            lock.unlock()
+            return
+        }
+        isRecoveringEngine = true
+        lastRecoveryAt = now
+        recoveryCountInSession += 1
+        let attempt = recoveryCountInSession
+        let gap = max(0.0, now - lastAudioBufferAt)
+        let generation = deliveryGeneration
+        let callback = chunkCallback
+        let oldEngine = audioEngine
+        let hadTap = inputTapInstalled
+        inputTapInstalled = false
+        audioEngine = nil
+        audioConverter = nil
+        conversionBuffer = nil
+        preparedHardwareFormat = nil
+        lock.unlock()
+
+        stopEngine(oldEngine, removeTap: hadTap)
+
+        // Kısa donanım duraklamalarında (50ms..250ms) akış zaman çizelgesini korumak için
+        // eşdeğer miktarda PCM16 sessizlik dolgusu ekle (Hex MAX_PADDED_GAP deseni).
+        var padChunks: [Data]? = nil
+        var padCallback: ((Data) -> Void)? = nil
+
+        lock.lock()
+        defer {
+            isRecoveringEngine = false
+            lock.unlock()
+        }
+        guard recordingState, !isStopping, deliveryGeneration == generation else {
+            return
+        }
+
+        if gap >= 0.05 && gap <= 0.25 {
+            let silenceSamples = Int((gap * 16_000.0).rounded())
+            let silenceBytes = silenceSamples * MemoryLayout<Int16>.size
+            if silenceBytes > 0 {
+                let silence = Data(count: silenceBytes)
+                bufferedPCMData.append(silence)
+                if let cb = callback {
+                    accumulatedPCM.append(silence)
+                    while accumulatedPCM.count - accumulatedPCMOffset >= Self.streamingChunkByteCount {
+                        let start = accumulatedPCMOffset
+                        let end = start + Self.streamingChunkByteCount
+                        if padChunks == nil { padChunks = [] }
+                        padChunks?.append(accumulatedPCM.subdata(in: start..<end))
+                        accumulatedPCMOffset = end
+                        hasDeliveredInitialStreamingChunk = true
+                    }
+                    compactAccumulatedPCMIfNeeded()
+                    padCallback = cb
+                }
+            }
+        }
+
+        guard preparePipelineLocked(), let newEngine = audioEngine else {
+            print("[AudioRecorder] ⚠️ Motor kurtarma hazırlığı başarısız (\(reason), #\(attempt)).")
+            return
+        }
+
+        do {
+            try newEngine.start()
+            lastAudioBufferAt = ProcessInfo.processInfo.systemUptime
+            print("[AudioRecorder] ✅ Aktif kayıt motoru kurtarıldı (\(reason), #\(attempt)).")
+        } catch {
+            print("[AudioRecorder] ⚠️ Aktif kayıt motoru yeniden başlatılamadı (\(reason)): \(error.localizedDescription)")
+        }
+
+        if let cb = padCallback, let chunks = padChunks, !chunks.isEmpty {
+            enqueueReadyChunks(chunks, callback: cb, generation: generation)
         }
     }
 
@@ -337,6 +497,7 @@ public class AudioRecorder: NSObject {
             lock.unlock()
             return
         }
+        lastAudioBufferAt = ProcessInfo.processInfo.systemUptime
         let generation = deliveryGeneration
         let callbackGroup = activeTapCallbacks
         let boostEnabled = processingModeForRecording == .realtimeBoost
@@ -471,6 +632,11 @@ public class AudioRecorder: NSObject {
         currentPower = -160.0
         hasDeliveredInitialStreamingChunk = false
         startTime = CFAbsoluteTimeGetCurrent()
+        let nowUptime = ProcessInfo.processInfo.systemUptime
+        lastAudioBufferAt = nowUptime
+        lastRecoveryAt = 0
+        recoveryCountInSession = 0
+        isRecoveringEngine = false
         activeTapCallbacks = DispatchGroup()
         deliveryGeneration &+= 1
         cancelledDeliveryGeneration = nil
@@ -486,11 +652,13 @@ public class AudioRecorder: NSObject {
         recordingState = true
         do {
             try engine.start()
+            startStallWatchdogLocked()
             let mode = reusedWarmPipeline ? "warm" : "cold"
             print("[AudioRecorder] ✅ Mikrofon başarıyla aktif edildi [\(mode)] (Örnekleme: \(hwFormat.sampleRate)Hz, Kanal: \(hwFormat.channelCount)).")
             return true
         } catch {
             recordingState = false
+            stopStallWatchdogLocked()
             chunkCallback = nil
             firstAudioBufferCallback = nil
             accumulatedPCM = Data()
@@ -549,6 +717,7 @@ public class AudioRecorder: NSObject {
         let duration = CFAbsoluteTimeGetCurrent() - startTime
         recordingState = false
         isStopping = true
+        stopStallWatchdogLocked()
         let engine = audioEngine
         let callbackGroup = activeTapCallbacks
         let generation = deliveryGeneration
@@ -618,6 +787,7 @@ public class AudioRecorder: NSObject {
 
         recordingState = false
         isStopping = true
+        stopStallWatchdogLocked()
         cancelledDeliveryGeneration = deliveryGeneration
         let engine = audioEngine
         let callbackGroup = activeTapCallbacks
@@ -675,6 +845,7 @@ public class AudioRecorder: NSObject {
 
         recordingState = false
         isStopping = true
+        stopStallWatchdogLocked()
         cancelledDeliveryGeneration = deliveryGeneration
         let callbackGroup = activeTapCallbacks
         let removeTap = inputTapInstalled

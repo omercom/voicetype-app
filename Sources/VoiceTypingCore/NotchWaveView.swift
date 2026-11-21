@@ -1,136 +1,160 @@
 import AppKit
 import QuartzCore
+import simd
 
-/// Çentik adasındaki canlı ses dalgası (Siri / Sesli Notlar hissi).
+/// Çentik adasındaki canlı ses dalgası — Hex Dot Scope phosphor nokta matrisi.
 ///
-/// Çubuklar yerine iki katmanlı, uçları incelen tek bir çizgi: önde parlak ana
-/// dalga, arkada ters fazlı soluk bir yankı. Genlik mikrofon seviyesini anında
-/// izler; sessizlikte ince bir kıpırtıya iner. Yazılırken sabit genlikli, yavaş
-/// akan bir dalgaya döner. Tüm geometri `wavePath` ile saf ve test edilebilirdir.
+/// İki fazlı örgülü osiloskop izi mikrofon seviyesini 240 Hz simülasyonla izler;
+/// sessizlikte orta hatta zarif bir fosfor çizgisi gösterir, konuşmada sıcak
+/// altın-inci izler üretir, yazılırken ise safir mavi akışa döner.
 final class NotchWaveView: NSView {
-    enum Mode { case listening, processing }
+    enum Mode { case preparing, listening, processing }
 
-    static let size = CGSize(width: 36, height: 20)
+    static let size = CGSize(width: 50, height: 20)
 
-    private let primary = CAShapeLayer()
-    private let echo = CAShapeLayer()
-    /// Ana dalgayı renklendiren geçiş (dalga şekli maske olarak kullanılır).
-    private let primaryColor = CAGradientLayer()
-    /// Dalganın arkasında sesle nefes alan yumuşak ışık.
-    private let glow = CAGradientLayer()
-    private var glowOpacity: CGFloat = 0
-
-    /// Çentiğin siyahıyla bütünleşen tek renkli palet: uçlarda gümüş, ortada
-    /// beyaz. Renkli (pembe/mor) tonlar siyah adada yabancı duruyordu.
+    /// Çentiğin siyahıyla bütünleşen tek renkli palet (uyumluluk için korunur).
     static let palette: [NSColor] = [
         NSColor(calibratedWhite: 0.62, alpha: 1),
         NSColor(calibratedWhite: 1.00, alpha: 1),
         NSColor(calibratedWhite: 0.62, alpha: 1),
     ]
-    private var phase: CGFloat = 0
+
+    private let simulation = DotScopeSimulation(tuning: .notchSlot)
     private var lastTick: TimeInterval?
+    private var currentMode: Mode = .listening
+    private var currentLevel: CGFloat = 0
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.masksToBounds = false
-
-        // Işık dalgadan büyüktür ve metnin altına doğru taşar; kenarları saydamdır.
-        glow.type = .radial
-        glow.startPoint = CGPoint(x: 0.5, y: 0.5)
-        glow.endPoint = CGPoint(x: 1, y: 1)
-        glow.colors = [
-            NSColor(calibratedWhite: 1, alpha: 0.16).cgColor,
-            NSColor(calibratedWhite: 1, alpha: 0.05).cgColor,
-            NSColor.clear.cgColor,
-        ]
-        glow.locations = [0, 0.45, 1]
-        glow.frame = CGRect(x: -22, y: -12, width: Self.size.width + 44, height: Self.size.height + 24)
-        glow.opacity = 0
-        glow.actions = ["opacity": NSNull(), "frame": NSNull()]
-        layer?.addSublayer(glow)
-
-        for (shape, alpha, width) in [(echo, 0.32, 1.2), (primary, 1.0, 2.0)] {
-            shape.fillColor = nil
-            shape.strokeColor = NSColor(calibratedWhite: 1, alpha: alpha).cgColor
-            shape.lineWidth = width
-            shape.lineCap = .round
-            shape.lineJoin = .round
-            shape.actions = ["path": NSNull(), "strokeColor": NSNull()]
-            if shape !== primary { layer?.addSublayer(shape) }
-        }
-        // Ana dalga: renk geçişi, dalga çizgisiyle maskelenir.
-        primaryColor.startPoint = CGPoint(x: 0, y: 0.5)
-        primaryColor.endPoint = CGPoint(x: 1, y: 0.5)
-        primaryColor.colors = Self.palette.map(\.cgColor)
-        primaryColor.frame = CGRect(origin: .zero, size: Self.size)
-        primaryColor.mask = primary
-        primaryColor.shadowColor = NSColor.white.cgColor
-        primaryColor.shadowOpacity = 0.6
-        primaryColor.shadowRadius = 3
-        primaryColor.shadowOffset = .zero
-        primaryColor.actions = ["colors": NSNull(), "shadowOpacity": NSNull()]
-        layer?.addSublayer(primaryColor)
         reset()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) kullanılmaz") }
 
+    override var isOpaque: Bool { false }
+
+    func configure(processingStyle: DotScopeProcessingStyle, accentMode: DotScopeAccentMode) {
+        var tuning = simulation.tuning
+        tuning.processingStyle = processingStyle
+        simulation.updateTuning(tuning)
+        simulation.accentMode = accentMode
+        needsDisplay = true
+    }
+
     func reset() {
-        phase = 0
         lastTick = nil
-        glowOpacity = 0
-        // İlk ses örneğini beklemeden sessiz durum çizgisini göster.
-        render(level: 0, mode: .listening, animated: false)
+        currentMode = .listening
+        currentLevel = 0
+        simulation.restart(reduceMotion: true)
+        simulation.advance(dt: 0.05, stage: .recording, visible: true, loudnessDB: -120.0, reduceMotion: true)
         lastTick = nil
+        needsDisplay = true
     }
 
     /// - Parameters:
     ///   - level: 0...1 yumuşatılmış mikrofon seviyesi (dinlerken).
-    ///   - animated: Hareketi azalt açıksa `false`; dalga durağan çizilir.
+    ///   - animated: Hareketi azalt açıksa `false`.
     func render(level: CGFloat, mode: Mode, animated: Bool) {
         let now = ProcessInfo.processInfo.systemUptime
-        let dt = lastTick.map { CGFloat(min(0.1, now - $0)) } ?? 0
+        let dt: Float
+        if let prev = lastTick {
+            dt = Float(min(0.1, max(1.0 / 120.0, now - prev)))
+        } else {
+            dt = animated ? (1.0 / 60.0) : 0.22
+        }
         lastTick = now
+        currentMode = mode
+        currentLevel = max(0, min(1, level))
 
-        let amplitude: CGFloat
-        let speed: CGFloat
+        let stage: DotScopeStage
         switch mode {
+        case .preparing:
+            stage = .preparing
         case .listening:
-            // Sessizlikte görünür çizgi, konuşunca yüksekliğin neredeyse tamamı.
-            amplitude = 1.2 + 7.8 * min(1, max(0, level)).squareRoot()
-            speed = 7 + 10 * level
+            stage = .recording
         case .processing:
-            amplitude = 3.2
-            speed = 5
+            stage = .processing
         }
-        if animated { phase += speed * dt }
+        // 0...1 seviyesini DotScope'un beklediği dBFS aralığına (-90...-16 dB) eşle.
+        let loudnessDB: Float = (mode == .listening && currentLevel > 0.01)
+            ? (-58.0 + Float(currentLevel) * 42.0)
+            : -120.0
 
-        // Işık: sessizlikte görünmez, sesle hızla açılır, yavaşça söner.
-        // Yazılırken hafifçe nefes alır.
-        let targetGlow: CGFloat
-        switch mode {
-        case .listening:
-            targetGlow = min(1, pow(max(0, level), 0.7) * 1.3)
-        case .processing:
-            targetGlow = animated ? 0.35 + 0.2 * sin(phase * 0.5) : 0.35
+        if !animated && mode == .listening && currentLevel > 0.05 {
+            // Anlık durağan örneklemeler için simülasyonu deterministik adımlarla ilerlet.
+            for _ in 0..<8 {
+                simulation.advance(dt: 0.025, stage: stage, visible: true, loudnessDB: loudnessDB, reduceMotion: false)
+            }
+        } else {
+            simulation.advance(dt: dt, stage: stage, visible: true, loudnessDB: loudnessDB, reduceMotion: !animated)
         }
-        let tau: CGFloat = targetGlow > glowOpacity ? 0.05 : 0.35
-        glowOpacity += (targetGlow - glowOpacity) * (dt > 0 ? min(1, 1 - exp(-dt / tau)) : 1)
-
-        let bounds = CGRect(origin: .zero, size: Self.size)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        glow.opacity = Float(glowOpacity)
-        primaryColor.shadowOpacity = Float(0.35 + 0.5 * glowOpacity)
-        primary.frame = bounds
-        echo.frame = bounds
-        primary.path = Self.wavePath(size: Self.size, amplitude: amplitude, phase: phase)
-        echo.path = Self.wavePath(size: Self.size, amplitude: amplitude * 0.6, phase: -phase * 0.8 + 1.7)
-        CATransaction.commit()
+        needsDisplay = true
     }
 
-    /// Uçları sıfıra inen (çentik kenarına yapışmayan) iki frekanslı dalga.
+    override func draw(_ dirtyRect: NSRect) {
+        guard bounds.width > 0, bounds.height > 0, let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let pose = simulation.pose()
+        let tuning = simulation.tuning
+        let columns = tuning.columns
+        let rows = tuning.rows
+        let pitch = CGFloat(tuning.spacing)
+        let dots = simulation.dots
+        let offsetX = CGFloat(columns - 1) * 0.5
+        let offsetY = CGFloat(rows - 1) * 0.5
+        let centerRow = rows / 2
+
+        ctx.saveGState()
+        for j in 0..<rows {
+            for i in 0..<columns {
+                let idx = j * columns + i
+                guard idx < dots.count else { continue }
+                let val = dots[idx]
+                let power = max(val.x, 1e-5)
+                let fresh = val.y
+                let cx = bounds.midX + (CGFloat(i) - offsetX) * pitch
+                let cy = bounds.midY - (CGFloat(j) - offsetY) * pitch
+                guard bounds.insetBy(dx: 0.5, dy: 0.5).contains(CGPoint(x: cx, y: cy)) else { continue }
+
+                // Çentik içinde saf siyah zemin üzerinde keskin Hex fosfor noktaları:
+                // sessiz durumda zarif inci çizgisi; konuşmada sıcak altın/mavi iz.
+                let isCenter = (j == centerRow)
+                let floorAlpha: Float = isCenter ? 0.58 : 0.04
+                let alpha = min(1.0, floorAlpha + (1.0 - floorAlpha) * pow(power, 0.70))
+                let dotRadius = CGFloat(0.23 + 0.23 * pow(power, 0.56)) * pitch
+                let baseColor = mixColor(pose.palette.base, SIMD3<Float>(0.97, 0.96, 0.95), t: 0.30)
+                let rgb = mixColor(baseColor, pose.palette.core, t: min(1.0, power * 0.82 + fresh * 0.18))
+
+                if power > 0.06 {
+                    let haloR = dotRadius * 1.9
+                    ctx.setFillColor(NSColor(
+                        calibratedRed: CGFloat(rgb.x),
+                        green: CGFloat(rgb.y),
+                        blue: CGFloat(rgb.z),
+                        alpha: CGFloat(0.24 * power * power)
+                    ).cgColor)
+                    ctx.fillEllipse(in: CGRect(x: cx - haloR, y: cy - haloR, width: haloR * 2, height: haloR * 2))
+                }
+
+                ctx.setFillColor(NSColor(
+                    calibratedRed: CGFloat(rgb.x),
+                    green: CGFloat(rgb.y),
+                    blue: CGFloat(rgb.z),
+                    alpha: CGFloat(alpha)
+                ).cgColor)
+                ctx.fillEllipse(in: CGRect(x: cx - dotRadius, y: cy - dotRadius, width: dotRadius * 2, height: dotRadius * 2))
+            }
+        }
+        ctx.restoreGState()
+    }
+
+    private func mixColor(_ a: SIMD3<Float>, _ b: SIMD3<Float>, t: Float) -> SIMD3<Float> {
+        let clamped = min(1.0, max(0.0, t))
+        return a + (b - a) * clamped
+    }
+
+    /// Uçları sıfıra inen (çentik kenarına yapışmayan) iki frekanslı dalga (test ve geometri uyumu için).
     static func wavePath(size: CGSize, amplitude: CGFloat, phase: CGFloat, step: CGFloat = 0.75) -> CGPath {
         let path = CGMutablePath()
         let midY = size.height / 2

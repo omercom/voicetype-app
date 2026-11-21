@@ -347,16 +347,51 @@ public class TargetInputManager {
         return components.string
     }
 
+    static func isEquivalentLiveField(
+        sameElement: Bool,
+        isDescendantOrAncestor: Bool,
+        isSameContainerTextInput: Bool
+    ) -> Bool {
+        sameElement || isDescendantOrAncestor || isSameContainerTextInput
+    }
+
+    private func isAncestorOrDescendant(_ a: AXUIElement, _ b: AXUIElement, maxDepth: Int = 4) -> Bool {
+        func hasAncestor(_ node: AXUIElement, target: AXUIElement) -> Bool {
+            var current: AXUIElement? = node
+            for _ in 0..<maxDepth {
+                guard let elem = current else { break }
+                var parentRef: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(elem, kAXParentAttribute as CFString, &parentRef) == .success,
+                      let parent = axElement(from: parentRef), !CFEqual(parent, elem) else { break }
+                if CFEqual(parent, target) { return true }
+                current = parent
+            }
+            return false
+        }
+        return hasAncestor(a, target: b) || hasAncestor(b, target: a)
+    }
+
+    private func isDynamicWebOrEditorContainer(bundleID: String, appName: String) -> Bool {
+        if browserBundleIDs.contains(bundleID) || chatAndNoteBundleIDs.contains(bundleID) {
+            return true
+        }
+        let category = AppProfileFormatter.shared.detectCategory(bundleIdentifier: bundleID, appName: appName)
+        return category == .codeEditor || category == .terminal || category == .messaging
+    }
+
     /// Teslimattan önce uygulamayı, pencereyi ve kayıt başındaki alanı doğrular.
     /// Odak okunamıyorsa başka bir alana yazma riskine karşı teslimat durdurulur.
     public func verify(_ target: TargetContext) -> TargetCheck {
-        guard target.role != "AXFallbackApp", target.runningApp?.isTerminated != true else {
+        guard target.runningApp?.isTerminated != true else {
             return .changed(reason: "Hedef alan kullanılamıyor")
         }
         guard let appPID = focusedApplicationPID() else {
             return .changed(reason: "Odak doğrulanamadı")
         }
         guard appPID == target.pid else { return .changed(reason: "Başka uygulama odakta") }
+        if target.role == "AXFallbackApp" {
+            return .same
+        }
         guard let focused = focusedElement() else { return .changed(reason: "Odak doğrulanamadı") }
         var elementPID: pid_t = 0
         guard AXUIElementGetPid(focused, &elementPID) == .success else {
@@ -376,11 +411,35 @@ public class TargetInputManager {
             }
         }
 
+        let currentURL = target.pageURL == nil ? nil : pageURL(near: focused)
+        let rawSameElement = CFEqual(focused, target.element)
+        var equivalentElement = rawSameElement
+        if !rawSameElement,
+           elementPID == target.pid,
+           sameWindow != false,
+           (target.pageURL == nil || currentURL == target.pageURL) {
+            let related = isAncestorOrDescendant(focused, target.element)
+            let sameContainerInput = isDynamicWebOrEditorContainer(
+                bundleID: target.bundleIdentifier,
+                appName: target.appName
+            ) && isTextInputElement(
+                focused,
+                pid: target.pid,
+                bundleID: target.bundleIdentifier,
+                appName: target.appName
+            ).isTextInput
+            equivalentElement = Self.isEquivalentLiveField(
+                sameElement: rawSameElement,
+                isDescendantOrAncestor: related,
+                isSameContainerTextInput: sameContainerInput
+            )
+        }
+
         return Self.assessTarget(
             expectedPID: target.pid, focusedPID: elementPID,
-            sameElement: CFEqual(focused, target.element), sameWindow: sameWindow,
+            sameElement: equivalentElement, sameWindow: sameWindow,
             expectedPageURL: target.pageURL,
-            currentPageURL: target.pageURL == nil ? nil : pageURL(near: focused)
+            currentPageURL: currentURL
         )
     }
 

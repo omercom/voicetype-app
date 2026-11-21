@@ -16,6 +16,18 @@ final class NotchShapeView: NSView {
         didSet { needsDisplay = true }
     }
 
+    /// Ada alt kenarı için ince reaktif vurgu ışığı (varsayılan 0 = saf siyah).
+    var rimGlowColor: NSColor = NSColor(calibratedRed: 0.96, green: 0.86, blue: 0.65, alpha: 1.0) {
+        didSet { needsDisplay = true }
+    }
+    var rimGlowIntensity: CGFloat = 0.0 {
+        didSet {
+            if abs(oldValue - rimGlowIntensity) > 0.005 {
+                needsDisplay = true
+            }
+        }
+    }
+
     /// Hata ayıklama için ince çerçeve çizer mi?
     var showsOutline: Bool = false {
         didSet { needsDisplay = true }
@@ -27,6 +39,35 @@ final class NotchShapeView: NSView {
         let path = Self.makePath(in: bounds)
         fillColor.setFill()
         path.fill()
+
+        let clampedGlow = min(1.0, max(0.0, rimGlowIntensity))
+        if clampedGlow > 0.01 && fillColor.alphaComponent > 0.1 {
+            NSGraphicsContext.saveGraphicsState()
+            path.addClip()
+
+            // Alt kenara doğru yumuşak ortam ışığı: üst kulaklara ve ekran üst çerçevesine sızmaz.
+            let bottomGlowHeight = min(bounds.height * 0.42, 16.0)
+            if bottomGlowHeight > 2.0,
+               let gradient = NSGradient(colors: [
+                   rimGlowColor.withAlphaComponent(0.11 * clampedGlow),
+                   rimGlowColor.withAlphaComponent(0.0)
+               ]) {
+                gradient.draw(
+                    in: NSRect(x: 0, y: 0, width: bounds.width, height: bottomGlowHeight),
+                    angle: 90
+                )
+            }
+
+            // İnce kenar ışığı yalnızca üst kulakların altındaki gövde ve alt ovallerde çizilir.
+            let clipTop = max(0, bounds.height - NotchShapePath.topCornerRadius - 4.0)
+            if clipTop > 2.0 {
+                NSBezierPath(rect: NSRect(x: 0, y: 0, width: bounds.width, height: clipTop)).addClip()
+                rimGlowColor.withAlphaComponent(0.24 * clampedGlow).setStroke()
+                path.lineWidth = 1.0
+                path.stroke()
+            }
+            NSGraphicsContext.restoreGraphicsState()
+        }
 
         if showsOutline {
             NSColor.systemRed.setStroke()

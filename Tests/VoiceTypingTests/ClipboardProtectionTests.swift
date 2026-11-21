@@ -92,6 +92,24 @@ final class ClipboardProtectionTests: XCTestCase {
         XCTAssertEqual(rollbacks, 0)
     }
 
+    func testCancellationDuringShortcutPreparationRestoresOwnedClipboard() {
+        var cancelled = false
+        var rollbacks = 0
+        var attempts = 0
+        let environment = ClipboardPasteTransaction.Environment(
+            prepare: { true }, ownsClipboard: { true }, targetChangedReason: { nil },
+            snapshot: { .init(value: nil, count: nil, selection: nil) },
+            sendPaste: { cancelled = true; return false }, restore: {}, autoSubmit: {},
+            rollbackBeforeSending: { rollbacks += 1 }, isCancelled: { cancelled }, wait: { _ in }
+        )
+        let outcome = ClipboardPasteTransaction.run(text: "test", pasteDelay: 0,
+                                                     restoreClipboard: true, autoSubmit: false,
+                                                     environment: environment, onAttempted: { attempts += 1 })
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertEqual(rollbacks, 1)
+        XCTAssertEqual(attempts, 0)
+    }
+
     func testCancellationAfterSendDoesNotRestoreClipboardEarly() {
         var cancelled = false
         var rollbacks = 0

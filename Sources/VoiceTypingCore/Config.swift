@@ -126,6 +126,8 @@ public struct AppConfig: Codable {
     // Gösterge stili: "pill" (alt-ortada kapsül, varsayılan) veya
     // "notch" (MacBook çentiğine yapışan Dynamic Island).
     public var hud_style: String
+    public var hud_processing_effect: String
+    public var enable_repaste_shortcut: Bool
     // NOT: Yazı boyutu ayarı kaldırıldı. Çentik modunda yazı boyutu
     // TAMAMEN OTOMATİKTİR: sabit ada genişliğine sığacak şekilde küçülür
     // ve okunabilirlik tabanının altına inmez (bkz. NotchTypography).
@@ -179,6 +181,8 @@ public struct AppConfig: Codable {
         sound_theme: "modern",
         sound_volume: 0.8,
         hud_style: "pill",
+        hud_processing_effect: "flow",
+        enable_repaste_shortcut: true,
         decode_tokens_per_sec: 16,
         decode_token_base: 32,
         vad_gate_db: -60.0,
@@ -199,7 +203,7 @@ public struct AppConfig: Codable {
         case gemini_system_prompt, only_in_text_fields, restore_target_focus
         case enable_auto_submit, auto_submit_key, type_text_directly, enable_app_profiles, voice_snippets
         case sound_theme, sound_volume
-        case hud_style
+        case hud_style, hud_processing_effect, enable_repaste_shortcut
         case decode_tokens_per_sec, decode_token_base
         case vad_gate_db, vad_stay_ratio, vad_silence_hold_sec, vad_max_segment_sec
         case enable_translation, translation_target_language, translation_provider
@@ -240,6 +244,8 @@ public struct AppConfig: Codable {
         sound_theme: String = "modern",
         sound_volume: Double = 0.8,
         hud_style: String = "pill",
+        hud_processing_effect: String = "flow",
+        enable_repaste_shortcut: Bool = true,
         decode_tokens_per_sec: Int = 16,
         decode_token_base: Int = 32,
         vad_gate_db: Double = -60.0,
@@ -284,6 +290,8 @@ public struct AppConfig: Codable {
         self.sound_theme = sound_theme
         self.sound_volume = sound_volume
         self.hud_style = hud_style
+        self.hud_processing_effect = hud_processing_effect
+        self.enable_repaste_shortcut = enable_repaste_shortcut
         self.decode_tokens_per_sec = decode_tokens_per_sec
         self.decode_token_base = decode_token_base
         self.vad_gate_db = vad_gate_db
@@ -331,6 +339,8 @@ public struct AppConfig: Codable {
         sound_theme = try container.decodeIfPresent(String.self, forKey: .sound_theme) ?? "modern"
         sound_volume = try container.decodeIfPresent(Double.self, forKey: .sound_volume) ?? 0.8
         hud_style = try container.decodeIfPresent(String.self, forKey: .hud_style) ?? "pill"
+        hud_processing_effect = try container.decodeIfPresent(String.self, forKey: .hud_processing_effect) ?? "flow"
+        enable_repaste_shortcut = try container.decodeIfPresent(Bool.self, forKey: .enable_repaste_shortcut) ?? true
         decode_tokens_per_sec = try container.decodeIfPresent(Int.self, forKey: .decode_tokens_per_sec) ?? 16
         decode_token_base = try container.decodeIfPresent(Int.self, forKey: .decode_token_base) ?? 32
         vad_gate_db = try container.decodeIfPresent(Double.self, forKey: .vad_gate_db) ?? -60.0
