@@ -93,6 +93,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var isExplicitQuit: Bool = false
     private let recordingStartCoordinator = RecordingStartCoordinator()
     private var activeStartLatencyTrace: RecordingStartLatencyTrace?
+    private var activeStopLatencyTrace: RecordingStopLatencyTrace?
     private var isPreparingRecord = false
     private var pendingRecordStartGeneration: UInt64 = 0
     private var deliveryGate = DictationDeliveryGate()
@@ -1172,6 +1173,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleRecordStop(duration: Double) {
+        let releasedAt = ProcessInfo.processInfo.systemUptime
         let config = activeDictationConfig ?? ConfigManager.shared.config
 
         if isPreparingRecord {
@@ -1207,6 +1209,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Kullanıcı arayüzünde anında ve akıcı geri bildirim: HUD ve menü durumunu deşifre moduna al
         isFinishingRecord = true
+        activeStopLatencyTrace?.finish(reason: "superseded")
+        let stopTrace = RecordingStopLatencyTrace(provider: config.provider, now: releasedAt)
+        activeStopLatencyTrace = stopTrace
         setStatus(title: "⏳ Yazıyor...", menuText: "Durum: Deşifre Ediliyor...")
         RecordingHUD.shared.showTranscribing()
 
@@ -1215,9 +1220,11 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         let workItem = DispatchWorkItem { [weak self] in
             guard let self = self, self.isFinishingRecord else { return }
             self.isFinishingRecord = false
+            stopTrace.mark(.postRollFinished)
 
             // Mikrofon kaydını durdur ve kalan tüm PCM verisini akıt
             let (data, actualDuration) = AudioRecorder.shared.stop()
+            stopTrace.mark(.recorderStopped)
 
             // Mikrofon sustuktan sonra ana ses çıkışını geri aç ve bitiş sesini çal
             SystemAudioManager.shared.restoreAfterDictation()
@@ -1238,6 +1245,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 self.activeTargetContext = nil
                 self.lastRecordedAudioData = nil
                 BackgroundAudioController.shared.handleDictationEnded(config: config)
+                stopTrace.finish(reason: "noSpeech")
                 RecordingHUD.shared.showNotice(message: "Ses algılanmadı · Tekrar deneyin")
                 self.setStatus(title: "🔇", menuText: "Ses algılanmadı — tekrar deneyin", revertAfter: 1.8)
                 return
@@ -1248,12 +1256,14 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
             if let liveSession = self.currentLiveSession {
                 self.isTranscribing = true
+                stopTrace.mark(.providerRequestSent)
                 liveSession.finishAudio()
                 return
             }
 
             guard let attempt = self.deliveryGate.currentAttempt(generation) else { return }
             self.isTranscribing = true
+            stopTrace.mark(.providerRequestSent)
             Transcriber.shared.transcribe(
                 audioData: audioData,
                 config: config,
@@ -1323,6 +1333,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
 
+            let stopTrace = self.activeStopLatencyTrace
+            stopTrace?.markResult(provider: result.provider, model: result.model, providerLatency: result.latency)
+
             if result.success {
                 guard self.deliveryGate.beginDelivery(generation) else { return }
                 self.isTranscribing = true
@@ -1337,7 +1350,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                     self.activeTargetContext = nil
 
                     let polishedText = TextPolisher.shared.polish(text: recognizedText, config: config, targetContext: target)
+                    stopTrace?.mark(.polished)
                     guard !polishedText.isEmpty else {
+                        stopTrace?.finish(reason: "emptyText")
                         self.finishDictationDelivery()
                         let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: "Metin oluşturulamadı", recordingID: recoveryID)
                         self.refreshRecoveryMenu()
@@ -1378,6 +1393,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                                       delivery.recordAttempt(gate: &self.deliveryGate) else { return }
                                 // The request is sent, not necessarily verified. Keep its
                                 // lease and recovery file until the background result arrives.
+                                stopTrace?.mark(.injectionAttempted)
                                 self.finishDictationDelivery()
                                 RecordingHUD.shared.dismiss(animated: true)
                                 self.setStatus(title: "⏳", menuText: "Durum: Aktarım kontrol ediliyor...")
@@ -1387,6 +1403,8 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                             let showFeedback = delivery.shouldPresent(
                                 currentGeneration: self.pendingRecordStartGeneration, gate: self.deliveryGate
                             )
+                            stopTrace?.mark(.injectionCompleted)
+                            stopTrace?.finish(reason: "\(outcome)")
                             guard delivery.complete() else { return }
                             self.pendingDeliveries.removeValue(forKey: generation)
                             if self.activeDelivery === delivery {
@@ -1411,6 +1429,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                             delivery.complete()
                             self.pendingDeliveries.removeValue(forKey: generation)
                             self.finishDictationDelivery()
+                            stopTrace?.finish(reason: "injectionNotStarted")
                             let recoveryAvailable = DictationRecoveryAudioStore.shared.markFailed(error: "Metin hedef alana yapıştırılamadı", recordingID: recoveryID)
                             self.refreshRecoveryMenu()
                             SoundManager.shared.playCancel()
@@ -1451,6 +1470,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                     DictationRecoveryAudioStore.shared.clear(recordingID: recoveryID)
                     self.refreshRecoveryMenu()
                     BackgroundAudioController.shared.handleDictationEnded(config: config)
+                    stopTrace?.finish(reason: "noSpeech")
                     RecordingHUD.shared.showNotice(message: "Ses algılanmadı · Tekrar deneyin")
                     self.setStatus(title: "🔇", menuText: "Ses algılanmadı — tekrar deneyin", revertAfter: 1.8)
                 }
@@ -1464,6 +1484,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                     DictationRecoveryAudioStore.shared.clear(recordingID: recoveryID)
                     self.refreshRecoveryMenu()
                     BackgroundAudioController.shared.handleDictationEnded(config: config)
+                    stopTrace?.finish(reason: "noSpeech")
                     RecordingHUD.shared.showNotice(message: "Ses algılanmadı · Tekrar deneyin")
                     self.setStatus(title: "🔇", menuText: "Ses algılanmadı — tekrar deneyin", revertAfter: 1.8)
                     return
