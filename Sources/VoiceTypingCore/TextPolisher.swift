@@ -87,7 +87,8 @@ public final class TextPolisher {
     /// Metni aktif ayarlara, hedef uygulamaya ve dikte moduna göre temizler ve biçimlendirir
     public func polish(text: String, config: AppConfig, targetContext: TargetContext? = nil) -> String {
         // 0. Düşünme Modeli (<think>...</think>) ve Görünmez Karakterleri Temizle
-        var processed = Self.stripThinkingAndInvisibleChars(text)
+        // 0b. Whisper'ın sessizlikte uydurduğu altyazı kalıpları ("Altyazı M.K." vb.)
+        var processed = HallucinationFilter.clean(Self.stripThinkingAndInvisibleChars(text))
         guard !processed.isEmpty else { return "" }
 
         // 1. Dolgu Kelimeleri ve Kekeleme Temizleme (Filler & Stutter Removal)

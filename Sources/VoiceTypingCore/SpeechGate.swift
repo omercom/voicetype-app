@@ -257,3 +257,27 @@ public struct SpeechGate {
         state == .silent && speechEndedAt == nil
     }
 }
+
+// MARK: - Yapılandırmadan oluşturma
+
+extension SpeechGate {
+    /// `config.json` içindeki `vad_*` ayarlarıyla kapı oluşturur.
+    ///
+    /// Önceden bu ayarlar okunuyor ama kapıya hiç aktarılmıyordu; kapı her
+    /// zaman sabit varsayılanlarla çalışıyordu. Değerler güvenli aralıklara
+    /// sıkıştırılır; geçersiz (NaN/∞) değer varsayılana döner.
+    public init(config: AppConfig, initialNoiseFloorDB: Float = -70.0) {
+        self.init(
+            gateFloorDB: Float(Self.sanitized(Double(config.vad_gate_db), range: -90.0 ... -20.0, fallback: Double(Self.defaultGateFloorDB))),
+            stayRatio: Float(Self.sanitized(Double(config.vad_stay_ratio), range: 0.05 ... 1.0, fallback: Double(Self.defaultStayRatio))),
+            silenceHoldSeconds: Self.sanitized(Double(config.vad_silence_hold_sec), range: 0.1 ... 3.0, fallback: Self.defaultSilenceHoldSeconds),
+            maxSegmentSeconds: Self.sanitized(Double(config.vad_max_segment_sec), range: 1.0 ... 60.0, fallback: Self.defaultMaxSegmentSeconds),
+            initialNoiseFloorDB: initialNoiseFloorDB
+        )
+    }
+
+    static func sanitized(_ value: Double, range: ClosedRange<Double>, fallback: Double) -> Double {
+        guard value.isFinite else { return fallback }
+        return min(range.upperBound, max(range.lowerBound, value))
+    }
+}

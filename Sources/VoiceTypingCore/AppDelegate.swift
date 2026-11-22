@@ -1002,7 +1002,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             startRecorder: { [self] in
                 // Her dikte oturumu kapıyı sıfırlar: yeni oturumun ilk anları
                 // ortam gürültüsünü yeniden kalibre eder.
-                AudioRecorder.shared.resetSpeechGate()
+                AudioRecorder.shared.resetSpeechGate(config: config)
                 guard let attempt = deliveryGate.currentAttempt(generation) else { return false }
                 if config.enable_translation {
                     liveTranslation = makeLiveTranslation(config: config, target: activeTargetContext)

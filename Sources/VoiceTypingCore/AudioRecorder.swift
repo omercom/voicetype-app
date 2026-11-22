@@ -817,10 +817,16 @@ public class AudioRecorder: NSObject {
 
     /// Konuşma kapısını yeni bir kayıt oturumu için sıfırlar.
     /// Gürültü tabanı korunur (oda gürültüsü oturumlar arası değişmez).
-    public func resetSpeechGate() {
+    /// `config` verilirse kapı `vad_*` ayarlarıyla yeniden kurulur; gürültü
+    /// tabanı yine korunur.
+    public func resetSpeechGate(config: AppConfig? = nil) {
         lock.lock()
         defer { lock.unlock() }
-        speechGate.reset()
+        if let config {
+            speechGate = SpeechGate(config: config, initialNoiseFloorDB: speechGate.noiseFloorDB)
+        } else {
+            speechGate.reset()
+        }
     }
 
     // MARK: - Kayıt Durdurma ve Donanımı Anında Serbest Bırakma
