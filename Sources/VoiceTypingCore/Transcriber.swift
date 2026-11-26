@@ -747,13 +747,25 @@ public final class LiveGeminiStreamSession: NSObject, URLSessionWebSocketDelegat
 
 // MARK: - Apple Speech Canlı Mikrofon Akış Oturumu (On-Device Speech Streaming)
 
-private func appleSpeechLocaleIdentifier(for language: String) -> String {
-    let normalized = language.lowercased()
-    if normalized.hasPrefix("en") { return "en_US" }
-    if normalized.hasPrefix("de") { return "de_DE" }
-    if normalized.hasPrefix("fr") { return "fr_FR" }
-    if normalized.hasPrefix("es") { return "es_ES" }
-    return "tr_TR"
+internal func appleSpeechLocaleIdentifier(for language: String) -> String {
+    let trimmed = language.trimmingCharacters(in: .whitespacesAndNewlines)
+    let normalized = trimmed.replacingOccurrences(of: "_", with: "-").lowercased()
+    if normalized.hasPrefix("nl-be") { return "nl-BE" }
+    if normalized.hasPrefix("nl") { return "nl-NL" }
+    if normalized.hasPrefix("en-gb") { return "en-GB" }
+    if normalized.hasPrefix("en-au") { return "en-AU" }
+    if normalized.hasPrefix("en") { return "en-US" }
+    if normalized.hasPrefix("de") { return "de-DE" }
+    if normalized.hasPrefix("fr") { return "fr-FR" }
+    if normalized.hasPrefix("es") { return "es-ES" }
+    if normalized.hasPrefix("it") { return "it-IT" }
+    if normalized.hasPrefix("pt") { return "pt-BR" }
+    if normalized.hasPrefix("ru") { return "ru-RU" }
+    if normalized.hasPrefix("ar") { return "ar-SA" }
+    if normalized.hasPrefix("ja") { return "ja-JP" }
+    if normalized.hasPrefix("ko") { return "ko-KR" }
+    if normalized.hasPrefix("zh") { return "zh-CN" }
+    return "tr-TR"
 }
 
 /// Özel sözlük metnini sağlayıcı sınırlarına uygun terim listesine ayırır.
@@ -1445,6 +1457,9 @@ public class Transcriber {
     }
 
     public func warmAppleSpeech(language: String) {
+        if AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS {
+            AppleSpeechAnalyzerSupport.prewarmAndEnsureLocale(language)
+        }
         let localeIdentifier = appleSpeechLocaleIdentifier(for: language)
         appleWarmupQueue.async { [weak self] in
             guard let self,
@@ -1479,7 +1494,23 @@ public class Transcriber {
         authorizationAlreadyValidated: Bool = false,
         onInterim: ((String) -> Void)? = nil,
         completion: @escaping (TranscriptionResult) -> Void
-    ) -> LiveAppleSpeechSession? {
+    ) -> (any LiveStreamSession)? {
+        if #available(macOS 26.0, *) {
+            let session = LiveAppleSpeechAnalyzerSession(
+                language: config.language,
+                customVocabulary: config.custom_vocabulary
+            )
+            session.onInterim = onInterim
+            session.onCompletion = completion
+
+            lock.lock()
+            activeLiveSession = session
+            lock.unlock()
+
+            session.start()
+            return session
+        }
+
         let session = LiveAppleSpeechSession(
             language: config.language,
             customVocabulary: config.custom_vocabulary,
@@ -1728,6 +1759,25 @@ public class Transcriber {
         config: AppConfig,
         completion: @escaping (TranscriptionResult) -> Void
     ) {
+        if AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS {
+            AppleSpeechAnalyzerSupport.transcribeWAV(audioData, language: config.language) { [weak self] aneResult in
+                if aneResult.success {
+                    completion(aneResult)
+                } else {
+                    print("[AppleSpeech] ANE batch başarısız (\(aneResult.error ?? "")), klasik SFSpeechRecognizer yedeğine geçiliyor.")
+                    guard let self else {
+                        completion(aneResult)
+                        return
+                    }
+                    let chunks = AudioChunker.splitWAV(audioData, maxChunkSeconds: 45.0, overlapSeconds: 0.6)
+                    self.transcribeWAVChunks(chunks: chunks, maxConcurrency: 1, transcribeSingle: { chunkData, done in
+                        self.transcribeAppleSpeechChunk(audioData: chunkData, config: config, completion: done)
+                    }, completion: completion)
+                }
+            }
+            return
+        }
+
         let chunks = AudioChunker.splitWAV(audioData, maxChunkSeconds: 45.0, overlapSeconds: 0.6)
         transcribeWAVChunks(chunks: chunks, maxConcurrency: 1, transcribeSingle: { chunkData, done in
             self.transcribeAppleSpeechChunk(audioData: chunkData, config: config, completion: done)

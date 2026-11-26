@@ -2298,6 +2298,16 @@ final class VoiceTypingTests: XCTestCase {
         XCTAssertTrue(decoded.enable_app_profiles)
         XCTAssertEqual(decoded.voice_snippets["kısayol test"], "başarılı")
     }
+
+    func testAppleSpeechLocaleMappingAndANEDetection() {
+        XCTAssertEqual(appleSpeechLocaleIdentifier(for: "tr"), "tr-TR")
+        XCTAssertEqual(appleSpeechLocaleIdentifier(for: "nl"), "nl-NL")
+        XCTAssertEqual(appleSpeechLocaleIdentifier(for: "nl-BE"), "nl-BE")
+        XCTAssertEqual(appleSpeechLocaleIdentifier(for: "en-GB"), "en-GB")
+        XCTAssertEqual(appleSpeechLocaleIdentifier(for: "en"), "en-US")
+        XCTAssertEqual(appleSpeechLocaleIdentifier(for: "de"), "de-DE")
+        XCTAssertEqual(AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS, true)
+    }
 }
 
 

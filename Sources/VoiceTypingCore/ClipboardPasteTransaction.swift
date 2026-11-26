@@ -71,14 +71,25 @@ struct ClipboardPasteTransaction {
         // cannot immediately replace text that a slow editor has not read yet.
         let deadline = env.now() + TextInjector.verificationTimeout(for: text, before: before)
         var result: TextInjector.InjectionOutcome = before.isReadable ? .notInserted : .unverifiable
+        var sawFieldMutation = false
         repeat {
             env.wait(0.05)
             if env.isCancelled() { return .cancelled }
             if before.isReadable {
-                result = TextInjector.outcome(before: before, after: env.snapshot(), insertedText: text,
-                                              readRange: env.readRange)
+                let after = env.snapshot()
+                let stepOutcome = TextInjector.outcome(before: before, after: after, insertedText: text,
+                                                     readRange: env.readRange)
+                if stepOutcome == .verified {
+                    result = .verified
+                    break
+                }
+                if stepOutcome == .unverifiable || after != before {
+                    sawFieldMutation = true
+                    result = .unverifiable
+                } else if !sawFieldMutation {
+                    result = .notInserted
+                }
             }
-            if result == .verified { break }
         } while env.now() < deadline
 
         // Never retry Cmd+V: delayed updates must not produce duplicate text.

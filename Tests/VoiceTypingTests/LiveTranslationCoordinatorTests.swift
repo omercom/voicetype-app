@@ -317,4 +317,41 @@ final class LiveTranslationCoordinatorTests: XCTestCase {
             XCTAssertEqual($0 as? TranslationError, .incompleteTranslation)
         }
     }
+
+    func testLivePreviewEmitsAndExactMatchFinishesImmediately() {
+        let finalMock = MockTranslator()
+        let previewMock = MockTranslator()
+        var previews: [String] = []
+        let session = LiveTranslationCoordinator(
+            livePreviewDebounceInterval: 0.02,
+            polish: { $0 },
+            request: { text, completion in
+                finalMock.start(text, completion: completion)
+            },
+            livePreviewRequest: { text, completion in
+                previewMock.start(text, completion: completion)
+            },
+            onLivePreview: { previews.append($0) }
+        )
+
+        session.observe("Bugün hava güzel")
+        let wait = expectation(description: "debounce")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { wait.fulfill() }
+        waitForExpectations(timeout: 1.0)
+
+        XCTAssertEqual(previewMock.calls.map(\.text), ["Bugün hava güzel"])
+        previewMock.succeed(0, "The weather is nice today")
+        drainMain()
+        XCTAssertEqual(previews, ["The weather is nice today"])
+
+        var finalResult: TranslationResult?
+        session.finish(text: "Bugün hava güzel") { finalResult = $0 }
+        drainMain()
+        XCTAssertTrue(finalMock.calls.isEmpty)
+        XCTAssertEqual(finalResult, TranslationResult(text: "The weather is nice today", wasFallback: false))
+    }
+
+    func testDutchLanguageCodeMapsToDutch() {
+        XCTAssertEqual(TranslationService.languageName(for: "nl"), "Dutch")
+    }
 }

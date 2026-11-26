@@ -88,6 +88,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private var postRollGeneration: UInt64 = 0
     private var currentLiveSession: (any LiveStreamSession)?
     private var liveTranslation: LiveTranslationCoordinator?
+    private var hasLiveTranslationPreview: Bool = false
     private var lastRecordedAudioData: Data?
     private var revertStatusTimer: Timer?
     private var isExplicitQuit: Bool = false
@@ -179,6 +180,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         RecordingHUD.shared.warm()
         _ = SoundManager.shared
         _ = AudioRecorder.shared
+        if ConfigManager.shared.config.enable_translation {
+            TranslationService.shared.warmConnection(for: ConfigManager.shared.config)
+        }
 
         // Ayarlar güncellendiğinde menüyü yenile
         SettingsWindowController.shared.onConfigUpdated = { [weak self] in
@@ -187,6 +191,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             if TranscriptionProviderRegistry.supports(.requiresSpeechPermission, providerID: ConfigManager.shared.config.provider),
                self?.permissionSnapshot?.speechStatus == .authorized {
                 Transcriber.shared.warmAppleSpeech(language: ConfigManager.shared.config.language)
+            }
+            if ConfigManager.shared.config.enable_translation {
+                TranslationService.shared.warmConnection(for: ConfigManager.shared.config)
             }
             self?.refreshHistoryMenu()
             self?.refreshMenuStates()
@@ -348,7 +355,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 5. Sağlayıcı Submenu
         let providerMenu = NSMenu()
-        appleMenuItem = NSMenuItem(title: "Apple (cihaz içi, ücretsiz)", action: #selector(selectAppleProvider), keyEquivalent: "")
+        let appleMenuTitle = AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS
+            ? "Apple ANE · SpeechAnalyzer (çevrimdışı, 0 TL)"
+            : "Apple (cihaz içi, ücretsiz)"
+        appleMenuItem = NSMenuItem(title: appleMenuTitle, action: #selector(selectAppleProvider), keyEquivalent: "")
         appleMenuItem.target = self
         providerMenu.addItem(appleMenuItem)
 
@@ -823,7 +833,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
     private static func effectiveModelName(for provider: String, config: AppConfig) -> String {
         switch provider {
         case "apple":
-            return "SFSpeechRecognizer"
+            return AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS
+                ? "SpeechAnalyzer (ANE)"
+                : "SFSpeechRecognizer"
         case "gemini":
             return config.gemini_model
         case "assemblyai":
@@ -835,17 +847,59 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func makeLiveTranslation(config: AppConfig, target: TargetContext?) -> LiveTranslationCoordinator {
-        LiveTranslationCoordinator(
+    private func makeLiveTranslation(
+        config: AppConfig,
+        target: TargetContext?,
+        generation: UInt64,
+        attempt: UInt64
+    ) -> LiveTranslationCoordinator {
+        let canUseLocalLivePreview = TranslationService.usesAppleLocalProvider(config) &&
+            AppleLocalTranslationEngine.shared.isPairKnownInstalled(
+                from: config.language,
+                to: config.translation_target_language
+            )
+
+        let livePreviewReq: LiveTranslationCoordinator.Request? = canUseLocalLivePreview
+            ? { text, completion in
+                let task = TranslationService.shared.translateCancellable(
+                    text: text,
+                    from: config.language,
+                    to: config.translation_target_language,
+                    config: config,
+                    timeout: 4.0,
+                    lowLatency: true,
+                    completion: completion
+                )
+                return task.map { task in { task.cancel() } }
+            }
+            : nil
+
+        return LiveTranslationCoordinator(
+            livePreviewDebounceInterval: 0.12,
             polish: { text in
                 TextPolisher.shared.polish(text: text, config: config, targetContext: target)
             },
             request: { text, completion in
                 let task = TranslationService.shared.translateCancellable(
-                    text: text, from: config.language, to: config.translation_target_language,
-                    config: config, timeout: 6.0, completion: completion
+                    text: text,
+                    from: config.language,
+                    to: config.translation_target_language,
+                    config: config,
+                    timeout: 6.0,
+                    lowLatency: false,
+                    completion: completion
                 )
                 return task.map { task in { task.cancel() } }
+            },
+            livePreviewRequest: livePreviewReq,
+            onLivePreview: { [weak self] previewText in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self,
+                          self.deliveryGate.acceptsResult(generation, attempt: attempt),
+                          AudioRecorder.shared.isRecording else { return }
+                    self.hasLiveTranslationPreview = true
+                    RecordingHUD.shared.updateInterimText("🌐 " + previewText)
+                }
             }
         )
     }
@@ -867,6 +921,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
         activeDictationConfig = config
         liveTranslation?.cancel()
         liveTranslation = nil
+        hasLiveTranslationPreview = false
         let provider = TranscriptionProviderRegistry.normalize(config.provider)
         let effectiveModel = Self.effectiveModelName(for: provider, config: config)
 
@@ -896,6 +951,9 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             Transcriber.shared.warmAssemblyAIDictation()
         } else if provider == "groq" || (provider == "gemini" && !ConfigManager.isGeminiLiveModel(effectiveModel)) {
             Transcriber.shared.warmHTTPConnection(provider: provider)
+        }
+        if config.enable_translation {
+            TranslationService.shared.warmConnection(for: config)
         }
 
         DispatchQueue.main.async { [weak self] in
@@ -1006,19 +1064,26 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 AudioRecorder.shared.resetSpeechGate(config: config)
                 guard let attempt = deliveryGate.currentAttempt(generation) else { return false }
                 if config.enable_translation {
-                    liveTranslation = makeLiveTranslation(config: config, target: activeTargetContext)
+                    liveTranslation = makeLiveTranslation(
+                        config: config,
+                        target: activeTargetContext,
+                        generation: generation,
+                        attempt: attempt
+                    )
                 }
                 let firstAudio: () -> Void = { trace.mark(.firstAudioCallback) }
                 let providerAudio: () -> Void = { trace.mark(.firstProviderAudio) }
                 let onInterim: (String) -> Void = { [weak self] interimText in
                     DispatchQueue.main.async { [weak self] in
-                        guard self?.deliveryGate.acceptsResult(generation, attempt: attempt) == true else { return }
+                        guard let self, self.deliveryGate.acceptsResult(generation, attempt: attempt) else { return }
                         trace.mark(.firstInterim)
                         trace.finish(reason: "firstInterim")
                         if AudioRecorder.shared.isRecording {
-                            self?.liveTranslation?.observe(interimText)
+                            self.liveTranslation?.observe(interimText)
                         }
-                        RecordingHUD.shared.updateInterimText(interimText)
+                        if !config.enable_translation || !self.hasLiveTranslationPreview {
+                            RecordingHUD.shared.updateInterimText(interimText)
+                        }
                     }
                 }
                 let onCompletion: (TranscriptionResult) -> Void = { [weak self] result in
@@ -1027,7 +1092,10 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let started: Bool
                 if isApple {
-                    print("[AppDelegate] Sağlayıcı: Apple Speech (Yerel Canlı Akış) başlatılıyor...")
+                    let appleModeLabel = AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS
+                        ? "Apple ANE SpeechAnalyzer (Çevrimdışı Canlı Akış)"
+                        : "Apple Speech (Yerel Canlı Akış)"
+                    print("[AppDelegate] Sağlayıcı: \(appleModeLabel) başlatılıyor...")
                     let session = Transcriber.shared.startLiveAppleSpeechSession(
                         config: config,
                         authorizationAlreadyValidated: true,
@@ -1294,7 +1362,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
                 let elapsed = max(0, ProcessInfo.processInfo.systemUptime - startedAt)
-                let isSpeaking = AudioRecorder.shared.speechGateState() != .silent || AudioRecorder.shared.averagePower() > -46.0
+                let isSpeaking = AudioRecorder.shared.speechGateState() != .silent || AudioRecorder.shared.averagePower() > -34.0
                 switch policy.decision(elapsed: elapsed, isSpeaking: isSpeaking) {
                 case .wait(let nextDelay):
                     scheduleStep(after: nextDelay)
@@ -1307,7 +1375,7 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: step)
         }
 
-        let initialSpeaking = AudioRecorder.shared.speechGateState() != .silent || AudioRecorder.shared.averagePower() > -46.0
+        let initialSpeaking = AudioRecorder.shared.speechGateState() != .silent || AudioRecorder.shared.averagePower() > -34.0
         switch policy.decision(elapsed: 0, isSpeaking: initialSpeaking) {
         case .wait(let delay):
             scheduleStep(after: delay)
@@ -1441,13 +1509,23 @@ public class AppDelegate: NSObject, NSApplicationDelegate {
                     }
 
                     if config.enable_translation {
-                        RecordingHUD.shared.showTranscribing()
-                        self.setStatus(title: "🌐", menuText: "Çevriliyor...", revertAfter: 4.0)
+                        let pendingTranslationSpinner = DispatchWorkItem { [weak self] in
+                            guard let self, self.deliveryGate.isDelivering(generation) else { return }
+                            RecordingHUD.shared.showTranscribing()
+                            self.setStatus(title: "🌐", menuText: "Çevriliyor...", revertAfter: 4.0)
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: pendingTranslationSpinner)
 
-                        let translation = self.liveTranslation ?? self.makeLiveTranslation(config: config, target: target)
+                        let translation = self.liveTranslation ?? self.makeLiveTranslation(
+                            config: config,
+                            target: target,
+                            generation: generation,
+                            attempt: attempt
+                        )
                         self.liveTranslation = translation
                         translation.finish(text: polishedText) { [weak self] translationResult in
                             DispatchQueue.main.async {
+                                pendingTranslationSpinner.cancel()
                                 guard let self = self, self.deliveryGate.isDelivering(generation) else { return }
                                 if translationResult.wasFallback {
                                     if let err = translationResult.errorMessage, !err.isEmpty {

@@ -501,33 +501,34 @@ public class TextInjector {
         if let old = before.value, let new = after.value,
            (before.count == nil || before.count == old.utf16.count),
            (after.count == nil || after.count == new.utf16.count) {
-            let normalizedOld = normalizeLineEndings(old)
-            let normalizedNew = normalizeLineEndings(new)
+            let normalizedOld = normalizeForVerification(old)
+            let normalizedNew = normalizeForVerification(new)
+            let normalizedInsert = normalizeForVerification(insertedText)
             if let range = before.selection, range.location >= 0, range.length >= 0,
                range.location <= (old as NSString).length,
                range.length <= (old as NSString).length - range.location {
-                let expected = (old as NSString).replacingCharacters(in: range, with: insertedText)
-                if normalizedNew == normalizeLineEndings(expected) {
+                let expected = normalizeForVerification((old as NSString).replacingCharacters(in: range, with: insertedText))
+                if matchesExpected(normalizedNew, expected: expected, oldNormalized: normalizedOld) {
                     return normalizedNew == normalizedOld ? .unverifiable : .verified
                 }
                 if insertedText.hasSuffix(" ") {
                     let trimmedTail = String(insertedText.dropLast())
                     if !trimmedTail.isEmpty {
-                        let expectedTrimmed = (old as NSString).replacingCharacters(in: range, with: trimmedTail)
-                        if normalizedNew == normalizeLineEndings(expectedTrimmed) && normalizedNew != normalizedOld {
+                        let expectedTrimmed = normalizeForVerification((old as NSString).replacingCharacters(in: range, with: trimmedTail))
+                        if matchesExpected(normalizedNew, expected: expectedTrimmed, oldNormalized: normalizedOld) &&
+                           normalizedNew != normalizedOld {
                             return .verified
                         }
                     }
                 }
             } else if before.selection == nil {
-                let normalizedInsert = normalizeLineEndings(insertedText)
-                if matchesInsertion(old: normalizedOld, new: normalizedNew, text: normalizedInsert) {
+                if matchesInsertionVariants(old: normalizedOld, new: normalizedNew, text: normalizedInsert) {
                     return .verified
                 }
                 if normalizedInsert.hasSuffix(" ") {
                     let trimmedInsert = String(normalizedInsert.dropLast())
                     if !trimmedInsert.isEmpty,
-                       matchesInsertion(old: normalizedOld, new: normalizedNew, text: trimmedInsert) {
+                       matchesInsertionVariants(old: normalizedOld, new: normalizedNew, text: trimmedInsert) {
                         return .verified
                     }
                 }
@@ -540,16 +541,42 @@ public class TextInjector {
         }
 
         if let range = verificationRange(before: before, after: after, text: insertedText),
-           let observed = readRange(range),
-           normalizeLineEndings(observed) == normalizeLineEndings(insertedText) {
-            return .verified
+           let observed = readRange(range) {
+            let normObserved = normalizeForVerification(observed)
+            let normInserted = normalizeForVerification(insertedText)
+            if normObserved == normInserted ||
+                (normInserted.hasSuffix(" ") && !normInserted.dropLast().isEmpty && normObserved == String(normInserted.dropLast())) {
+                return .verified
+            }
         }
         return result
     }
 
-    private static func normalizeLineEndings(_ text: String) -> String {
+    private static func normalizeForVerification(_ text: String) -> String {
         text.replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+            .replacingOccurrences(of: "\u{200B}", with: "")
+    }
+
+    private static func matchesExpected(_ observed: String, expected: String, oldNormalized: String) -> Bool {
+        if observed == expected { return true }
+        // Chromium/Electron contenteditable (AXTextArea) sıkça yapıştırma sonrası sona bir \n ekler.
+        if !oldNormalized.hasSuffix("\n") && observed == expected + "\n" {
+            return true
+        }
+        return false
+    }
+
+    private static func matchesInsertionVariants(old: String, new: String, text: String) -> Bool {
+        if matchesInsertion(old: old, new: new, text: text) { return true }
+        if !old.hasSuffix("\n") && new.hasSuffix("\n") {
+            let trimmedNew = String(new.dropLast())
+            if trimmedNew != old && matchesInsertion(old: old, new: trimmedNew, text: text) {
+                return true
+            }
+        }
+        return false
     }
 
     /// A range read only proves insertion when the caret or character count also

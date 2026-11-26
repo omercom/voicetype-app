@@ -1,146 +1,180 @@
-# VoiceType 🎙️
+<div align="center">
 
-[![Son sürüm](https://img.shields.io/github/v/release/omercom/voicetype-app?label=Son%20s%C3%BCr%C3%BCm)](https://github.com/omercom/voicetype-app/releases/latest)
+# 🎙️ VoiceType
 
-**Mac'inizde konuşarak yazın. İsterseniz konuşmanızı başka bir dile çevirin.**
+**Mac'inizde klavyeden hızlı konuşarak yazın — isterseniz anında başka bir dile çevirerek.**
 
-VoiceType, macOS menü çubuğunda çalışan açık kaynaklı bir uygulamadır. Mesaj, e-posta veya belge yazarken konuşmanızı metne dönüştürür.
+[![Son sürüm](https://img.shields.io/github/v/release/omercom/voicetype-app?label=Son%20s%C3%BCr%C3%BCm&color=brightgreen)](https://github.com/omercom/voicetype-app/releases/latest)
+[![Platform](https://img.shields.io/badge/macOS-13%2B%20%7C%20Apple%20Silicon%20%26%20Intel-000000?logo=apple)](https://github.com/omercom/voicetype-app/releases/latest)
+[![Swift](https://img.shields.io/badge/Swift-100%25%20Native%20AppKit%20%26%20Metal-F05138?logo=swift&logoColor=white)](Package.swift)
+[![Gizlilik](https://img.shields.io/badge/%C3%87evrimd%C4%B1%C5%9F%C4%B1%20ANE-0%20TL%20%C2%B7%20API%20Anahtars%C4%B1z-0A84FF)](#motorlar-ve-%C3%BCcretsiz-kullan%C4%B1m)
 
-<img src="docs/images/ayarlar.png" alt="VoiceType genel ayarlar ekranı" width="520">
+Bir yazı alanına tıklayın · **Sağ Command (`⌘`)** tuşuna basılı tutup konuşun · Bıraktığınız anda temiz metin yerine yapışsın.<br>
+Başka bir dilde mi yazmanız gerekiyor? **Sağ Option (`⌥`)** ile Türkçe konuşun; Slack, Mail, Cursor veya tarayıcıya doğrudan İngilizce, Almanca, Fransızca, İspanyolca ya da Hollandaca düşsün.
 
-## Neler yapabilir?
+<br>
 
-- **Konuşarak yazın:** Bir metin alanı seçin, Sağ Command tuşuna basılı tutun ve konuşun.
-- **Çevirerek yazın:** Çeviriyi açın ve Sağ Option ile konuşun. Metin seçtiğiniz dile çevrilir.
-- **Motoru seçin:** Apple Speech, yerel Seda veya desteklenen bulut servislerini kullanın.
-- **Raycast ile başlatın:** Dikteyi Raycast komutlarıyla başlatın veya durdurun.
-- **Çalışmanıza devam edin:** VoiceType arka planda çalışır. Ayarları menü çubuğundan değiştirirsiniz.
+<img src="docs/images/ayarlar.png" alt="VoiceType genel ayarlar ekranı" width="600">
 
-## Ücretsiz kullanabilir miyim?
+<p>
+  <a href="https://github.com/omercom/voicetype-app/releases/latest"><strong>⬇️ Son Sürümü İndir (.zip)</strong></a> ·
+  <a href="#kurulum"><strong>⚡ Tek Komutla Kur</strong></a> ·
+  <a href="#neden-voicetype"><strong>✨ Özellikler</strong></a> ·
+  <a href="docs/VOICE_TYPING.md"><strong>📖 Teknik Kılavuz</strong></a>
+</p>
 
-Evet. VoiceType ücretsiz ve açık kaynaklıdır. **Normal dikte için ücretli bir servise veya API anahtarına ihtiyacınız yoktur.**
+</div>
 
-- **Apple Speech:** macOS ile gelir ve varsayılan olarak seçilidir. Desteklenen cihaz ve dillerde yerel tanıma kullanılır. Diğer durumlarda Apple'ın konuşma tanıma davranışı geçerlidir.
-- **Seda-v0.2:** Türkçe konuşmayı Mac'inizde işler. İlk kurulumda model indirilir; sonrasında dikte için bulut servisi ve API anahtarı gerekmez.
-- **Groq ve Gemini:** İsteğe bağlı bulut servisleridir. Hesap ve API anahtarı gerektirir. Uygun ücretsiz kotalar hafif kullanım için yeterli olabilir; kota, model erişimi ve fiyatlar değişebilir.
+---
 
-Çevirili dikte şu anda Groq veya Gemini gerektirir. Kullanımınız ücretsiz kotayı aşarsa veya ücretli bir plan seçerseniz sağlayıcınız ücret uygulayabilir. Güncel koşulları [Groq](https://console.groq.com/docs/rate-limits) ve [Gemini](https://ai.google.dev/gemini-api/docs/rate-limits) üzerinden kontrol edin.
+## ✨ Ekranınızda Nasıl Görünür?
 
-## Kurulum
+VoiceType arka planda sessizce menü çubuğunda bekler; yalnızca konuştuğunuz anda **Metal GPU hızlandırmalı 60 Hz fosfor nokta matrisi (`Hex Dot Scope`)** ile canlanır:
 
-**Gerekenler:** macOS 13 veya daha yeni bir sürüm ve mikrofon. Apple Silicon ve Intel Mac'ler desteklenir.
+| Dynamic Island — MacBook Çentiği | Kapsül & Hex Dot Scope — Ekranın Altı |
+|:---:|:---:|
+| <img src="docs/images/notch-view.png" alt="Notch View dikte göstergesi" width="360"> | <img src="docs/images/kapsul-view.png" alt="Kapsül dikte göstergesi" width="360"> |
+| Üst sekmeleri kapatmayan iki aşamalı çentik adası ve canlı metin/çeviri akışı | Tüm ekranlarda çalışan kompakt kapsül veya yazısız **Hex Minimal** görünümü |
 
-### Son sürümü indirin
+> **Ayarlar → Gelişmiş → Gösterge Stili** altından **Kapsül**, **Dynamic Island** veya **Hex Minimal** modunu ve **Akış / Nabız / Tarama** efektini anında önizleyerek seçebilirsiniz.
 
-1. [Sürümler sayfasını](https://github.com/omercom/voicetype-app/releases) açın.
-2. En son sürümün `VoiceType-...-macOS.zip` dosyasını indirin.
-3. Arşivi açın. `VoiceTyping.app` dosyasını Uygulamalar klasörüne taşıyıp açın.
+---
 
-> [!IMPORTANT]
-> İndirilen uygulama Developer ID ile imzalanmadı ve Apple tarafından noterlenmedi. macOS Gatekeeper uygulamanın açılmasını engelleyebilir. Kaynaktan kurulum aşağıdadır.
+## 🚀 Neden VoiceType?
 
-İndirilen paket otomatik başlangıç kurmaz. İsterseniz macOS giriş öğelerine VoiceTyping'i ekleyebilirsiniz.
+- **🧠 Tamamen Çevrimdışı & Sıfır Maliyet (Apple ANE):** Abonelik yok, zorunlu hesap yok. macOS 26+ üzerinde Apple Neural Engine (`SpeechAnalyzer` + `TranslationSession`) ile hem dikte hem de çeviri **internetsiz, süre sınırsız ve 0 TL** maliyetle Mac'inizde çalışır.
+- **🌐 Tek Tuşla Canlı Çevirerek Yazma (`Sağ ⌥`):** Türkçe düşünüp konuşun; konuştuğunuz cümleler HUD'da anlık çeviri önizlemesiyle (`🌐`) işlensin ve hedef uygulamaya seçtiğiniz dilde tek seferde yapışsın.
+- **⚡ İstediğiniz Yapay Zeka Motorunu Seçin:** Cihaz içi **Apple ANE / Apple Speech** ve yerel Türkçe **Harfiyen · Seda-v0.2** motorlarının yanında, dilediğiniz an **Google Gemini Live**, **Groq Whisper (`whisper-large-v3`)** veya **AssemblyAI (`Universal-3.5 Pro`)** bulut hızına geçin.
+- **🎯 Hedef Uygulamayı Tanıyan Akıllı Biçimlendirme:**
+  - **Terminal & Kod Editörleri (Cursor, VS Code, Ghostty, iTerm):** Komut satırı ve kod dostu biçimlendirme.
+  - **Sohbet (Slack, WhatsApp, Discord, Telegram):** Doğal ve akıcı mesajlaşma üslubu.
+  - **E-posta & Belgeler (Mail, Notion, Docs):** Tam noktalama ve resmi imla kuralları.
+- **⏎ El Değmeden Otomatik Gönderim (Auto-Submit):** ChatGPT, Claude, Cursor, Slack veya Terminal'de konuşmanız biter bitmez metni yapıştırıp `Enter`, `⌘Enter`, `⇧Enter` veya `Tab` tuşuna sizin yerinize basabilir.
+- **🔉 Siri Kalitesinde Akıllı Müzik Kısma (CoreAudio Ducking):** Dikte başladığında arka plandaki müziği sistem ses çubuğunuzu bozmadan `-13.5 dB` yumuşak geçişle kısar (veya duraklatır); tuşu bıraktığınızda eski seviyesine döndürür.
+- **🧹 Tertemiz Çıktı & Fısıltı Desteği:** *"ııı, şey, yani"* gibi dolgu kelimeleri ve sessizlikte oluşabilen altyazı halüsinasyonlarını otomatik temizler; **Mic Boost** ile gece kısık sesle veya fısıltıyla konuşurken bile net kayıt alır.
+- **🧩 Sesli Kısayollar & Özel Sözlük:** `"kısayol mail = ad@sirket.com"` gibi tetikleyiciler tanımlayın; teknik terimlerinizi, marka ve kişi adlarını özel sözlüğe ekleyerek her seferinde doğru yazdırın.
+- **🛡️ Kaya Gibi Güvenilir Yapıştırma:** Web, Electron ve IDE alanlarında yapıştırmayı doğrular, önceki panonuzu korur, `⌥⇧V` ile son dikteyi anında yeniden yapıştırır ve ağ kesilse bile kaydı kaybetmeden menüden tek tıkla yeniden deşifre etmenizi sağlar.
 
-### Terminal ile kurun
+---
 
-[Xcode Komut Satırı Araçları](https://developer.apple.com/xcode/resources/) gerekir. Terminal'e şu tek komutu yapıştırın:
+## 🎛️ Motorlar ve Ücretsiz Kullanım
+
+VoiceType **ücretsiz ve açık kaynaklıdır**. Normal dikte ve (macOS 26+ üzerinde) çevirili dikte için hiçbir ücretli servise veya API anahtarına ihtiyacınız yoktur:
+
+| Motor | Görev | Nerede Çalışır? | API Anahtarı | Öne Çıkan Gücü |
+| :--- | :--- | :---: | :---: | :--- |
+| **Apple ANE (`SpeechAnalyzer`)** | Dikte | 💻 Cihaz içi (macOS 26+) | Gerekmez | Çevrimdışı, süre sınırsız, 10+ dil paketi tek tıkla indirilir |
+| **Apple Speech** | Dikte | 💻 Yerel / macOS (13+) | Gerekmez | Kutudan çıktığı anda hazır varsayılan motor |
+| **Apple ANE (`Translation`)** | Çeviri (`Sağ ⌥`) | 💻 Cihaz içi (macOS 26+) | Gerekmez | 0 TL çevrimdışı çeviri + konuşurken canlı HUD önizlemesi |
+| **Harfiyen · Seda-v0.2** | Türkçe Dikte | 💻 Cihaz içi | Gerekmez | Türkçe için özelleştirilmiş tamamen yerel model |
+| **Google Gemini Live** | Dikte & Çeviri | ☁️ Bulut | İsteğe bağlı | WebSocket ile gerçek zamanlı akış ve özel sistem istemi |
+| **Groq Whisper** | Dikte & Çeviri | ☁️ Bulut | İsteğe bağlı | `whisper-large-v3` ile milisaniyeler içinde toplu deşifre |
+| **AssemblyAI Dictation** | Dikte | ☁️ Bulut | İsteğe bağlı | `Universal-3.5 Pro` ile öz-düzeltme ve dolgu temizliği |
+
+> Bulut servisleri isteğe bağlıdır; ücretsiz kotalar günlük hafif kullanım için çoğu zaman yeterlidir. Güncel kota ve fiyat koşullarını [Groq](https://console.groq.com/docs/rate-limits), [Gemini](https://ai.google.dev/gemini-api/docs/rate-limits) ve AssemblyAI sayfalarından kontrol edebilirsiniz.
+
+---
+
+## 📦 Kurulum
+
+**Gereksinimler:** macOS 13 Ventura veya daha yeni bir sürüm (Apple ANE çevrimdışı motorları için macOS 26+) · Apple Silicon (`M1–M4+`) veya Intel Mac · Mikrofon.
+
+### Seçenek 1 — Hazır Paketi İndirin (En Hızlı)
+
+1. [**Son sürüm sayfasından**](https://github.com/omercom/voicetype-app/releases/latest) `VoiceType-...-macOS.zip` dosyasını indirin.
+2. Arşivi açın ve `VoiceTyping.app` uygulamasını **Uygulamalar (`Applications`)** klasörüne sürükleyin.
+3. İlk açılışta uygulamaya **sağ tıklayıp Aç** deyin.
+
+> [!NOTE]
+> Hazır `.zip` paketi Apple Developer ID ile noterlenmediği için macOS Gatekeeper ilk açılışta onay isteyebilir. Sağ tıklayıp **Aç** diyebilir veya Terminal'de `xattr -dr com.apple.quarantine /Applications/VoiceTyping.app` komutunu çalıştırabilirsiniz. Mac açılışında otomatik başlamasını isterseniz **Ayarlar → Genel → Mac açıldığında otomatik başlat** kutusunu işaretlemeniz yeterlidir.
+
+### Seçenek 2 — Terminal ile Kaynaktan Kurun (Otomatik Başlatma Dahil)
+
+[Xcode Komut Satırı Araçları](https://developer.apple.com/xcode/resources/) kuruluysa şu tek satır uygulamayı derler, `/Applications` klasörüne kurar ve otomatik başlatmayı etkinleştirir:
 
 ```bash
 git clone --depth 1 https://github.com/omercom/voicetype-app.git && (cd voicetype-app && ./install.sh)
 ```
 
-Komut ana daldaki güncel kaynak kodunu indirir ve [kurulum betiğini](install.sh) çalıştırır. Bu kod, yayımlanmış son sürümden farklı olabilir. Betik uygulamayı derler, Uygulamalar klasörüne yerleştirir ve otomatik başlatmayı açar. `voicetype-app` klasörü zaten varsa komut mevcut dosyaları değiştirmez.
+### İlk İzinler (30 Saniye)
 
-### Uygulama nerede?
+Uygulama açıldığında ekranın sağ üstündeki **menü çubuğunda (`🎙️`)** yerini alır. **Ayarlar → İzinler** sekmesinden durum rozetlerini (`🟢`) görebilir ve tek tıkla ilgili macOS ayarına gidebilirsiniz:
 
-VoiceType'ın simgesi ekranın **sağ üstündeki menü çubuğunda**, saat ve Wi-Fi simgelerinin bulunduğu alanda görünür.
+1. **Mikrofon:** Konuşmanızı yakalamak için.
+2. **Erişilebilirlik:** Bas-konuş kısayolunu algılamak ve metni aktif yazı alanına yapıştırmak için.
+3. **Konuşma Tanıma:** Yalnızca Apple'ın yerleşik konuşma motorunu kullanırken gerekir.
 
-Simgeye tıklayarak **Ayarlar**, ses tanıma motoru ve diğer seçeneklere ulaşabilirsiniz. Ayarlarınızı değiştirdiğinizde ayrıca kaydetmeniz gerekmez.
+---
 
-### İzinleri açın
+## ⌨️ Nasıl Kullanılır?
 
-İlk kullanımda macOS'un istediği izinleri onaylayın:
+### Günlük Kısayollar
 
-1. **Mikrofon:** Konuşmanızı kaydetmek için.
-2. **Erişilebilirlik:** Kısayolu algılamak ve metni seçtiğiniz alana yazmak için.
-3. **Konuşma Tanıma:** Yalnızca Apple Speech kullanırken.
+| Kısayol / Tetikleyici | Ne Yapar? |
+| :--- | :--- |
+| **Sağ Command (`⌘`)** *(Basılı tut)* | Konuşmanızı seçili dilde metne çevirir ve bıraktığınızda imlecin olduğu yere yapıştırır |
+| **Sağ Option (`⌥`)** *(Basılı tut)* | Konuşmanızı hedef dile **çevirir** (ör. Türkçe → İngilizce) ve doğrudan çevirisini yapıştırır |
+| **Esc** | Aktif kaydı veya bekleyen çeviriyi hiçbir şey yazdırmadan anında iptal eder |
+| **Option + Shift + V (`⌥⇧V`)** | Son dikte edilen metni tek tuşla yeniden yapıştırır |
+| **Ek Tetikleyiciler** *(İsteğe bağlı)* | **Akıllı Hibrit** (dokun: aç-kapa / basılı tut: konuş), **Caps Lock** eller-serbest, **Fare Yan Tuşları (Mouse 4/5)** ve **MacBook Dikte/Mikrofon tuşu** |
 
-İzinlerin durumunu VoiceType → **Ayarlar → İzinler** bölümünden kontrol edebilirsiniz.
+### Konuşmanızı Anında Çevirin (`Sağ ⌥`)
 
-## Nasıl kullanılır?
+1. Menü çubuğundaki VoiceType simgesinden **Ayarlar → Yapay Zeka** sekmesini açın.
+2. **Çeviri (Sağ ⌥)** bölümünde **Sağ ⌥ Çeviri Açık** anahtarını etkinleştirin ve hedef dili seçin (*İngilizce, Almanca, İspanyolca, Fransızca, Hollandaca*).
+3. Motor olarak **Apple Çevrimdışı** seçiliyse (macOS 26+) **Paketi İndir** düğmesiyle dil paketini bir kez indirin — ya da **Google Gemini / Groq** bulut motorlarından birini seçin.
+4. Herhangi bir uygulamada **Sağ Option (`⌥`)** tuşuna basılı tutarak Türkçe konuşun; bıraktığınızda çevrilmiş metin yapıştırılır. **Sağ Command (`⌘`)** her zaman normal dikte yapmaya devam eder.
 
-### Konuşarak yazın
+### Yerel Türkçe Seda-v0.2 Motoru (İsteğe Bağlı)
 
-1. Mesaj, e-posta, not veya başka bir metin alanına tıklayın.
-2. **Sağ Command (⌘)** tuşuna basılı tutun ve konuşun.
-3. Bitirdiğinizde tuşu bırakın. VoiceType metni seçtiğiniz alana yapıştırır.
-
-Kayıt sırasında vazgeçmek için **Esc** tuşuna basın. Kısayolu ve diğer davranışları Ayarlar'dan değiştirebilirsiniz.
-
-### Dikte göstergesi
-
-| Notch View — MacBook çentiği | Kapsül — ekranın altı |
-|:---:|:---:|
-| <img src="docs/images/notch-view.png" alt="Notch View dikte göstergesi" width="320"> | <img src="docs/images/kapsul-view.png" alt="Kapsül dikte göstergesi" width="320"> |
-
-Görseller örnek metin ve temsili arka plan kullanır. **Ayarlar → Gelişmiş → Gösterge Stili** bölümünden görünümü seçebilirsiniz. Notch View, çentikli MacBook ekranlarında kullanılır; diğer ekranlarda kapsül görünür.
-
-### Konuşmanızı çevirin
-
-1. Menü çubuğundan **Ayarlar** penceresini açın.
-2. **Sağ Option ile Çevir** seçeneğini açın ve hedef dili seçin.
-3. Groq veya Gemini API anahtarınızı Ayarlar'a ekleyin.
-4. Bir metin alanına tıklayın. **Sağ Option (⌥)** tuşuna basılı tutarak konuşun ve bitince bırakın.
-
-Örneğin Türkçe konuşup İngilizce yazabilirsiniz. İngilizce, Almanca, İspanyolca ve Fransızca hedef diller arasındadır. **Sağ Command** normal dikte yapmaya devam eder.
-
-VoiceType, uygun canlı tanıma sonuçlarında cümleleri konuşma sırasında arka planda çevirmeye başlayabilir. Sonucu tek seferde yapıştırır. Çeviri başarısız olursa özgün metni korur ve sizi uyarır.
-
-### Raycast ile kullanın
-
-Önce bir metin alanı seçin. Raycast'te **Start VoiceType Dictation** ile konuşmaya başlayın; **Stop VoiceType Dictation** ile bitirin. **Open VoiceType Settings**, ayarları açar.
-
-Eklentiyi kendi Mac'inize kurmanız gerekir; henüz Raycast Store'da değildir. Raycast ve macOS otomasyon bağlantısı gerçek kullanımda henüz doğrulanmadı. [Raycast kurulum adımlarına](integrations/raycast/README.md) bakın.
-
-### Türkçe dikteyi tamamen yerel çalıştırın
-
-Seda-v0.2 için [uv](https://docs.astral.sh/uv/getting-started/installation/) ve VoiceType 1.1.0 veya daha yeni bir sürüm gerekir. Model, uygulamadan ayrı kurulur. Kaynak klasöründe şu komutu çalıştırın:
+macOS 13–15 sistemlerde de Türkçe konuşmayı tamamen yerel bir modelle işlemek isterseniz [uv](https://docs.astral.sh/uv/getting-started/installation/) kurduktan sonra kaynak klasöründe şu komutu çalıştırın:
 
 ```bash
 ./setup-stt.sh
 ```
 
-Kurulum bitene kadar Seda, sağlayıcı listesinde görünmez. Kurulumdan sonra menüyü yeniden açın ve **Ses Tanıma → Harfiyen · Seda-v0.2** seçeneğini seçin. Dili **Türkçe (`tr`)** olarak ayarlayın. İlk kurulum model dosyalarını indirir; sonraki dikte işlemleri Mac'inizde çalışır. Tek kayıt en fazla 10 dakika sürer. Noktalama biçimlendiricisi bu uygulamada henüz kullanılmaz.
+Kurulum tamamlandığında menüden **Ses Tanıma → Harfiyen · Seda-v0.2** seçeneği aktif olur. Ayrıntılar ve model lisansları için [Seda kurulum rehberine](runtime/seda/README.md) göz atabilirsiniz.
 
-Model lisansları ve ayrıntılar için [Seda kurulumuna](runtime/seda/README.md) bakın.
+### Raycast Entegrasyonu
 
-## Gizlilik
+Raycast üzerinden **Start VoiceType Dictation**, **Stop VoiceType Dictation** ve **Open VoiceType Settings** komutlarıyla dikteyi klavye akışınıza bağlayabilirsiniz. Kurulum adımları için [Raycast rehberine](integrations/raycast/README.md) bakın.
 
-- **Apple Speech:** Desteklenen durumlarda konuşma cihazda işlenir. Diğer durumlarda Apple'ın konuşma tanıma koşulları geçerlidir.
-- **Seda:** Kurulum tamamlandıktan sonra konuşma tanıma Mac'inizde yapılır.
-- **Groq, Gemini ve AssemblyAI:** Bu servislerden biri ses tanıma için seçilirse kayıt o servise gönderilir.
-- **Çeviri:** Metin Groq veya Gemini'ye gönderilir. Otomatik seçimde Groq başarısız olursa metin yapılandırılmış Gemini'ye de gönderilebilir. Ara cümleler konuşma sürerken gönderilebilir.
-- **İzinler:** Erişilebilirlik izni, kısayollar ve metni hedef alana yazmak için kullanılır. API anahtarları kullanıcı hesabındaki yerel ayarlarda saklanır.
+---
 
-Özel içerikleri göndermeden önce seçtiğiniz sağlayıcının gizlilik ve ücret koşullarını kontrol edin. Ayrıntılı bilgi: [dikte ve çeviri kılavuzu](docs/VOICE_TYPING.md).
+## 🔒 Gizlilik
 
-## Yardım
+- **Cihaz İçi Modlar (Apple ANE & Seda-v0.2):** Çevrimdışı dil paketleri kurulduğunda sesiniz ve çeviriniz Mac'inizden dışarı çıkmaz. (Desteklenmeyen sistem/dil durumlarında Apple'ın standart konuşma tanıma koşulları geçerlidir.)
+- **Bulut Modları (Gemini, Groq, AssemblyAI):** Yalnızca siz bu sağlayıcılardan birini seçtiğinizde ses veya çevrilecek metin ilgili servise gönderilir.
+- **Şeffaf İzin Kapsamı:** Erişilebilirlik izni yalnızca kısayol tuşunu dinlemek, aktif yazı alanını doğrulamak ve `⌘V` ile metni teslim etmek için kullanılır; normal klavye yazımınız kaydedilmez. API anahtarlarınız yalnızca kendi kullanıcı hesabınızdaki yerel yapılandırmada saklanır.
 
-- **Simge görünmüyor:** Uygulamanın açık olduğunu ve menü çubuğunda yeterli yer bulunduğunu kontrol edin.
-- **Kısayol çalışmıyor:** Mikrofon ve Erişilebilirlik izinlerini kontrol edin. Apple Speech için Konuşma Tanıma iznini de açın.
-- **Metin yazılmıyor:** Önce düzenlenebilir bir metin alanı seçin. Bazı güvenli alanlar veya uygulamalar otomatik yapıştırmayı sınırlayabilir.
-- **Çeviri çalışmıyor:** Çevirinin açık olduğunu, API anahtarını, internet bağlantısını ve sağlayıcı kotasını kontrol edin.
+Daha derin teknik mimari ve gizlilik ayrıntıları için [VoiceType Teknik Kılavuzuna](docs/VOICE_TYPING.md) bakın.
 
-Daha fazla kurulum, gizlilik ve sorun giderme bilgisi için [VoiceType kılavuzuna](docs/VOICE_TYPING.md) bakın.
+---
 
-## Geliştiriciler
+## 🛠️ Sorun Giderme
+
+- **Menü çubuğunda simge görünmüyor:** Uygulamanın açık olduğundan ve MacBook çentiğinin sağında menü öğeleri için yer kaldığından emin olun.
+- **Kısayol tepki vermiyor:** **Ayarlar → İzinler** sekmesinden **Mikrofon** ve **Erişilebilirlik** rozetlerinin yeşil (`🟢`) olduğunu doğrulayın.
+- **Metin hedef alana yapışmıyor:** Yazmaya başlamadan önce düzenlenebilir bir metin kutusuna tıklayın. Yapıştırma doğrulanamazsa metin kaybolmaz; panonuzda hazır bekler veya menüden yeniden yapıştırılabilir.
+- **Çeviri çalışmıyor:** **Yapay Zeka** sekmesindeki **Test Et** düğmesiyle çevrimdışı dil paketinin kurulu olduğunu veya bulut API anahtarınızın aktif olduğunu tek tıkla kontrol edin.
+
+---
+
+## 👨‍💻 Geliştiriciler
 
 ```bash
+# Release binary ve VoiceTyping.app paketini derle
+./scripts/build.sh
+
+# Universal (arm64 + x86_64) dağıtım paketini üret
+./scripts/package-release.sh
+
+# Birim testlerini çalıştır (Xcode kurulu ortamda)
 swift test
 ```
 
-Canlı API ve mikrofon testleri varsayılan olarak kapalıdır. Bunları etkinleştirme koşulları [test kılavuzunda](docs/VOICE_TYPING.md) açıklanır.
+Canlı API ve mikrofon testleri varsayılan olarak kapalıdır; etkinleştirme değişkenleri [teknik kılavuzda](docs/VOICE_TYPING.md) açıklanmıştır.
 
-## Lisans ve teşekkür
+## 📄 Lisans ve Teşekkür
 
-VoiceType için MIT lisansı belirtilmiştir; depoda henüz ayrı bir lisans dosyası yoktur. Harfiyen ve Seda-v0.2'in kendi lisansları geçerlidir. Bazı tasarım yaklaşımları için [AlwaysWhisper](https://github.com/kzkhykw/AlwaysWhisper) projesinden yararlanılmıştır.
+VoiceType için MIT lisansı belirtilmiştir; depoda henüz ayrı bir lisans dosyası yoktur. Harfiyen ve Seda-v0.2 modellerinin kendi lisans koşulları geçerlidir. Bazı arayüz ve etkileşim yaklaşımlarında [AlwaysWhisper](https://github.com/kzkhykw/AlwaysWhisper) ve [Hex](https://github.com/kitlangton/Hex) projelerinden ilham alınmıştır.

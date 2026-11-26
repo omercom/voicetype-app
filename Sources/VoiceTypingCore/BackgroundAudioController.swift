@@ -34,7 +34,7 @@ public final class BackgroundAudioController: @unchecked Sendable {
         switch config.background_audio_mode.lowercased() {
         case "ducking":
             guard !isAudioDucked else { return }
-            isAudioDucked = AudioDuckingService.shared.duckAudio(to: 0.20)
+            isAudioDucked = AudioDuckingService.shared.duckAudio(attenuationDB: -13.5)
         case "pause":
             guard !isMediaPaused else { return }
             MediaPlaybackManager.shared.pauseForDictation()

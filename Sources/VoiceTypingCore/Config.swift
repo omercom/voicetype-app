@@ -143,7 +143,7 @@ public struct AppConfig: Codable {
     public var vad_max_segment_sec: Double
     public var enable_translation: Bool
     public var translation_target_language: String
-    public var translation_provider: String // "auto", "groq", "gemini"
+    public var translation_provider: String // "apple", "gemini", "groq", "auto"
     public var keep_microphone_warm_seconds: Int
     public var enable_caps_lock_dictation: Bool
     public var mouse_trigger_button: Int // 0=kapalı, 3=Mouse 4, 4=Mouse 5

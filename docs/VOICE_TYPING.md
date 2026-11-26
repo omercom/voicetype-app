@@ -53,9 +53,9 @@ VoiceType, macOS menü çubuğunda çalışan bir dikte uygulamasıdır. Bir met
 ### Konuşmayı çevirerek yapıştırma
 
 1. Ayarlar'da **Normal Dikte Tuşu** olarak **Sağ Command** seçin. Bu tuş, çeviri açık olsa bile çevirmeden dikte eder.
-2. **Konuşma Dili** alanını `tr` yapın. **Sağ Option ile Çevir** seçeneğini açın ve hedef dil olarak **İngilizce [en]** seçin.
-3. Geçerli bir Groq veya Gemini API anahtarı girin. Otomatik seçim önce Groq'u dener. Groq başarısızsa ve Gemini anahtarı varsa aynı metni Gemini'ye de gönderir. Bu, iki sağlayıcıda da ücret oluşturabilir. Özellikle Groq veya Gemini seçildiğinde diğer sağlayıcı denenmez.
-4. Hedef yazı alanını seçin ve Sağ Option ile konuşun. Uygulama son çeviriyi hedef doğrulamasından sonra bir kez yapıştırır.
+2. **Konuşma Dili** alanını `tr` yapın. **Yapay Zeka** sekmesinde **Sağ ⌥ Çeviri Açık** seçeneğini etkinleştirin ve hedef dil olarak **İngilizce** (veya Almanca, İspanyolca, Fransızca, Hollandaca) seçin.
+3. Çeviri motoru olarak macOS 26+ üzerinde **Apple Çevrimdışı** (`TranslationSession`) seçebilirsiniz (API anahtarı gerekmez; dil paketi uygulama içinden indirilebilir) veya geçerli bir Groq / Gemini API anahtarı girebilirsiniz. Otomatik bulut seçiminde önce Groq denenir; başarısızsa ve Gemini anahtarı varsa metin Gemini'ye gönderilebilir.
+4. Hedef yazı alanını seçin ve Sağ Option ile konuşun. Apple Çevrimdışı modunda konuşma sürerken HUD'da canlı çeviri önizlemesi (`🌐`) gösterilir ve son çeviri hedef doğrulamasından sonra bir kez yapıştırılır.
 
 Normal dikte tuşu da Sağ Option olarak seçilirse, çeviri açıkken Sağ Option çevirili dikteye ayrılır. Normal dikte için farklı bir tuş seçin. Basılı tutma, akıllı mod ve aç/kapa modu iki kısayol için de geçerlidir. Diğer dikte kısayolu başlayan kaydı durdurmaz.
 
@@ -132,6 +132,11 @@ Mikrofon testleri `VOICETYPE_TEST_MICROPHONE=1` ile, sabit metin kullanan canlı
   - `AudioRecorder.swift`: `AVFoundation` ile 16kHz mono WAV ses kaydı, ham sessizlik kontrolü ve sağlayıcıya göre tek geçişli ses hazırlığı.
   - `UtteranceClarityEnhancer.swift`: RMPN netlik raporu, bounded statik kazanç/soft limiter ve batch sağlayıcı işlem planı.
   - `Transcriber.swift`: Saf Swift `URLSession`/WebSocket ile Apple Speech, Groq, Gemini ve AssemblyAI istemcisi, paylaşımlı `CustomVocabularyParser`.
+  - `AppleSpeechAnalyzerEngine.swift`: macOS 26+ Apple Silicon ANE `SpeechAnalyzer` (`SpeechTranscriber` / `DictationTranscriber`) çevrimdışı canlı akış, WAV deşifre ve `AssetInventory` dil paketi yönetimi.
+  - `AppleLocalTranslationEngine.swift`: macOS 26+ `Translation.framework` (`TranslationSession`) cihaz içi çevrimdışı çeviri ve dil paketi kurulum yardımcısı.
+  - `AudioDuckingService.swift`: macOS CoreAudio yerel `AudioDeviceDuck` (`-13.5 dB` yumuşak rampa) ve desibel tabanlı arka plan sesi kısma servisi.
+  - `HallucinationFilter.swift`: Sessizlikte oluşabilen Whisper altyazı ve kapanış jeneriği halüsinasyonlarını temizleyen filtre.
+  - `RecordingStopLatencyTrace.swift`: Tuş bırakma ile yapıştırma arasındaki her aşamayı milisaniye bazında izleyen gecikme ölçüm katmanı.
   - `AssemblyAIDictation.swift`: Dictation multipart protokolü, WAV doğrulama, `stt_prompt`/keyterms ve yanıt fallback'i.
   - `GeminiModelCatalog.swift`: Gemini API `models.list` yanıtını yalnızca ses transkripsiyon modelleri için filtreler.
   - `AppProfileFormatter.swift`: Hedef uygulamaya özel (Terminal, Code Editor, Messaging, Document) biçimlendirme kuralları.

@@ -145,6 +145,23 @@ final class ClipboardPasteTransactionTests: XCTestCase {
         XCTAssertEqual(h.events, ["prepare", "send"])
     }
 
+    func testPostPasteEnterClearDoesNotDowngradeToNotInserted() {
+        let h = Harness()
+        var pollCount = 0
+        h.snapshotOverride = {
+            pollCount += 1
+            if pollCount == 1 {
+                return TextInjector.FieldSnapshot(value: "", count: 0, selection: NSRange(location: 0, length: 0))
+            }
+            if pollCount <= 3 {
+                return TextInjector.FieldSnapshot(value: "başka şey", count: 9)
+            }
+            // Kullanıcı Enter'a basıp mesajı gönderdi -> alan yeniden boşaldı.
+            return TextInjector.FieldSnapshot(value: "", count: 0, selection: NSRange(location: 0, length: 0))
+        }
+        XCTAssertEqual(h.run("yeni metin"), .unverifiable)
+    }
+
     func testChangedClipboardBeforeSendDoesNotPasteUnrelatedText() {
         let h = Harness()
         h.onWait = { h.clipboard = "yeni kopyalama"; h.generation += 1 }

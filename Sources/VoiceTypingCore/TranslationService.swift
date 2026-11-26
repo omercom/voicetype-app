@@ -77,6 +77,7 @@ public enum TranslationError: LocalizedError, Equatable {
 public final class TranslationRequestHandle {
     private let lock = NSLock()
     private var task: URLSessionDataTask?
+    private var asyncTask: Task<Void, Never>?
     private var cancelled = false
     private var finished = false
 
@@ -92,6 +93,17 @@ public final class TranslationRequestHandle {
         lock.unlock()
     }
 
+    fileprivate func start(_ nextTask: Task<Void, Never>) {
+        lock.lock()
+        guard !cancelled, !finished else {
+            lock.unlock()
+            nextTask.cancel()
+            return
+        }
+        asyncTask = nextTask
+        lock.unlock()
+    }
+
     fileprivate var isActive: Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -103,6 +115,7 @@ public final class TranslationRequestHandle {
         guard !cancelled, !finished else { lock.unlock(); return }
         finished = true
         task = nil
+        asyncTask = nil
         lock.unlock()
         completion(result)
     }
@@ -112,9 +125,12 @@ public final class TranslationRequestHandle {
         guard !cancelled, !finished else { lock.unlock(); return }
         cancelled = true
         let activeTask = task
+        let activeAsyncTask = asyncTask
         task = nil
+        asyncTask = nil
         lock.unlock()
         activeTask?.cancel()
+        activeAsyncTask?.cancel()
     }
 }
 
@@ -124,12 +140,15 @@ public final class TranslationService: TranslationServiceProtocol {
     public static let defaultGeminiTranslationModel = "gemini-3.6-flash"
 
     private let session: URLSession
+    private let warmLock = NSLock()
+    private var lastWarmByHost: [String: CFAbsoluteTime] = [:]
 
     public init(session: URLSession = .shared) {
         self.session = session
     }
 
     private enum ChosenProvider {
+        case apple
         case groq
         case gemini
     }
@@ -140,6 +159,7 @@ public final class TranslationService: TranslationServiceProtocol {
         switch code.lowercased() {
         case "tr": return "Turkish"
         case "en": return "English"
+        case "nl": return "Dutch"
         case "de": return "German"
         case "es": return "Spanish"
         case "fr": return "French"
@@ -148,6 +168,11 @@ public final class TranslationService: TranslationServiceProtocol {
         case "ru": return "Russian"
         case "ja": return "Japanese"
         case "zh": return "Chinese"
+        case "ko": return "Korean"
+        case "ar": return "Arabic"
+        case "pl": return "Polish"
+        case "sv": return "Swedish"
+        case "uk": return "Ukrainian"
         default: return code
         }
     }
@@ -569,13 +594,20 @@ public final class TranslationService: TranslationServiceProtocol {
         return words.contains { stopwords.contains($0) }
     }
 
-    // MARK: - Provider Resolution
+    // MARK: - Provider Resolution & Warming
+
+    public static func usesAppleLocalProvider(_ config: AppConfig) -> Bool {
+        let mode = config.translation_provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return mode == "apple" || mode == "apple_auto"
+    }
 
     private func resolveProviders(config: AppConfig) -> [ChosenProvider] {
         let hasGroqKey = !config.groq_api_key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasGeminiKey = !config.gemini_api_key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
-        switch config.translation_provider.lowercased() {
+        switch config.translation_provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "apple", "apple_auto":
+            return [.apple]
         case "groq":
             return hasGroqKey ? [.groq] : []
         case "gemini":
@@ -585,6 +617,40 @@ public final class TranslationService: TranslationServiceProtocol {
             if hasGroqKey { providers.append(.groq) }
             if hasGeminiKey { providers.append(.gemini) }
             return providers
+        }
+    }
+
+    /// Pre-warms Apple ANE translation weights and/or HTTP TLS connections for configured providers.
+    public func warmConnection(for config: AppConfig) {
+        let providers = resolveProviders(config: config)
+        if providers.contains(.apple) {
+            let src = config.language
+            let tgt = config.translation_target_language
+            Task {
+                await AppleLocalTranslationEngine.shared.warmSession(from: src, to: tgt)
+            }
+        }
+        var hosts: [String] = []
+        if providers.contains(.groq) {
+            hosts.append("https://api.groq.com/openai/v1/models")
+        }
+        if providers.contains(.gemini) {
+            hosts.append("https://generativelanguage.googleapis.com/v1beta/models")
+        }
+        let now = CFAbsoluteTimeGetCurrent()
+        for host in hosts {
+            warmLock.lock()
+            let last = lastWarmByHost[host] ?? 0
+            let shouldWarm = (now - last) >= 20.0
+            if shouldWarm {
+                lastWarmByHost[host] = now
+            }
+            warmLock.unlock()
+            guard shouldWarm, let url = URL(string: host) else { continue }
+            var req = URLRequest(url: url)
+            req.httpMethod = "HEAD"
+            req.timeoutInterval = 4.0
+            session.dataTask(with: req) { _, _, _ in }.resume()
         }
     }
 
@@ -610,6 +676,7 @@ public final class TranslationService: TranslationServiceProtocol {
         to targetLanguage: String = "en",
         config: AppConfig,
         timeout: TimeInterval = 6.0,
+        lowLatency: Bool = false,
         completion: @escaping (TranslationResult) -> Void
     ) -> TranslationRequestHandle? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -620,13 +687,14 @@ public final class TranslationService: TranslationServiceProtocol {
         let providers = resolveProviders(config: config)
         guard !providers.isEmpty else {
             completion(TranslationResult(text: text, wasFallback: true,
-                                         errorMessage: "Çeviri için Groq veya Gemini API anahtarı yapılandırılmamış"))
+                                         errorMessage: "Çeviri için Groq/Gemini API anahtarı veya Apple yerel motor yapılandırılmamış"))
             return nil
         }
         let handle = TranslationRequestHandle()
         performAttempt(index: 0, providers: providers, text: text, trimmed: trimmed,
                        sourceLanguage: sourceLanguage, targetLanguage: targetLanguage,
-                       config: config, timeout: timeout, handle: handle, completion: completion)
+                       config: config, timeout: timeout, lowLatency: lowLatency,
+                       handle: handle, completion: completion)
         return handle
     }
 
@@ -639,14 +707,52 @@ public final class TranslationService: TranslationServiceProtocol {
         targetLanguage: String,
         config: AppConfig,
         timeout: TimeInterval,
+        lowLatency: Bool,
         handle: TranslationRequestHandle,
         completion: @escaping (TranslationResult) -> Void
     ) {
         guard handle.isActive else { return }
+
+        if case .apple = providers[index] {
+            let asyncTask = Task { [self] in
+                guard handle.isActive else { return }
+                let result: TranslationResult
+                do {
+                    let raw = try await AppleLocalTranslationEngine.shared.translate(
+                        text: trimmed,
+                        from: sourceLanguage,
+                        to: targetLanguage,
+                        lowLatency: lowLatency
+                    )
+                    let sanitized = Self.sanitizeOutput(raw)
+                    if Self.validateTranslation(translatedText: sanitized, originalText: trimmed, targetLanguage: targetLanguage) {
+                        result = TranslationResult(text: sanitized, wasFallback: false)
+                    } else {
+                        result = TranslationResult(text: text, wasFallback: true,
+                                                   errorMessage: "Apple yerel çeviri hedef dil doğrulamasını geçemedi")
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    let msg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                    result = TranslationResult(text: text, wasFallback: true, errorMessage: msg)
+                }
+                guard handle.isActive else { return }
+                advanceAfterAttempt(result, index: index, providers: providers, text: text, trimmed: trimmed,
+                                    sourceLanguage: sourceLanguage, targetLanguage: targetLanguage,
+                                    config: config, timeout: timeout, lowLatency: lowLatency,
+                                    handle: handle, completion: completion)
+            }
+            handle.start(asyncTask)
+            return
+        }
+
         let request: URLRequest
         let parser: (Data, HTTPURLResponse?) throws -> String
         do {
             switch providers[index] {
+            case .apple:
+                return
             case .groq:
                 request = try Self.makeGroqRequest(text: trimmed, from: sourceLanguage, to: targetLanguage,
                                                    apiKey: config.groq_api_key, timeout: timeout)
@@ -660,7 +766,8 @@ public final class TranslationService: TranslationServiceProtocol {
             advanceAfterAttempt(TranslationResult(text: text, wasFallback: true, errorMessage: error.localizedDescription),
                                 index: index, providers: providers, text: text, trimmed: trimmed,
                                 sourceLanguage: sourceLanguage, targetLanguage: targetLanguage,
-                                config: config, timeout: timeout, handle: handle, completion: completion)
+                                config: config, timeout: timeout, lowLatency: lowLatency,
+                                handle: handle, completion: completion)
             return
         }
 
@@ -691,7 +798,8 @@ public final class TranslationService: TranslationServiceProtocol {
             }
             advanceAfterAttempt(result, index: index, providers: providers, text: text, trimmed: trimmed,
                                 sourceLanguage: sourceLanguage, targetLanguage: targetLanguage,
-                                config: config, timeout: timeout, handle: handle, completion: completion)
+                                config: config, timeout: timeout, lowLatency: lowLatency,
+                                handle: handle, completion: completion)
         }
         handle.start(task)
     }
@@ -706,6 +814,7 @@ public final class TranslationService: TranslationServiceProtocol {
         targetLanguage: String,
         config: AppConfig,
         timeout: TimeInterval,
+        lowLatency: Bool,
         handle: TranslationRequestHandle,
         completion: @escaping (TranslationResult) -> Void
     ) {
@@ -713,7 +822,8 @@ public final class TranslationService: TranslationServiceProtocol {
         if result.wasFallback && index + 1 < providers.count {
             performAttempt(index: index + 1, providers: providers, text: text, trimmed: trimmed,
                            sourceLanguage: sourceLanguage, targetLanguage: targetLanguage,
-                           config: config, timeout: timeout, handle: handle, completion: completion)
+                           config: config, timeout: timeout, lowLatency: lowLatency,
+                           handle: handle, completion: completion)
         } else {
             handle.complete(result, completion: completion)
         }

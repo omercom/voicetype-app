@@ -56,8 +56,11 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         )
     ]
     private var languageField: NSTextField!
+    private var spokenLanguagePopUp: NSPopUpButton!
     public var translationCheckbox: NSButton!
     public var targetLanguagePopUp: NSPopUpButton!
+    public var translationProviderPopUp: NSPopUpButton!
+    private var appleTranslationDownloadButton: NSButton!
     private var playSoundsCheckbox: NSButton!
     private var hapticFeedbackCheckbox: NSButton!
     private var removeFillerWordsCheckbox: NSButton!
@@ -77,6 +80,33 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     var sedaInstallationCheck: () -> Bool = { SedaTranscriber.isInstalled() }
     private var providerNoteLabel: NSTextField!
     private var appleStatusLabel: NSTextField!
+    private var appleLocalePopUp: NSPopUpButton!
+    private var appleDownloadModelButton: NSButton!
+    private var appleUseLocaleButton: NSButton!
+    private var appleDownloadProgressBar: NSProgressIndicator!
+    private var appleDownloadProgressLabel: NSTextField!
+    private var appleTechDetailLabel: NSTextField!
+    private var lastAppleDiagnostics: AppleANEDiagnostics?
+    private var tab2TranslationStatusLabel: NSTextField!
+    private var tab2TranslationTestButton: NSButton!
+    private var tab2TranslationProgressBar: NSProgressIndicator!
+    private var tab2TranslationTechDetailLabel: NSTextField!
+    private var tab2TranslationTestResultLabel: NSTextField!
+    private var translationDownloadPollTimer: Timer?
+    private var activeDownloadPair: (src: String, tgt: String)?
+
+    private let appleQuickLocales: [(code: String, shortCode: String, name: String)] = [
+        ("tr-TR", "tr", "Türkçe"),
+        ("nl-NL", "nl", "Hollandaca"),
+        ("en-US", "en", "İngilizce (US)"),
+        ("en-GB", "en-GB", "İngilizce (UK)"),
+        ("de-DE", "de", "Almanca"),
+        ("fr-FR", "fr", "Fransızca"),
+        ("es-ES", "es", "İspanyolca"),
+        ("it-IT", "it", "İtalyanca"),
+        ("ja-JP", "ja", "Japonca"),
+        ("ar-SA", "ar", "Arapça")
+    ]
     private var groqKeyField: NSTextField!
     private var groqModelPopUp: NSPopUpButton!
     private var groqStatusLabel: NSTextField!
@@ -365,7 +395,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // TAB 1: Genel & Kısayol (Two-Column Layout)
     // =========================================================================
     private func buildTab1GeneralView() -> NSView {
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 550))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 650, height: 535))
 
         // 1. Kısayol Tuşu
         let keyLabel = createSectionLabel(text: "Normal Dikte Tuşu", y: 18)
@@ -408,7 +438,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(modeLabel)
 
         modeSegmentedControl = NSSegmentedControl(
-            labels: ["Basılı Tut (Push-to-Talk)", "Akıllı Hibrit", "Aç / Kapa"],
+            labels: ["Basılı Tut", "Akıllı", "Aç / Kapa"],
             trackingMode: .selectOne,
             target: self,
             action: #selector(modeSegmentedChanged(_:))
@@ -421,9 +451,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         // Gizli yedek popup
         modePopUp = NSPopUpButton(frame: NSRect(x: 175, y: 102, width: 440, height: 26), pullsDown: false)
-        modePopUp.addItem(withTitle: "Basılı Tut (Push-to-Talk) - Tuşa basılı tut konuş, bırak yaz")
-        modePopUp.addItem(withTitle: "Akıllı Hibrit (Smart) - Kısa tıkla aç-kapa, uzun bas tut-konuş")
-        modePopUp.addItem(withTitle: "Aç / Kapa (Toggle) - Tuşa tıkla başlasın, tıkla dursun")
+        modePopUp.addItem(withTitle: "Basılı Tut - Tuşa basılı tut konuş, bırak yaz")
+        modePopUp.addItem(withTitle: "Akıllı - Kısa dokun aç-kapa, uzun bas konuş")
+        modePopUp.addItem(withTitle: "Aç / Kapa - Tıkla başlasın, tıkla dursun")
         modePopUp.isHidden = true
         container.addSubview(modePopUp)
 
@@ -439,12 +469,12 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         customVocabField = createSingleLineInputField(
             frame: NSRect(x: 175, y: 170, width: 440, height: 24),
-            placeholder: "Kubernetes, PostgreSQL, Next.js, SPM..."
+            placeholder: "Özel isimler, marka veya terimler (virgülle ayırın)..."
         )
         customVocabField.delegate = self
         container.addSubview(customVocabField)
 
-        let vocabNote = createNoteLabel(text: "Teknik terimleri virgülle ayırarak girin. Whisper ve Gemini modelleri bu kelimeleri öncelikli tanır.", y: 196)
+        let vocabNote = createNoteLabel(text: "Sık kullandığınız özel isim ve terimleri yazın; uygulama bunları daha doğru yazar.", y: 196)
         container.addSubview(vocabNote)
 
         // Ayırıcı
@@ -461,39 +491,35 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         )
         languageField.alignment = .center
         languageField.delegate = self
+        languageField.isHidden = true
         container.addSubview(languageField)
 
-        let langHint = NSTextField(labelWithString: "('tr': Türkçe, 'en': İngilizce, 'auto': Otomatik Algıla)")
-        langHint.frame = NSRect(x: 245, y: 233, width: 370, height: 20)
+        spokenLanguagePopUp = NSPopUpButton(frame: NSRect(x: 175, y: 229, width: 205, height: 24), pullsDown: false)
+        for item in [
+            ("Türkçe", "tr"),
+            ("İngilizce", "en"),
+            ("Hollandaca", "nl"),
+            ("Almanca", "de"),
+            ("Fransızca", "fr"),
+            ("İspanyolca", "es"),
+            ("İtalyanca", "it"),
+            ("Otomatik Algıla", "auto")
+        ] {
+            spokenLanguagePopUp.addItem(withTitle: item.0)
+            spokenLanguagePopUp.lastItem?.representedObject = item.1
+        }
+        spokenLanguagePopUp.target = self
+        spokenLanguagePopUp.action = #selector(spokenLanguagePopUpChanged(_:))
+        container.addSubview(spokenLanguagePopUp)
+
+        let langHint = NSTextField(labelWithString: "Hangi dilde konuşacağınızı seçin")
+        langHint.frame = NSRect(x: 388, y: 233, width: 227, height: 18)
         langHint.font = NSFont.systemFont(ofSize: 11)
         langHint.textColor = .secondaryLabelColor
         container.addSubview(langHint)
 
-        // Çeviri (Translation)
-        translationCheckbox = NSButton(checkboxWithTitle: "Sağ Option ile Çevir", target: self, action: #selector(checkboxChanged(_:)))
-        translationCheckbox.toolTip = "Sağ Option çevirili dikteyi başlatır. Normal dikte tuşu çevirmeden yazar. Metin Groq veya Gemini'ye gönderilir. Otomatik seçimde Groq başarısızsa metin Gemini'ye de gönderilebilir. Ara cümleler konuşma sürerken gönderilebilir. Normal dikte tuşu da Sağ Option ise çeviri önceliklidir."
-        translationCheckbox.setButtonType(.switch)
-        translationCheckbox.frame = NSRect(x: 175, y: 258, width: 200, height: 20)
-        container.addSubview(translationCheckbox)
-
-        let targetLangLabel = NSTextField(labelWithString: "Hedef Dil:")
-        targetLangLabel.frame = NSRect(x: 385, y: 259, width: 65, height: 18)
-        targetLangLabel.font = NSFont.systemFont(ofSize: 12)
-        targetLangLabel.textColor = .secondaryLabelColor
-        container.addSubview(targetLangLabel)
-
-        targetLanguagePopUp = NSPopUpButton(frame: NSRect(x: 450, y: 256, width: 165, height: 24), pullsDown: false)
-        targetLanguagePopUp.addItem(withTitle: "İngilizce [en]")
-        targetLanguagePopUp.lastItem?.representedObject = "en"
-        targetLanguagePopUp.addItem(withTitle: "Almanca [de]")
-        targetLanguagePopUp.lastItem?.representedObject = "de"
-        targetLanguagePopUp.addItem(withTitle: "İspanyolca [es]")
-        targetLanguagePopUp.lastItem?.representedObject = "es"
-        targetLanguagePopUp.addItem(withTitle: "Fransızca [fr]")
-        targetLanguagePopUp.lastItem?.representedObject = "fr"
-        targetLanguagePopUp.target = self
-        targetLanguagePopUp.action = #selector(targetLanguageChanged(_:))
-        container.addSubview(targetLanguagePopUp)
+        let transHint = createNoteLabel(text: "Dikte ve Çeviri (Sağ ⌥) yapay zeka motorlarını üstteki 'Yapay Zeka' sekmesinden yönetebilirsiniz.", y: 259)
+        container.addSubview(transHint)
 
         // Ayırıcı
         container.addSubview(createSeparator(y: 284))
@@ -502,23 +528,23 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         let optsLabel = createSectionLabel(text: "Seçenekler", y: 298)
         container.addSubview(optsLabel)
 
-        hapticFeedbackCheckbox = NSButton(checkboxWithTitle: "Dokunsal titreşim (Trackpad Force Touch tıkı)", target: self, action: #selector(checkboxChanged(_:)))
+        hapticFeedbackCheckbox = NSButton(checkboxWithTitle: "Kayıt başlarken ve biterken hafif titreşim ver", target: self, action: #selector(checkboxChanged(_:)))
         hapticFeedbackCheckbox.frame = NSRect(x: 175, y: 296, width: 440, height: 18)
         container.addSubview(hapticFeedbackCheckbox)
 
-        removeFillerWordsCheckbox = NSButton(checkboxWithTitle: "Dolgu kelimelerini otomatik temizle ('ııı', 'şey', 'yani', 'hımm')", target: self, action: #selector(checkboxChanged(_:)))
+        removeFillerWordsCheckbox = NSButton(checkboxWithTitle: "Gereksiz dolgu sözleri temizle ('ııı', 'şey', 'yani')", target: self, action: #selector(checkboxChanged(_:)))
         removeFillerWordsCheckbox.frame = NSRect(x: 175, y: 316, width: 440, height: 18)
         container.addSubview(removeFillerWordsCheckbox)
 
-        saveHistoryCheckbox = NSButton(checkboxWithTitle: "Dikte geçmişini menü çubuğunda sakla (Son 15 dikte)", target: self, action: #selector(checkboxChanged(_:)))
+        saveHistoryCheckbox = NSButton(checkboxWithTitle: "Son 15 dikteyi menü çubuğunda sakla", target: self, action: #selector(checkboxChanged(_:)))
         saveHistoryCheckbox.frame = NSRect(x: 175, y: 336, width: 440, height: 18)
         container.addSubview(saveHistoryCheckbox)
 
-        playSoundsCheckbox = NSButton(checkboxWithTitle: "Sistem ses efektlerini çal", target: self, action: #selector(checkboxChanged(_:)))
+        playSoundsCheckbox = NSButton(checkboxWithTitle: "Ses efektlerini çal", target: self, action: #selector(checkboxChanged(_:)))
         playSoundsCheckbox.frame = NSRect(x: 175, y: 356, width: 440, height: 18)
         container.addSubview(playSoundsCheckbox)
 
-        micBoostCheckbox = NSButton(checkboxWithTitle: "Mikrofon Akıllı Kazanç (AGC Boost - Fısıltı Güçlendirme & Tanh Sınırlayıcı)", target: self, action: #selector(checkboxChanged(_:)))
+        micBoostCheckbox = NSButton(checkboxWithTitle: "Kısık sesleri otomatik güçlendir (Fısıltı desteği)", target: self, action: #selector(checkboxChanged(_:)))
         micBoostCheckbox.frame = NSRect(x: 175, y: 376, width: 440, height: 18)
         container.addSubview(micBoostCheckbox)
 
@@ -555,14 +581,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(bgAudioLabel)
 
         backgroundAudioPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 472, width: 440, height: 26), pullsDown: false)
-        backgroundAudioPopUp.addItem(withTitle: "🔉 Ses Kısma (Audio Ducking - %20'ye İndir) [Varsayılan]")
-        backgroundAudioPopUp.addItem(withTitle: "⏸️ Medyayı Duraklat (Play/Pause Tuşu)")
-        backgroundAudioPopUp.addItem(withTitle: "❌ Arka Plan Sesine Dokunma (Kapalı)")
+        backgroundAudioPopUp.addItem(withTitle: "🔉 Konuşurken müziği kıs (Önerilen)")
+        backgroundAudioPopUp.addItem(withTitle: "⏸️ Konuşurken müziği duraklat")
+        backgroundAudioPopUp.addItem(withTitle: "❌ Arka plan sesine dokunma")
         backgroundAudioPopUp.target = self
         backgroundAudioPopUp.action = #selector(backgroundAudioChanged(_:))
         container.addSubview(backgroundAudioPopUp)
 
-        let bgAudioHint = createNoteLabel(text: "Dikte sırasında arka plandaki müzik veya video sesini otomatik kısar veya duraklatır.", y: 502)
+        let bgAudioHint = createNoteLabel(text: "Dikte sırasında diğer uygulamaların sesini macOS'un yerel sistemiyle yumuşakça kısar veya duraklatır; sistem ses seviyeniz değişmez.", y: 502)
         container.addSubview(bgAudioHint)
 
         return container
@@ -582,8 +608,322 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         autoSave()
     }
 
+    private static func turkishLanguageDisplayName(_ code: String) -> String {
+        let base = AppleLocalTranslationEngine.normalizedLanguageCode(code, fallback: code.lowercased())
+        switch base.lowercased() {
+        case "tr": return "Türkçe"
+        case "en", "en-us": return "İngilizce"
+        case "en-gb": return "İngilizce (UK)"
+        case "nl": return "Hollandaca"
+        case "de": return "Almanca"
+        case "fr": return "Fransızca"
+        case "es": return "İspanyolca"
+        case "it": return "İtalyanca"
+        case "ja": return "Japonca"
+        case "ar": return "Arapça"
+        case "auto": return "Otomatik"
+        default: return code.uppercased()
+        }
+    }
+
+    private func syncSpokenLanguagePopUp(with code: String) {
+        let norm = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let base = (norm == "auto") ? "auto" : AppleLocalTranslationEngine.normalizedLanguageCode(norm, fallback: "tr")
+        if let idx = spokenLanguagePopUp?.itemArray.firstIndex(where: {
+            ($0.representedObject as? String)?.lowercased() == base.lowercased()
+        }) {
+            spokenLanguagePopUp.selectItem(at: idx)
+        } else {
+            spokenLanguagePopUp?.selectItem(at: 0)
+        }
+    }
+
+    @objc private func spokenLanguagePopUpChanged(_ sender: NSPopUpButton) {
+        guard let code = sender.selectedItem?.representedObject as? String else { return }
+        languageField?.stringValue = code
+        autoSave()
+        refreshAppleANEDiagnostics(selectCurrentConfigLocale: true)
+        refreshAppleTranslationStatus()
+    }
+
     @objc public func targetLanguageChanged(_ sender: NSPopUpButton) {
         autoSave()
+        refreshAppleTranslationStatus()
+    }
+
+    @objc private func translationProviderChanged(_ sender: NSPopUpButton) {
+        autoSave()
+        refreshAppleTranslationStatus()
+    }
+
+    private func selectedTargetLanguageCode() -> String {
+        if let code = targetLanguagePopUp?.selectedItem?.representedObject as? String, !code.isEmpty {
+            return code
+        }
+        switch targetLanguagePopUp?.indexOfSelectedItem ?? 0 {
+        case 1: return "de"
+        case 2: return "es"
+        case 3: return "fr"
+        case 4: return "nl"
+        default: return "en"
+        }
+    }
+
+    private func selectedTranslationProviderID() -> String {
+        if let id = translationProviderPopUp?.selectedItem?.representedObject as? String, !id.isEmpty {
+            return id
+        }
+        return ConfigManager.shared.config.translation_provider
+    }
+
+    private func refreshAppleTranslationStatus() {
+        let rawSrc = languageField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let src = rawSrc.isEmpty ? ConfigManager.shared.config.language : rawSrc
+        let tgt = selectedTargetLanguageCode()
+        let isEnabled = (translationCheckbox?.state ?? (ConfigManager.shared.config.enable_translation ? .on : .off)) == .on
+        let provID = selectedTranslationProviderID().lowercased()
+
+        let activeEngineSummary: String
+        switch provID {
+        case "gemini":
+            activeEngineSummary = "Google Gemini (gemini-3.6-flash)"
+        case "groq":
+            activeEngineSummary = "Groq (openai/gpt-oss-120b)"
+        default:
+            activeEngineSummary = "Apple Çevrimdışı (Ücretsiz)"
+        }
+
+        Task {
+            let diag = await AppleLocalTranslationEngine.shared.diagnostics(from: src, to: tgt)
+            await MainActor.run {
+                let srcName = Self.turkishLanguageDisplayName(diag.sourceCode)
+                let tgtName = Self.turkishLanguageDisplayName(diag.targetCode)
+                let pairHuman = "\(srcName) → \(tgtName)"
+                let isAppleSelected = (provID != "gemini" && provID != "groq")
+                let canDownload = AppleLocalTranslationEngine.isAvailableOnCurrentOS
+
+                if !isAppleSelected {
+                    self.appleTranslationDownloadButton?.isHidden = true
+                } else {
+                    self.appleTranslationDownloadButton?.isHidden = !canDownload
+                    switch diag.pairStatus {
+                    case .installed:
+                        self.appleTranslationDownloadButton?.title = "Doğrula ✓"
+                        self.appleTranslationDownloadButton?.isEnabled = true
+                    case .supported:
+                        self.appleTranslationDownloadButton?.title = "Paketi İndir"
+                        self.appleTranslationDownloadButton?.isEnabled = true
+                    case .unsupported, .unavailable:
+                        self.appleTranslationDownloadButton?.title = "Sistem Ayarları"
+                        self.appleTranslationDownloadButton?.isEnabled = true
+                    }
+                }
+
+                let techDetailText: String
+                if isAppleSelected && diag.pairStatus == .installed {
+                    techDetailText = "Çevrimdışı Apple motoru · Konuşurken anlık çeviri açık · Ücretsiz\n\(pairHuman) paketi kurulu ve kullanıma hazır"
+                } else if isAppleSelected && diag.pairStatus == .supported {
+                    techDetailText = "Çevrimdışı Apple motoru · İnternet gerekmez · Ücretsiz\n\(pairHuman) dil paketi henüz indirilmedi — 'Paketi İndir'e tıklayın"
+                } else if isAppleSelected {
+                    techDetailText = "Apple çevrimdışı motoru bu dil çiftinde veya macOS sürümünde kullanılamıyor\nİsterseniz yukarıdan Google Gemini veya Groq seçebilirsiniz"
+                } else if provID == "gemini" {
+                    techDetailText = "Google Gemini bulut çeviri (gemini-3.6-flash)\nİnternet bağlantısı ve Gemini API anahtarı gerekir"
+                } else {
+                    techDetailText = "Groq bulut çeviri (openai/gpt-oss-120b)\nİnternet bağlantısı ve Groq API anahtarı gerekir"
+                }
+                self.tab2TranslationTechDetailLabel?.stringValue = techDetailText
+                self.tab2TranslationTechDetailLabel?.toolTip = diag.summaryLine
+
+                if !isEnabled {
+                    self.tab2TranslationStatusLabel?.stringValue = "⚪ Çeviri kapalı (Sağ ⌥ ile kullanabilirsiniz)"
+                    self.tab2TranslationStatusLabel?.textColor = .secondaryLabelColor
+                } else if isAppleSelected && diag.pairStatus == .installed {
+                    self.tab2TranslationStatusLabel?.stringValue = "🟢 Hazır · \(pairHuman) (Çevrimdışı, ücretsiz)"
+                    self.tab2TranslationStatusLabel?.textColor = .systemGreen
+                } else if isAppleSelected && diag.pairStatus == .supported {
+                    self.tab2TranslationStatusLabel?.stringValue = "🟡 \(pairHuman) çevrimdışı paketi indirilmeli"
+                    self.tab2TranslationStatusLabel?.textColor = .systemOrange
+                } else if isAppleSelected {
+                    self.tab2TranslationStatusLabel?.stringValue = "⚠️ \(pairHuman) Apple çevrimdışı desteklenmiyor"
+                    self.tab2TranslationStatusLabel?.textColor = .secondaryLabelColor
+                } else {
+                    self.tab2TranslationStatusLabel?.stringValue = "🟢 Hazır · \(pairHuman) (\(activeEngineSummary))"
+                    self.tab2TranslationStatusLabel?.textColor = .systemGreen
+                }
+            }
+        }
+    }
+
+    @objc private func testTranslationClicked() {
+        autoSave(showMessage: false)
+        let cfg = ConfigManager.shared.config
+        let src = AppleLocalTranslationEngine.normalizedLanguageCode(cfg.language, fallback: "tr")
+        let tgt = AppleLocalTranslationEngine.normalizedLanguageCode(cfg.translation_target_language, fallback: "en")
+        let sampleText: String
+        if src == "en" {
+            sampleText = "We have an important team meeting tomorrow morning at nine."
+        } else if src == "nl" {
+            sampleText = "We hebben morgenochtend om negen uur een belangrijke vergadering."
+        } else {
+            sampleText = "Yarın sabah saat dokuzda önemli bir ekip toplantımız var."
+        }
+
+        tab2TranslationTestButton?.isEnabled = false
+        tab2TranslationTestButton?.title = "Test Ediliyor..."
+        tab2TranslationTestResultLabel?.stringValue = "⏳ Çeviri testi çalışıyor (\(src.uppercased()) → \(tgt.uppercased()))..."
+        tab2TranslationTestResultLabel?.textColor = .systemBlue
+
+        let t0 = CFAbsoluteTimeGetCurrent()
+        TranslationService.shared.translate(text: sampleText, from: src, to: tgt, config: cfg, timeout: 10.0) { [weak self] result in
+            let elapsedMs = Int(((CFAbsoluteTimeGetCurrent() - t0) * 1000.0).rounded())
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.tab2TranslationTestButton?.isEnabled = true
+                self.tab2TranslationTestButton?.title = "Çeviriyi Test Et ⚡"
+                if result.wasFallback {
+                    let err = result.errorMessage ?? "Çeviri başarısız oldu"
+                    self.tab2TranslationTestResultLabel?.stringValue = "⚠️ Başarısız (\(elapsedMs) ms): \(err)"
+                    self.tab2TranslationTestResultLabel?.textColor = .systemOrange
+                    SoundManager.shared.playCancel()
+                } else {
+                    self.tab2TranslationTestResultLabel?.stringValue = "✅ Başarılı (\(elapsedMs) ms · \(src.uppercased())→\(tgt.uppercased())): \"\(result.text)\""
+                    self.tab2TranslationTestResultLabel?.textColor = .systemGreen
+                    SoundManager.shared.playSuccess()
+                }
+            }
+        }
+    }
+
+    private func setTranslationDownloadInProgress(_ active: Bool, statusMessage: String? = nil) {
+        if active {
+            tab2TranslationProgressBar?.isHidden = false
+            tab2TranslationProgressBar?.startAnimation(nil)
+        } else {
+            tab2TranslationProgressBar?.stopAnimation(nil)
+            tab2TranslationProgressBar?.isHidden = true
+        }
+        if let statusMessage {
+            tab2TranslationTestResultLabel?.stringValue = statusMessage
+            tab2TranslationTestResultLabel?.textColor = active ? .systemBlue : .systemGreen
+        }
+    }
+
+    private func stopTranslationDownloadPolling() {
+        translationDownloadPollTimer?.invalidate()
+        translationDownloadPollTimer = nil
+        activeDownloadPair = nil
+        setTranslationDownloadInProgress(false)
+    }
+
+    private func startTranslationDownloadPolling(src: String, tgt: String) {
+        stopTranslationDownloadPolling()
+        activeDownloadPair = (src, tgt)
+        setTranslationDownloadInProgress(
+            true,
+            statusMessage: "⏳ İndiriliyor (\(src.uppercased()) → \(tgt.uppercased())) — macOS arka planda kuruyor..."
+        )
+        var ticks = 0
+        translationDownloadPollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            ticks += 1
+            if ticks > 400 {
+                self.stopTranslationDownloadPolling()
+                return
+            }
+            Task { [weak self] in
+                AppleLocalTranslationEngine.shared.invalidateCache()
+                let st = await AppleLocalTranslationEngine.shared.status(from: src, to: tgt)
+                if st == .installed {
+                    await AppleLocalTranslationEngine.shared.warmSession(from: src, to: tgt)
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        self.stopTranslationDownloadPolling()
+                        AppleTranslationDownloadWindowController.cleanup()
+                        self.appleTranslationDownloadButton?.isEnabled = true
+                        self.refreshAppleTranslationStatus()
+                        let doneMsg = "✅ \(src.uppercased()) → \(tgt.uppercased()) çevrimdışı paketi kuruldu ve hazır!"
+                        self.tab2TranslationTestResultLabel?.stringValue = doneMsg
+                        self.tab2TranslationTestResultLabel?.textColor = .systemGreen
+                        SoundManager.shared.playSuccess()
+                    }
+                }
+            }
+        }
+    }
+
+    @objc private func appleTranslationDownloadClicked() {
+        let rawSrc = languageField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let src = rawSrc.isEmpty ? ConfigManager.shared.config.language : rawSrc
+        let tgt = selectedTargetLanguageCode()
+
+        appleTranslationDownloadButton?.isEnabled = false
+        tab2TranslationTestResultLabel?.stringValue = "⏳ Çevrimdışı dil paketi kontrol ediliyor..."
+        tab2TranslationTestResultLabel?.textColor = .systemBlue
+
+        Task { [weak self] in
+            AppleLocalTranslationEngine.shared.invalidateCache()
+            let currentStatus = await AppleLocalTranslationEngine.shared.status(from: src, to: tgt)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if currentStatus == .installed {
+                    self.stopTranslationDownloadPolling()
+                    Task { [weak self] in
+                        let t0 = CFAbsoluteTimeGetCurrent()
+                        await AppleLocalTranslationEngine.shared.warmSession(from: src, to: tgt)
+                        let sample = (src == "en") ? "Good morning, how are you?" : "Merhaba, bugün nasılsın?"
+                        let testOut = try? await AppleLocalTranslationEngine.shared.translate(
+                            text: sample,
+                            from: src,
+                            to: tgt,
+                            lowLatency: true
+                        )
+                        let ms = Int(((CFAbsoluteTimeGetCurrent() - t0) * 1000.0).rounded())
+                        await MainActor.run { [weak self] in
+                            guard let self else { return }
+                            self.appleTranslationDownloadButton?.isEnabled = true
+                            self.refreshAppleTranslationStatus()
+                            if let testOut, !testOut.isEmpty {
+                                let okMsg = "✅ Kurulu & Doğrulandı (\(ms) ms · \(src.uppercased())→\(tgt.uppercased())): \"\(testOut)\""
+                                self.tab2TranslationTestResultLabel?.stringValue = okMsg
+                                self.tab2TranslationTestResultLabel?.textColor = .systemGreen
+                                SoundManager.shared.playSuccess()
+                            }
+                        }
+                    }
+                    return
+                }
+                if currentStatus == .unsupported || currentStatus == .unavailable {
+                    self.stopTranslationDownloadPolling()
+                    self.appleTranslationDownloadButton?.isEnabled = true
+                    AppleTranslationDownloadWindowController.openSystemLocalizationSettings()
+                    return
+                }
+
+                self.startTranslationDownloadPolling(src: src, tgt: tgt)
+                AppleTranslationDownloadWindowController.present(
+                    sourceCode: src,
+                    targetCode: tgt,
+                    relativeTo: self.window
+                ) { [weak self] ok, msg in
+                    guard let self else { return }
+                    self.appleTranslationDownloadButton?.isEnabled = true
+                    if ok {
+                        self.stopTranslationDownloadPolling()
+                        self.tab2TranslationTestResultLabel?.stringValue = msg
+                        self.tab2TranslationTestResultLabel?.textColor = .systemGreen
+                        SoundManager.shared.playSuccess()
+                        self.refreshAppleTranslationStatus()
+                    } else {
+                        self.tab2TranslationTestResultLabel?.stringValue = msg
+                        self.tab2TranslationTestResultLabel?.textColor = .systemOrange
+                    }
+                }
+                // Arka plan indirmesi veya sheet kapatma sonrası tekrar tıklanabilsin
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                    self?.appleTranslationDownloadButton?.isEnabled = true
+                }
+            }
+        }
     }
 
     private func updateModeInfoText(for index: Int) {
@@ -607,11 +947,11 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
 
-        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 635, height: 840))
+        let container = FlippedContentView(frame: NSRect(x: 0, y: 0, width: 635, height: 1150))
         scrollView.documentView = container
 
-        // 1. Aktif Sağlayıcı (Active Provider)
-        let provLabel = createSectionLabel(text: "Aktif Sağlayıcı", y: 16)
+        // 1. Dikte Sağlayıcı (Active Provider · Sağ ⌘)
+        let provLabel = createSectionLabel(text: "Dikte Motoru (Sağ ⌘)", y: 16)
         container.addSubview(provLabel)
 
         selectableProviders = TranscriptionProviderRegistry.selectable(sedaInstalled: sedaInstallationCheck())
@@ -642,34 +982,170 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         container.addSubview(createSeparator(y: 78))
 
-        // 2. 🍎 Apple Speech (Yerel / On-Device Speech)
-        let appleSection = createSectionLabel(text: "Apple Speech", y: 92)
+        // 2. 🍎 Apple (Çevrimdışı Dikte)
+        let appleSection = createSectionLabel(text: "Apple (Çevrimdışı)", y: 92)
         container.addSubview(appleSection)
 
-        appleStatusLabel = NSTextField(labelWithString: "🟢 Apple Speech kullanılabilir")
-        appleStatusLabel.frame = NSRect(x: 175, y: 90, width: 440, height: 22)
-        appleStatusLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
+        appleStatusLabel = NSTextField(labelWithString: "🟢 Apple (Çevrimdışı) hazır")
+        appleStatusLabel.frame = NSRect(x: 175, y: 90, width: 440, height: 20)
+        appleStatusLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         appleStatusLabel.textColor = .systemGreen
         container.addSubview(appleStatusLabel)
 
-        let appleNote = createNoteLabel(text: "Konuşma tanıma izni ve macOS'un desteklediği dil modeli gerekir; sonuç kalitesi sisteme ve dile bağlıdır.", y: 116)
+        appleLocalePopUp = NSPopUpButton(frame: NSRect(x: 175, y: 115, width: 232, height: 26), pullsDown: false)
+        for item in appleQuickLocales {
+            appleLocalePopUp.addItem(withTitle: item.name)
+            appleLocalePopUp.lastItem?.representedObject = item.code
+        }
+        appleLocalePopUp.target = self
+        appleLocalePopUp.action = #selector(appleLocalePopUpChanged(_:))
+        appleLocalePopUp.isHidden = !AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS
+        container.addSubview(appleLocalePopUp)
+
+        appleDownloadModelButton = NSButton(frame: NSRect(x: 413, y: 115, width: 124, height: 26))
+        appleDownloadModelButton.title = "İndir / Kur"
+        appleDownloadModelButton.bezelStyle = .rounded
+        appleDownloadModelButton.font = NSFont.systemFont(ofSize: 11)
+        appleDownloadModelButton.target = self
+        appleDownloadModelButton.action = #selector(downloadAppleOfflineModelClicked)
+        appleDownloadModelButton.isHidden = !AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS
+        container.addSubview(appleDownloadModelButton)
+
+        appleUseLocaleButton = NSButton(frame: NSRect(x: 542, y: 115, width: 73, height: 26))
+        appleUseLocaleButton.title = "Dili Seç"
+        appleUseLocaleButton.bezelStyle = .rounded
+        appleUseLocaleButton.font = NSFont.systemFont(ofSize: 11)
+        appleUseLocaleButton.target = self
+        appleUseLocaleButton.action = #selector(useSelectedAppleLocaleClicked)
+        appleUseLocaleButton.isHidden = !AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS
+        container.addSubview(appleUseLocaleButton)
+
+        appleDownloadProgressBar = NSProgressIndicator(frame: NSRect(x: 175, y: 147, width: 350, height: 14))
+        appleDownloadProgressBar.style = .bar
+        appleDownloadProgressBar.isIndeterminate = false
+        appleDownloadProgressBar.minValue = 0
+        appleDownloadProgressBar.maxValue = 100
+        appleDownloadProgressBar.doubleValue = 0
+        appleDownloadProgressBar.isHidden = true
+        container.addSubview(appleDownloadProgressBar)
+
+        appleDownloadProgressLabel = NSTextField(labelWithString: "")
+        appleDownloadProgressLabel.frame = NSRect(x: 531, y: 145, width: 84, height: 16)
+        appleDownloadProgressLabel.alignment = .right
+        appleDownloadProgressLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        appleDownloadProgressLabel.textColor = .systemBlue
+        appleDownloadProgressLabel.isHidden = true
+        container.addSubview(appleDownloadProgressLabel)
+
+        appleTechDetailLabel = NSTextField(wrappingLabelWithString: "Mac'inizde çevrimdışı çalışır · İnternet gerekmez · Ücretsiz")
+        appleTechDetailLabel.frame = NSRect(x: 175, y: 166, width: 440, height: 42)
+        appleTechDetailLabel.font = NSFont.systemFont(ofSize: 11)
+        appleTechDetailLabel.textColor = .secondaryLabelColor
+        appleTechDetailLabel.maximumNumberOfLines = 2
+        appleTechDetailLabel.isHidden = !AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS
+        container.addSubview(appleTechDetailLabel)
+
+        let appleNote = createNoteLabel(text: "Dil paketleri macOS tarafından yönetilir; eksik dilleri tek tıkla indirebilirsiniz.", y: 214)
         container.addSubview(appleNote)
 
-        container.addSubview(createSeparator(y: 148))
+        container.addSubview(createSeparator(y: 256))
 
-        // 3. Google Gemini Live
-        let geminiSection = createSectionLabel(text: "Google Gemini", y: 162)
+        // 3. 🌐 Çeviri (Sağ Option · Çevrimdışı / Bulut)
+        let transSection = createSectionLabel(text: "Çeviri (Sağ ⌥)", y: 270)
+        container.addSubview(transSection)
+
+        tab2TranslationStatusLabel = NSTextField(labelWithString: "🟢 Çeviri durumu kontrol ediliyor...")
+        tab2TranslationStatusLabel.frame = NSRect(x: 175, y: 268, width: 440, height: 20)
+        tab2TranslationStatusLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        tab2TranslationStatusLabel.textColor = .systemGreen
+        container.addSubview(tab2TranslationStatusLabel)
+
+        translationCheckbox = NSButton(checkboxWithTitle: "Sağ ⌥ Çeviri Açık", target: self, action: #selector(checkboxChanged(_:)))
+        translationCheckbox.toolTip = "Sağ Option tuşuna basıp konuşunca yazdırmadan önce seçtiğiniz dile çevirir."
+        translationCheckbox.setButtonType(.switch)
+        translationCheckbox.frame = NSRect(x: 175, y: 295, width: 145, height: 20)
+        container.addSubview(translationCheckbox)
+
+        targetLanguagePopUp = NSPopUpButton(frame: NSRect(x: 325, y: 293, width: 136, height: 24), pullsDown: false)
+        for item in [
+            ("İngilizce", "en"),
+            ("Almanca", "de"),
+            ("İspanyolca", "es"),
+            ("Fransızca", "fr"),
+            ("Hollandaca", "nl")
+        ] {
+            targetLanguagePopUp.addItem(withTitle: item.0)
+            targetLanguagePopUp.lastItem?.representedObject = item.1
+        }
+        targetLanguagePopUp.target = self
+        targetLanguagePopUp.action = #selector(targetLanguageChanged(_:))
+        container.addSubview(targetLanguagePopUp)
+
+        tab2TranslationTestButton = NSButton(frame: NSRect(x: 467, y: 293, width: 148, height: 24))
+        tab2TranslationTestButton.title = "Test Et"
+        tab2TranslationTestButton.bezelStyle = .rounded
+        tab2TranslationTestButton.font = NSFont.systemFont(ofSize: 11)
+        tab2TranslationTestButton.target = self
+        tab2TranslationTestButton.action = #selector(testTranslationClicked)
+        container.addSubview(tab2TranslationTestButton)
+
+        translationProviderPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 323, width: 300, height: 24), pullsDown: false)
+        for opt in [
+            ("Apple Çevrimdışı (Ücretsiz · İnternetsiz)", "apple"),
+            ("Google Gemini (Bulut)", "gemini"),
+            ("Groq (Bulut)", "groq")
+        ] {
+            translationProviderPopUp.addItem(withTitle: opt.0)
+            translationProviderPopUp.lastItem?.representedObject = opt.1
+        }
+        translationProviderPopUp.target = self
+        translationProviderPopUp.action = #selector(translationProviderChanged(_:))
+        container.addSubview(translationProviderPopUp)
+
+        appleTranslationDownloadButton = NSButton(frame: NSRect(x: 481, y: 323, width: 134, height: 24))
+        appleTranslationDownloadButton.title = "Paketi İndir"
+        appleTranslationDownloadButton.bezelStyle = .rounded
+        appleTranslationDownloadButton.font = NSFont.systemFont(ofSize: 11)
+        appleTranslationDownloadButton.target = self
+        appleTranslationDownloadButton.action = #selector(appleTranslationDownloadClicked)
+        appleTranslationDownloadButton.isHidden = !AppleLocalTranslationEngine.isAvailableOnCurrentOS
+        container.addSubview(appleTranslationDownloadButton)
+
+        tab2TranslationProgressBar = NSProgressIndicator(frame: NSRect(x: 175, y: 349, width: 440, height: 10))
+        tab2TranslationProgressBar.style = .bar
+        tab2TranslationProgressBar.isIndeterminate = true
+        tab2TranslationProgressBar.isHidden = true
+        container.addSubview(tab2TranslationProgressBar)
+
+        tab2TranslationTechDetailLabel = NSTextField(wrappingLabelWithString: "Çeviri bilgisi yükleniyor...")
+        tab2TranslationTechDetailLabel.frame = NSRect(x: 175, y: 362, width: 440, height: 38)
+        tab2TranslationTechDetailLabel.font = NSFont.systemFont(ofSize: 11)
+        tab2TranslationTechDetailLabel.textColor = .secondaryLabelColor
+        tab2TranslationTechDetailLabel.maximumNumberOfLines = 2
+        container.addSubview(tab2TranslationTechDetailLabel)
+
+        tab2TranslationTestResultLabel = NSTextField(wrappingLabelWithString: "Sağ Option (⌥) ile konuşurken seçtiğiniz dile çevirip yapıştırır. 'Test Et' ile hemen deneyebilirsiniz.")
+        tab2TranslationTestResultLabel.frame = NSRect(x: 175, y: 408, width: 440, height: 30)
+        tab2TranslationTestResultLabel.font = NSFont.systemFont(ofSize: 11)
+        tab2TranslationTestResultLabel.textColor = .secondaryLabelColor
+        tab2TranslationTestResultLabel.maximumNumberOfLines = 2
+        container.addSubview(tab2TranslationTestResultLabel)
+
+        container.addSubview(createSeparator(y: 451))
+
+        // 4. Google Gemini Live
+        let geminiSection = createSectionLabel(text: "Google Gemini", y: 465)
         container.addSubview(geminiSection)
 
         geminiKeyField = createSingleLineInputField(
-            frame: NSRect(x: 175, y: 160, width: 440, height: 24),
+            frame: NSRect(x: 175, y: 463, width: 440, height: 24),
             placeholder: "AIzaSy...",
             isSecure: true
         )
         geminiKeyField.delegate = self
         container.addSubview(geminiKeyField)
 
-        geminiModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 192, width: 440, height: 26), pullsDown: false)
+        geminiModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 495, width: 440, height: 26), pullsDown: false)
         for m in geminiModelOptions {
             geminiModelPopUp.addItem(withTitle: m.name)
         }
@@ -677,52 +1153,52 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         geminiModelPopUp.action = #selector(geminiModelChanged(_:))
         container.addSubview(geminiModelPopUp)
 
-        let testGeminiBtn = NSButton(frame: NSRect(x: 175, y: 226, width: 145, height: 28))
+        let testGeminiBtn = NSButton(frame: NSRect(x: 175, y: 529, width: 145, height: 28))
         testGeminiBtn.title = "Bağlantıyı Test Et"
         testGeminiBtn.bezelStyle = .rounded
         testGeminiBtn.target = self
         testGeminiBtn.action = #selector(testGeminiConnectionClicked)
         container.addSubview(testGeminiBtn)
 
-        let getGeminiKeyBtn = NSButton(frame: NSRect(x: 326, y: 226, width: 140, height: 28))
+        let getGeminiKeyBtn = NSButton(frame: NSRect(x: 326, y: 529, width: 140, height: 28))
         getGeminiKeyBtn.title = "API Anahtarı Al ↗"
         getGeminiKeyBtn.bezelStyle = .rounded
         getGeminiKeyBtn.target = self
         getGeminiKeyBtn.action = #selector(openGeminiConsoleClicked)
         container.addSubview(getGeminiKeyBtn)
 
-        let refreshGeminiBtn = NSButton(frame: NSRect(x: 475, y: 226, width: 140, height: 28))
-        refreshGeminiBtn.title = "Modelleri Webden Yenile"
+        let refreshGeminiBtn = NSButton(frame: NSRect(x: 472, y: 529, width: 143, height: 28))
+        refreshGeminiBtn.title = "Modelleri Yenile"
         refreshGeminiBtn.bezelStyle = .rounded
         refreshGeminiBtn.target = self
         refreshGeminiBtn.action = #selector(refreshGeminiModelsClicked)
         container.addSubview(refreshGeminiBtn)
 
         geminiStatusLabel = NSTextField(wrappingLabelWithString: "")
-        geminiStatusLabel.frame = NSRect(x: 175, y: 258, width: 440, height: 32)
+        geminiStatusLabel.frame = NSRect(x: 175, y: 561, width: 440, height: 32)
         geminiStatusLabel.font = NSFont.systemFont(ofSize: 11)
         geminiStatusLabel.textColor = .secondaryLabelColor
         geminiStatusLabel.maximumNumberOfLines = 2
         container.addSubview(geminiStatusLabel)
 
-        let geminiNote = createNoteLabel(text: "WebSocket canlı akışı sayesinde konuşurken kelimeler doğrudan canlı işlenir.", y: 294)
+        let geminiNote = createNoteLabel(text: "WebSocket canlı akışı sayesinde konuşurken kelimeler doğrudan canlı işlenir.", y: 597)
         container.addSubview(geminiNote)
 
-        container.addSubview(createSeparator(y: 324))
+        container.addSubview(createSeparator(y: 627))
 
-        // 4. Groq Whisper
-        let groqSection = createSectionLabel(text: "Groq Whisper", y: 338)
+        // 5. Groq Whisper
+        let groqSection = createSectionLabel(text: "Groq Whisper", y: 641)
         container.addSubview(groqSection)
 
         groqKeyField = createSingleLineInputField(
-            frame: NSRect(x: 175, y: 336, width: 440, height: 24),
+            frame: NSRect(x: 175, y: 639, width: 440, height: 24),
             placeholder: "gsk_...",
             isSecure: true
         )
         groqKeyField.delegate = self
         container.addSubview(groqKeyField)
 
-        groqModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 368, width: 440, height: 26), pullsDown: false)
+        groqModelPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 671, width: 440, height: 26), pullsDown: false)
         for m in ConfigManager.availableGroqModels {
             groqModelPopUp.addItem(withTitle: m.name)
         }
@@ -730,14 +1206,14 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         groqModelPopUp.action = #selector(groqModelChanged(_:))
         container.addSubview(groqModelPopUp)
 
-        let testGroqBtn = NSButton(frame: NSRect(x: 175, y: 402, width: 145, height: 28))
+        let testGroqBtn = NSButton(frame: NSRect(x: 175, y: 705, width: 145, height: 28))
         testGroqBtn.title = "Bağlantıyı Test Et"
         testGroqBtn.bezelStyle = .rounded
         testGroqBtn.target = self
         testGroqBtn.action = #selector(testGroqConnectionClicked)
         container.addSubview(testGroqBtn)
 
-        let getGroqKeyBtn = NSButton(frame: NSRect(x: 326, y: 402, width: 140, height: 28))
+        let getGroqKeyBtn = NSButton(frame: NSRect(x: 326, y: 705, width: 140, height: 28))
         getGroqKeyBtn.title = "API Anahtarı Al ↗"
         getGroqKeyBtn.bezelStyle = .rounded
         getGroqKeyBtn.target = self
@@ -745,23 +1221,23 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(getGroqKeyBtn)
 
         groqStatusLabel = NSTextField(wrappingLabelWithString: "")
-        groqStatusLabel.frame = NSRect(x: 175, y: 434, width: 440, height: 32)
+        groqStatusLabel.frame = NSRect(x: 175, y: 737, width: 440, height: 32)
         groqStatusLabel.font = NSFont.systemFont(ofSize: 11)
         groqStatusLabel.textColor = .secondaryLabelColor
         groqStatusLabel.maximumNumberOfLines = 2
         container.addSubview(groqStatusLabel)
 
-        let groqNote = createNoteLabel(text: "Whisper Large modelini Groq LPU bulut donanımında ~0.3 saniyede tamamlar.", y: 470)
+        let groqNote = createNoteLabel(text: "Whisper Large modelini Groq LPU bulut donanımında ~0.3 saniyede tamamlar.", y: 773)
         container.addSubview(groqNote)
 
-        container.addSubview(createSeparator(y: 500))
+        container.addSubview(createSeparator(y: 803))
 
-        // 5. AssemblyAI Dictation
-        let assemblySection = createSectionLabel(text: "AssemblyAI", y: 514)
+        // 6. AssemblyAI Dictation
+        let assemblySection = createSectionLabel(text: "AssemblyAI", y: 817)
         container.addSubview(assemblySection)
 
         assemblyAIKeyField = createSingleLineInputField(
-            frame: NSRect(x: 175, y: 512, width: 440, height: 24),
+            frame: NSRect(x: 175, y: 815, width: 440, height: 24),
             placeholder: "AssemblyAI API anahtarı",
             isSecure: true
         )
@@ -769,19 +1245,19 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(assemblyAIKeyField)
 
         let assemblyModelLabel = NSTextField(labelWithString: "Dictation API · Universal-3.5 Pro tabanlı · Gönderime hazır metin")
-        assemblyModelLabel.frame = NSRect(x: 175, y: 544, width: 440, height: 20)
+        assemblyModelLabel.frame = NSRect(x: 175, y: 847, width: 440, height: 20)
         assemblyModelLabel.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
         assemblyModelLabel.textColor = .secondaryLabelColor
         container.addSubview(assemblyModelLabel)
 
-        let testAssemblyBtn = NSButton(frame: NSRect(x: 175, y: 572, width: 145, height: 28))
+        let testAssemblyBtn = NSButton(frame: NSRect(x: 175, y: 875, width: 145, height: 28))
         testAssemblyBtn.title = "Bağlantıyı Test Et"
         testAssemblyBtn.bezelStyle = .rounded
         testAssemblyBtn.target = self
         testAssemblyBtn.action = #selector(testAssemblyAIConnectionClicked)
         container.addSubview(testAssemblyBtn)
 
-        let getAssemblyKeyBtn = NSButton(frame: NSRect(x: 326, y: 572, width: 140, height: 28))
+        let getAssemblyKeyBtn = NSButton(frame: NSRect(x: 326, y: 875, width: 140, height: 28))
         getAssemblyKeyBtn.title = "API Anahtarı Al ↗"
         getAssemblyKeyBtn.bezelStyle = .rounded
         getAssemblyKeyBtn.target = self
@@ -789,22 +1265,22 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         container.addSubview(getAssemblyKeyBtn)
 
         assemblyAIStatusLabel = NSTextField(wrappingLabelWithString: "")
-        assemblyAIStatusLabel.frame = NSRect(x: 175, y: 604, width: 440, height: 32)
+        assemblyAIStatusLabel.frame = NSRect(x: 175, y: 907, width: 440, height: 32)
         assemblyAIStatusLabel.font = NSFont.systemFont(ofSize: 11)
         assemblyAIStatusLabel.textColor = .secondaryLabelColor
         assemblyAIStatusLabel.maximumNumberOfLines = 2
         container.addSubview(assemblyAIStatusLabel)
 
-        let assemblyNote = createNoteLabel(text: "Kayıt bitince ham metin ve gönderime hazır temizlenmiş metin birlikte alınır; ses AssemblyAI bulutuna gönderilir.", y: 640)
+        let assemblyNote = createNoteLabel(text: "Kayıt bitince ham metin ve gönderime hazır temizlenmiş metin birlikte alınır; ses AssemblyAI bulutuna gönderilir.", y: 943)
         container.addSubview(assemblyNote)
 
-        container.addSubview(createSeparator(y: 676))
+        container.addSubview(createSeparator(y: 979))
 
-        // 6. Gemini Sistem İstemi (System Instruction / Cevap & Yazım Tarzı)
-        promptSectionLabel = createSectionLabel(text: "Sistem İstemi", y: 690)
+        // 7. Gemini Sistem İstemi (System Instruction / Cevap & Yazım Tarzı)
+        promptSectionLabel = createSectionLabel(text: "Sistem İstemi", y: 993)
         container.addSubview(promptSectionLabel)
 
-        geminiPromptPresetPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 688, width: 440, height: 26), pullsDown: false)
+        geminiPromptPresetPopUp = NSPopUpButton(frame: NSRect(x: 175, y: 991, width: 440, height: 26), pullsDown: false)
         for preset in promptPresets {
             geminiPromptPresetPopUp.addItem(withTitle: preset.name)
         }
@@ -812,7 +1288,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         geminiPromptPresetPopUp.action = #selector(promptPresetChanged(_:))
         container.addSubview(geminiPromptPresetPopUp)
 
-        geminiPromptScrollView = NSScrollView(frame: NSRect(x: 175, y: 718, width: 440, height: 54))
+        geminiPromptScrollView = NSScrollView(frame: NSRect(x: 175, y: 1021, width: 440, height: 54))
         geminiPromptScrollView.hasVerticalScroller = true
         geminiPromptScrollView.hasHorizontalScroller = false
         geminiPromptScrollView.autohidesScrollers = true
@@ -833,11 +1309,11 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         geminiPromptScrollView.documentView = geminiPromptTextView
         container.addSubview(geminiPromptScrollView)
 
-        promptNoteLabel = createNoteLabel(text: "Gemini bu sistem talimatına (systemInstruction) göre çıktıyı biçimlendirir ve üslubu belirler.", y: 778)
+        promptNoteLabel = createNoteLabel(text: "Gemini bu sistem talimatına (systemInstruction) göre çıktıyı biçimlendirir ve üslubu belirler.", y: 1081)
         container.addSubview(promptNoteLabel)
 
         promptUnsupportedLabel = NSTextField(wrappingLabelWithString: "ℹ️ Seçili Gemini modeli saf ses deşifre (ASR) içindir; konuşulanları doğrudan metne döker. Sistem istemi ve sohbet özellikleri bu model seçicisinde kullanılmaz.")
-        promptUnsupportedLabel.frame = NSRect(x: 175, y: 690, width: 440, height: 42)
+        promptUnsupportedLabel.frame = NSRect(x: 175, y: 993, width: 440, height: 42)
         promptUnsupportedLabel.font = NSFont.systemFont(ofSize: 11)
         promptUnsupportedLabel.textColor = .secondaryLabelColor
         promptUnsupportedLabel.isHidden = true
@@ -849,7 +1325,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     private func updateProviderNote(for provider: String) {
         switch provider {
         case "apple":
-            providerNoteLabel.stringValue = "🍎 Apple Speech: Uygun sistemlerde yerel konuşma tanıma ile çalışır. API anahtarı gerekmez; Apple Speech izni gerekir."
+            providerNoteLabel.stringValue = AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS
+                ? "🍎 Apple (Çevrimdışı): İnternet gerektirmez, ücretsizdir ve süre sınırı olmadan Mac'inizde çalışır."
+                : "🍎 Apple: Mac'inizde yerel konuşma tanıma ile çalışır. Ücretsizdir; konuşma izni gerekir."
         case "gemini":
             providerNoteLabel.stringValue = "✨ Google Gemini: API anahtarı ve internet bağlantısı gerekir; seçili modele göre canlı veya normal deşifre kullanılır."
         case "groq":
@@ -867,7 +1345,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
     private func updateProviderStatusLabels() {
         let speech = PermissionManager.shared.getSpeechRecognitionStatus()
-        if speech.status == .authorized {
+        if AppleSpeechAnalyzerSupport.isAvailableOnCurrentOS {
+            refreshAppleANEDiagnostics(selectCurrentConfigLocale: true)
+        } else if speech.status == .authorized {
             appleStatusLabel.stringValue = "🟢 Apple Speech hazır"
             appleStatusLabel.textColor = .systemGreen
         } else {
@@ -1767,6 +2247,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         autoSaveDebounceTimer = nil
         statusResetTimer?.invalidate()
         statusResetTimer = nil
+        stopTranslationDownloadPolling()
+        AppleTranslationDownloadWindowController.cleanup()
         autoSave(showMessage: false)
 
         stopPermissionPollTimer()
@@ -1925,6 +2407,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         // Language
         languageField.stringValue = cfg.language
+        syncSpokenLanguagePopUp(with: cfg.language)
 
         // Translation
         translationCheckbox.state = cfg.enable_translation ? .on : .off
@@ -1935,9 +2418,20 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             targetLanguagePopUp.selectItem(at: 2)
         case "fr":
             targetLanguagePopUp.selectItem(at: 3)
+        case "nl":
+            targetLanguagePopUp.selectItem(at: 4)
         default:
             targetLanguagePopUp.selectItem(at: 0) // "en"
         }
+        let targetTransProv = cfg.translation_provider.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let match = translationProviderPopUp?.itemArray.firstIndex(where: {
+            ($0.representedObject as? String)?.lowercased() == targetTransProv
+        }) {
+            translationProviderPopUp.selectItem(at: match)
+        } else {
+            translationProviderPopUp?.selectItem(at: 0)
+        }
+        refreshAppleTranslationStatus()
 
         // Trigger Key
         selectedTriggerKeyCode = cfg.trigger_key
@@ -2250,6 +2744,125 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         }
     }
 
+    private func refreshAppleANEDiagnostics(selectCurrentConfigLocale: Bool = false) {
+        let rawLang = (languageField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+            ?? ConfigManager.shared.config.language
+        AppleSpeechAnalyzerSupport.fetchDiagnostics(for: rawLang) { [weak self] diag in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.lastAppleDiagnostics = diag
+                let activeHumanName = Self.turkishLanguageDisplayName(diag.activeLocale)
+                if diag.activeLocaleInstalled {
+                    self.appleStatusLabel.stringValue = "🟢 Hazır · \(activeHumanName) (Çevrimdışı, ücretsiz)"
+                    self.appleStatusLabel.textColor = .systemGreen
+                } else {
+                    self.appleStatusLabel.stringValue = "🟡 \(activeHumanName) dil paketi indirilmeli"
+                    self.appleStatusLabel.textColor = .systemOrange
+                }
+
+                // Açılır listedeki her dilin yanında sade kurulum simgesi göster
+                let currentSelectedCode = self.appleLocalePopUp.selectedItem?.representedObject as? String
+                for i in 0..<self.appleQuickLocales.count {
+                    let q = self.appleQuickLocales[i]
+                    let key = q.code.lowercased()
+                    let isInst = diag.speechInstalled.contains(key) || diag.dictationInstalled.contains(key)
+                    let icon = isInst ? "✅" : "⬇️"
+                    self.appleLocalePopUp.item(at: i)?.title = "\(icon) \(q.name)"
+                }
+
+                if selectCurrentConfigLocale {
+                    let activeKey = diag.activeLocale.lowercased()
+                    if let idx = self.appleQuickLocales.firstIndex(where: { $0.code.lowercased() == activeKey }) {
+                        self.appleLocalePopUp.selectItem(at: idx)
+                    }
+                } else if let cur = currentSelectedCode,
+                          let idx = self.appleQuickLocales.firstIndex(where: { $0.code == cur }) {
+                    self.appleLocalePopUp.selectItem(at: idx)
+                }
+
+                self.appleTechDetailLabel?.stringValue =
+                    "Mac'inizde çevrimdışı çalışır · İnternet gerekmez · Ücretsiz\n" +
+                    "Kurulu diller: \(diag.installedLocales.count) dil hazır (\(diag.supportedCount) dil destekleniyor)"
+                self.appleTechDetailLabel?.toolTip =
+                    "SpeechAnalyzer (\(diag.activeEngine)) · macOS \(diag.osVersionString) · UAF Slotları: \(diag.reservedLocales.count)/\(diag.maxReservedLocales)"
+
+                self.updateAppleDownloadButtonTitle()
+            }
+        }
+    }
+
+    private func updateAppleDownloadButtonTitle() {
+        guard let diag = lastAppleDiagnostics,
+              let selCode = appleLocalePopUp?.selectedItem?.representedObject as? String else { return }
+        let key = selCode.lowercased()
+        let isInst = diag.speechInstalled.contains(key) || diag.dictationInstalled.contains(key)
+        appleDownloadModelButton?.title = isInst ? "Doğrula ✓" : "İndir / Kur"
+    }
+
+    @objc private func appleLocalePopUpChanged(_ sender: NSPopUpButton) {
+        updateAppleDownloadButtonTitle()
+    }
+
+    @objc private func useSelectedAppleLocaleClicked() {
+        let idx = appleLocalePopUp.indexOfSelectedItem
+        guard idx >= 0, idx < appleQuickLocales.count else { return }
+        let chosen = appleQuickLocales[idx]
+        ConfigManager.shared.update { $0.language = chosen.shortCode }
+        languageField?.stringValue = chosen.shortCode
+        syncSpokenLanguagePopUp(with: chosen.shortCode)
+        Transcriber.shared.warmAppleSpeech(language: chosen.shortCode)
+        SoundManager.shared.playSuccess()
+        refreshAppleANEDiagnostics(selectCurrentConfigLocale: true)
+        refreshAppleTranslationStatus()
+    }
+
+    @objc private func downloadAppleOfflineModelClicked() {
+        let selectedCode = (appleLocalePopUp?.selectedItem?.representedObject as? String)
+        let rawField = languageField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let targetLang = selectedCode ?? (rawField.isEmpty ? ConfigManager.shared.config.language : rawField)
+
+        appleStatusLabel.stringValue = "⏳ \(targetLang) Apple ANE modeli indiriliyor / doğrulanıyor..."
+        appleStatusLabel.textColor = .systemBlue
+        appleDownloadModelButton?.isEnabled = false
+        appleUseLocaleButton?.isEnabled = false
+        appleDownloadProgressBar?.doubleValue = 5
+        appleDownloadProgressBar?.isHidden = false
+        appleDownloadProgressLabel?.stringValue = "Başlıyor..."
+        appleDownloadProgressLabel?.isHidden = false
+
+        AppleSpeechAnalyzerSupport.prewarmAndEnsureLocale(
+            targetLang,
+            onProgress: { [weak self] fraction, label in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.appleDownloadProgressBar?.doubleValue = max(2, min(100, fraction * 100.0))
+                    self.appleDownloadProgressLabel?.stringValue = label
+                }
+            },
+            completion: { [weak self] ok, msg in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.appleDownloadModelButton?.isEnabled = true
+                    self.appleUseLocaleButton?.isEnabled = true
+                    self.appleDownloadProgressBar?.doubleValue = ok ? 100 : 0
+                    self.appleDownloadProgressLabel?.stringValue = ok ? "%100 ✓" : "Hata"
+                    self.appleStatusLabel.stringValue = msg
+                    self.appleStatusLabel.textColor = ok ? .systemGreen : .systemOrange
+                    if ok {
+                        SoundManager.shared.playSuccess()
+                    } else {
+                        SoundManager.shared.playCancel()
+                    }
+                    self.refreshAppleANEDiagnostics(selectCurrentConfigLocale: false)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in
+                        self?.appleDownloadProgressBar?.isHidden = true
+                        self?.appleDownloadProgressLabel?.isHidden = true
+                    }
+                }
+            }
+        )
+    }
+
     @objc private func openGroqConsoleClicked() {
         if let url = URL(string: "https://console.groq.com/keys") {
             NSWorkspace.shared.open(url)
@@ -2414,6 +3027,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
     // OTOMATİK KAYIT & METİN DELEGELERİ (Modeless Auto-Save & Debounce)
     // =========================================================================
     @objc private func checkboxChanged(_ sender: NSButton) {
+        if sender === translationCheckbox {
+            refreshAppleTranslationStatus()
+        }
         autoSave()
     }
 
@@ -2426,6 +3042,9 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
         autoSaveDebounceTimer?.invalidate()
         autoSaveDebounceTimer = nil
         autoSave()
+        if (obj.object as? NSTextField) === languageField {
+            refreshAppleTranslationStatus()
+        }
     }
 
     public func textDidChange(_ notification: Notification) {
@@ -2471,13 +3090,8 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
 
         let language = languageField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let enableTranslation = translationCheckbox.state == .on
-        let targetLanguage: String
-        switch targetLanguagePopUp.indexOfSelectedItem {
-        case 1: targetLanguage = "de"
-        case 2: targetLanguage = "es"
-        case 3: targetLanguage = "fr"
-        default: targetLanguage = "en"
-        }
+        let targetLanguage = selectedTargetLanguageCode()
+        let translationProvider = selectedTranslationProviderID()
 
         let modeStr: String
         switch modePopUp.indexOfSelectedItem {
@@ -2546,6 +3160,7 @@ public class SettingsWindowController: NSWindowController, NSWindowDelegate, NST
             cfg.language = language.isEmpty ? "tr" : language
             cfg.enable_translation = enableTranslation
             cfg.translation_target_language = targetLanguage
+            cfg.translation_provider = translationProvider
             cfg.trigger_key = triggerKey
             cfg.trigger_mode = modeStr
             cfg.dictation_mode = "direct"

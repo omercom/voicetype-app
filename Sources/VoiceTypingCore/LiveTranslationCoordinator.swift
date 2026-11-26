@@ -21,6 +21,9 @@ final class LiveTranslationCoordinator {
 
     private let polish: (String) -> String
     private let request: Request
+    private let livePreviewRequest: Request?
+    private let livePreviewDebounceInterval: TimeInterval
+    private let onLivePreview: ((String) -> Void)?
     private let maxChunkLength: Int
     private let maxEarlyRequests: Int
     private let maxConcurrentFinalRequests: Int
@@ -30,6 +33,12 @@ final class LiveTranslationCoordinator {
     private var cachedSourcePrefix = ""
     private var cachedTranslation = ""
     private var pendingInterim: PendingInterim?
+    private var previewTimer: DispatchWorkItem?
+    private var previewCancel: CancelRequest?
+    private var previewGeneration = 0
+    private var lastPreviewSourceRaw = ""
+    private var lastPreviewSourcePolished = ""
+    private var lastPreviewTranslated = ""
     private var earlyRequestCount = 0
     private var earlyDisabled = false
     private var nextID = 0
@@ -48,14 +57,20 @@ final class LiveTranslationCoordinator {
         maxChunkLength: Int = 600,
         maxEarlyRequests: Int = 20,
         maxConcurrentFinalRequests: Int = 3,
+        livePreviewDebounceInterval: TimeInterval = 0.14,
         polish: @escaping (String) -> String,
-        request: @escaping Request
+        request: @escaping Request,
+        livePreviewRequest: Request? = nil,
+        onLivePreview: ((String) -> Void)? = nil
     ) {
         self.maxChunkLength = max(1, maxChunkLength)
         self.maxEarlyRequests = max(0, maxEarlyRequests)
         self.maxConcurrentFinalRequests = max(1, maxConcurrentFinalRequests)
+        self.livePreviewDebounceInterval = max(0.02, livePreviewDebounceInterval)
         self.polish = polish
         self.request = request
+        self.livePreviewRequest = livePreviewRequest
+        self.onLivePreview = onLivePreview
     }
 
     func observe(_ text: String) {
@@ -70,7 +85,15 @@ final class LiveTranslationCoordinator {
             pending.cancel?()
             pendingInterim = nil
         }
+        if !lastPreviewSourceRaw.isEmpty && !Self.isWholePrefix(lastPreviewSourceRaw, of: latestInterim) && latestInterim != lastPreviewSourceRaw {
+            clearPreviewState()
+        }
         scheduleInterimIfPossible()
+        if livePreviewRequest != nil {
+            scheduleLivePreview()
+        } else if !cachedTranslation.isEmpty {
+            emitCommittedPreviewWithTail()
+        }
     }
 
     /// The original provider failed or was replaced; none of its partials may be reused.
@@ -78,6 +101,7 @@ final class LiveTranslationCoordinator {
         guard !finishing, !cancelled else { return }
         pendingInterim?.cancel?()
         pendingInterim = nil
+        clearPreviewState()
         clearInterimCache()
         earlyDisabled = true
     }
@@ -87,8 +111,28 @@ final class LiveTranslationCoordinator {
         finishing = true
         pendingInterim?.cancel?()
         pendingInterim = nil
+        previewTimer?.cancel()
+        previewTimer = nil
+        previewCancel?()
+        previewCancel = nil
         finalText = text
         finalCompletion = completion
+
+        let trailingWS = String(text.reversed().prefix { $0.isWhitespace }.reversed())
+        let leadingWS = String(text.prefix { $0.isWhitespace })
+        let trimmedFinal = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !lastPreviewTranslated.isEmpty &&
+            lastPreviewSourcePolished.trimmingCharacters(in: .whitespacesAndNewlines) == trimmedFinal &&
+            !trimmedFinal.isEmpty {
+            let exactHit = leadingWS + lastPreviewTranslated + trailingWS
+            clearPreviewState()
+            clearInterimCache()
+            previousInterim = ""
+            latestInterim = ""
+            completeFinal(TranslationResult(text: exactHit, wasFallback: false))
+            return
+        }
+        clearPreviewState()
 
         let remainder: String
         if !cachedSourcePrefix.isEmpty && Self.isWholePrefix(cachedSourcePrefix, of: text) {
@@ -116,6 +160,7 @@ final class LiveTranslationCoordinator {
         cancelled = true
         pendingInterim?.cancel?()
         pendingInterim = nil
+        clearPreviewState()
         let cancellations = Array(finalRequests.values)
         finalRequests.removeAll()
         cancellations.forEach { $0() }
@@ -134,6 +179,114 @@ final class LiveTranslationCoordinator {
         cachedRawPrefix = ""
         cachedSourcePrefix = ""
         cachedTranslation = ""
+    }
+
+    private func clearPreviewState() {
+        previewGeneration += 1
+        previewTimer?.cancel()
+        previewTimer = nil
+        previewCancel?()
+        previewCancel = nil
+        lastPreviewSourceRaw = ""
+        lastPreviewSourcePolished = ""
+        lastPreviewTranslated = ""
+    }
+
+    private func emitCommittedPreviewWithTail() {
+        guard !cancelled, !finishing, !cachedTranslation.isEmpty else { return }
+        let tail: String
+        if !cachedRawPrefix.isEmpty && Self.isWholePrefix(cachedRawPrefix, of: latestInterim) {
+            tail = String(latestInterim.dropFirst(cachedRawPrefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            tail = ""
+        }
+        if tail.isEmpty {
+            onLivePreview?(cachedTranslation)
+        } else {
+            onLivePreview?(cachedTranslation + " · " + tail)
+        }
+    }
+
+    private func scheduleLivePreview() {
+        guard !cancelled, !finishing, let livePreviewRequest else { return }
+        let rawSnapshot = latestInterim
+        guard !rawSnapshot.isEmpty else { return }
+
+        previewTimer?.cancel()
+        previewTimer = nil
+        previewGeneration += 1
+        let gen = previewGeneration
+
+        if rawSnapshot == lastPreviewSourceRaw, !lastPreviewTranslated.isEmpty {
+            previewCancel?()
+            previewCancel = nil
+            return
+        }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.cancelled, !self.finishing, self.previewGeneration == gen else { return }
+            guard self.latestInterim == rawSnapshot else { return }
+
+            let polishedFull = self.polish(rawSnapshot)
+            let cachedRaw = self.cachedRawPrefix
+            let cachedSource = self.cachedSourcePrefix
+            let cachedTranslated = self.cachedTranslation
+            let chunk: String
+            let baseTranslation: String
+            let separator: String
+
+            if !cachedRaw.isEmpty &&
+                Self.isWholePrefix(cachedRaw, of: rawSnapshot) &&
+                Self.isWholePrefix(cachedSource, of: polishedFull) {
+                let delta = String(polishedFull.dropFirst(cachedSource.count))
+                let split = Self.separateLeadingWhitespace(delta)
+                separator = split.0.isEmpty && !cachedTranslated.isEmpty ? " " : split.0
+                chunk = split.1
+                baseTranslation = cachedTranslated
+            } else {
+                separator = ""
+                chunk = polishedFull.trimmingCharacters(in: .whitespacesAndNewlines)
+                baseTranslation = ""
+            }
+
+            if chunk.isEmpty {
+                if !baseTranslation.isEmpty {
+                    self.lastPreviewSourceRaw = rawSnapshot
+                    self.lastPreviewSourcePolished = polishedFull
+                    self.lastPreviewTranslated = baseTranslation
+                    self.onLivePreview?(baseTranslation)
+                }
+                return
+            }
+
+            guard chunk.count <= self.maxChunkLength else { return }
+
+            self.previewCancel?()
+            let cancel = livePreviewRequest(chunk) { [weak self] result in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, !self.cancelled, !self.finishing else { return }
+                    guard self.previewGeneration == gen else { return }
+                    self.previewCancel = nil
+                    guard !result.wasFallback else { return }
+                    let translatedPart = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !translatedPart.isEmpty else { return }
+                    let combined = baseTranslation.isEmpty
+                        ? translatedPart
+                        : (baseTranslation + separator + translatedPart)
+                    self.lastPreviewSourceRaw = rawSnapshot
+                    self.lastPreviewSourcePolished = polishedFull
+                    self.lastPreviewTranslated = combined
+                    self.onLivePreview?(combined)
+                }
+            }
+            if self.previewGeneration == gen {
+                self.previewCancel = cancel
+            } else {
+                cancel?()
+            }
+        }
+        previewTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + livePreviewDebounceInterval, execute: work)
     }
 
     private func scheduleInterimIfPossible() {
@@ -183,6 +336,15 @@ final class LiveTranslationCoordinator {
         cachedRawPrefix = pending.rawPrefix
         cachedSourcePrefix = pending.sourcePrefix
         cachedTranslation += pending.separator + result.text
+        if livePreviewRequest != nil {
+            lastPreviewSourceRaw = pending.rawPrefix
+            lastPreviewSourcePolished = pending.sourcePrefix
+            lastPreviewTranslated = cachedTranslation
+            emitCommittedPreviewWithTail()
+            scheduleLivePreview()
+        } else {
+            emitCommittedPreviewWithTail()
+        }
         scheduleInterimIfPossible()
     }
 

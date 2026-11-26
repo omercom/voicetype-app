@@ -109,6 +109,25 @@ final class PasteVerificationTests: XCTestCase {
                                                 insertedText: "dikte"), .unverifiable)
         }
     }
+
+    func testChromiumNBSPAndTrailingNewlineVerifyCleanly() {
+        XCTAssertEqual(
+            TextInjector.outcome(
+                before: Snap(value: "", count: 0, selection: NSRange(location: 0, length: 0)),
+                after: Snap(value: "Hello\u{00A0}world!\n", count: 13, selection: NSRange(location: 12, length: 0)),
+                insertedText: "Hello world! "
+            ),
+            .verified
+        )
+        XCTAssertEqual(
+            TextInjector.outcome(
+                before: Snap(value: "Merhaba", count: 7),
+                after: Snap(value: "Merhaba\u{00A0}dünya\n", count: 14),
+                insertedText: " dünya "
+            ),
+            .verified
+        )
+    }
 }
 
 final class DirectTypingRulesTests: XCTestCase {
